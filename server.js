@@ -983,10 +983,13 @@ app.get('/stream/:type/:id.json', async (req, res) => {
 
     const deriveResultKey = (result) => {
       if (!result) return null;
-      if (result.downloadUrl) return result.downloadUrl;
-      if (result.guid) return `${result.indexerId || 'unknown'}|${result.guid}`;
-      if (result.title) return `${result.indexerId || 'unknown'}|${result.title}|${result.size || 0}`;
-      return null;
+      const indexerId = result.indexerId || result.IndexerId || 'unknown';
+      const indexer = result.indexer || result.Indexer || '';
+      const title = (result.title || result.Title || '').trim();
+      const size = result.size || result.Size || 0;
+      
+      // Use title + indexer info + size as unique key for better deduplication
+      return `${indexerId}|${indexer}|${title}|${size}`;
     };
 
     const resultsByKey = new Map();
@@ -1108,7 +1111,7 @@ app.get('/stream/:type/:id.json', async (req, res) => {
         if (result.title) baseParams.set('title', result.title);
 
         const streamUrl = `${addonBaseUrl}/nzb/stream?${baseParams.toString()}`;
-        const name = 'Download via Prowlarr';
+        const name = 'UsenetStreamer';
         const behaviorHints = {
           notWebReady: true,
           externalPlayer: {
