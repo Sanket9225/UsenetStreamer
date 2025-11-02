@@ -1,6 +1,6 @@
 # UsenetStreamer
 
-UsenetStreamer is a Stremio addon that bridges Prowlarr and NZBDav. It searches Usenet indexers via Prowlarr, queues NZB downloads in NZBDav, and exposes the resulting media as Stremio streams.
+UsenetStreamer is a Stremio addon that bridges Prowlarr and NZBDav. It hosts no media itself; it simply orchestrates search and streaming through your existing Usenet stack. The addon searches Usenet indexers via Prowlarr, queues NZB downloads in NZBDav, and exposes the resulting media as Stremio streams.
 
 ## Features
 
