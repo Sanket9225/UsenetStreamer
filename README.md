@@ -45,6 +45,7 @@ docker run -d \
    -e NZBDAV_WEBDAV_USER=webdav-username \
    -e NZBDAV_WEBDAV_PASS=webdav-password \
    -e ADDON_BASE_URL=https://myusenet.duckdns.org \
+   -e MANIFEST_AUTH_PASSWORD=your-secret-password \
    ghcr.io/sanket9225/usenetstreamer:latest
 ```
 
@@ -58,8 +59,11 @@ If you prefer to keep secrets in a file, use `--env-file /path/to/usenetstreamer
 - `PROWLARR_URL`, `PROWLARR_API_KEY`, `PROWLARR_STRICT_ID_MATCH`
 - `NZBDAV_URL`, `NZBDAV_API_KEY`, `NZBDAV_WEBDAV_URL`, `NZBDAV_WEBDAV_USER`, `NZBDAV_WEBDAV_PASS`
 - `ADDON_BASE_URL`
+- `MANIFEST_AUTH_PASSWORD` (optional)
 
 `PROWLARR_STRICT_ID_MATCH` defaults to `false`. Set it to `true` if you want strictly ID-based searches (IMDb/TVDB/TMDB only). This usually yields faster, more precise matches but many indexers do not support ID queries, so you will receive fewer total results.
+
+`MANIFEST_AUTH_PASSWORD` is optional. When set, it requires authentication to access the manifest endpoint, preventing unauthorized users from adding your addon to their Stremio client.
 
 See `.env.example` for the authoritative list.
 
@@ -85,6 +89,40 @@ See `.env.example` for the authoritative list.
 Tips:
 
 - Keep port 7000 (or whichever you use) firewalled; let the reverse proxy handle public traffic.
-- Renew certificates automatically (cron/systemd timer or your proxy’s auto-renew feature).
+- Renew certificates automatically (cron/systemd timer or your proxy's auto-renew feature).
 - If you deploy behind Cloudflare or another CDN, ensure WebDAV/body sizes are allowed and HTTPS certificates stay valid.
-- Finally, add `https://myusenet.duckdns.org/manifest.json` (replace with your domain) to Stremio’s addon catalog. Use straight HTTPS—the addon will not show up over HTTP.
+- Finally, add the manifest URL to Stremio's addon catalog (see below for URL format). Use straight HTTPS—the addon will not show up over HTTP.
+
+### Adding the Addon to Stremio
+
+**Without authentication** (when `MANIFEST_AUTH_PASSWORD` is not set):
+
+1. Open your addon in a browser: `https://myusenet.duckdns.org`
+2. Click the "Install" button on the landing page
+3. Stremio will open and install the addon automatically
+
+**With authentication** (when `MANIFEST_AUTH_PASSWORD` is set):
+
+1. Open your addon in a browser: `https://myusenet.duckdns.org`
+2. You'll be redirected to the configuration page automatically
+3. Enter your `MANIFEST_AUTH_PASSWORD` value in the password field
+4. Click "Install" button
+5. Stremio will open and install the configured addon
+
+The addon implements Stremio's official configuration system with:
+- **Landing page** at `/` with auto-redirect to `/configure` when password is required
+- **Configuration page** at `/configure` with a password input form
+- **Automatic installation** - After entering your password, clicking "Install" generates a `stremio://` URL that opens Stremio
+
+**How it works:**
+- The configuration form encodes your password as base64 JSON in the installation URL
+- Example: `stremio://domain.com/eyJwYXNzd29yZCI6InRlc3QifQ==/manifest.json`
+- The encoded data (`eyJwYXNzd29yZCI6InRlc3QifQ==`) contains `{"password":"test"}`
+- Stremio saves this URL and includes the userData in all future requests
+- All manifest and stream requests validate the password on the server
+
+**Security notes:**
+- Passwords are validated on every request using middleware
+- The password is stored in Stremio's addon configuration (not plaintext in URLs)
+- All requests require authentication when password is configured
+- Failed authentication returns 401/403 errors
