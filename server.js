@@ -86,6 +86,7 @@ const NZBDAV_API_KEY = (process.env.NZBDAV_API_KEY || '').trim();
 const NZBDAV_CATEGORY_MOVIES = process.env.NZBDAV_CATEGORY_MOVIES || 'Movies';
 const NZBDAV_CATEGORY_SERIES = process.env.NZBDAV_CATEGORY_SERIES || 'Tv';
 const NZBDAV_CATEGORY_DEFAULT = process.env.NZBDAV_CATEGORY_DEFAULT || 'Movies';
+const NZBDAV_CATEGORY_OVERRIDE = (process.env.NZBDAV_CATEGORY || '').trim();
 const NZBDAV_POLL_INTERVAL_MS = 2000;
 const NZBDAV_POLL_TIMEOUT_MS = 80000;
 const NZBDAV_CACHE_TTL_MS = 3600000;
@@ -260,15 +261,37 @@ function extractHydraAttrMap(item) {
   collectSource(item.attrs);
   collectSource(item.attributes);
   collectSource(item['newznab:attr']);
+  collectSource(item['newznab:attrs']);
 
   attrSources.forEach((attr) => {
     if (!attr) return;
-    const name = (attr.name || attr['@name'] || attr['$']?.name || attr.key || attr['@key'] || '')
-      .toString()
-      .trim()
-      .toLowerCase();
+    const entry = attr['@attributes'] || attr.attributes || attr.$ || attr;
+    const rawName =
+      entry.name ??
+      entry.Name ??
+      entry['@name'] ??
+      entry['@Name'] ??
+      entry.key ??
+      entry.Key ??
+      entry['@key'] ??
+      entry['@Key'] ??
+      entry.field ??
+      entry.Field ??
+      '';
+    const name = rawName.toString().trim().toLowerCase();
     if (!name) return;
-    const value = attr.value || attr['@value'] || attr['$']?.value || attr.content || attr['#text'];
+    const value =
+      entry.value ??
+      entry.Value ??
+      entry['@value'] ??
+      entry['@Value'] ??
+      entry.val ??
+      entry.Val ??
+      entry.content ??
+      entry.Content ??
+      entry['#text'] ??
+      entry.text ??
+      entry['@text'];
     if (value !== undefined && value !== null) {
       attrMap[name] = value;
     }
@@ -300,7 +323,7 @@ function normalizeHydraResults(data) {
     const enclosure = item.enclosure || item['enclosure'];
     if (enclosure) {
       const enclosureObj = Array.isArray(enclosure) ? enclosure[0] : enclosure;
-      downloadUrl = enclosureObj?.url || enclosureObj?.['@url'] || enclosureObj?.href;
+      downloadUrl = enclosureObj?.url || enclosureObj?.['@url'] || enclosureObj?.href || enclosureObj?.link;
     }
     if (!downloadUrl) {
       downloadUrl = item.link || item['link'];
@@ -318,10 +341,52 @@ function normalizeHydraResults(data) {
     }
 
     const attrMap = extractHydraAttrMap(item);
-    const sizeValue = attrMap.size || attrMap.filesize || attrMap['contentlength'] || attrMap['nzbsize'];
-    const parsedSize = sizeValue !== undefined ? Number.parseInt(sizeValue, 10) : NaN;
-    const indexer = attrMap.indexer || attrMap.indexername || item.indexer || item['indexer'];
-    const indexerId = attrMap.indexerid || indexer || 'nzbhydra';
+    const resolveFirst = (...candidates) => {
+      for (const candidate of candidates) {
+        if (candidate === undefined || candidate === null) continue;
+        if (Array.isArray(candidate)) {
+          const inner = resolveFirst(...candidate);
+          if (inner !== undefined && inner !== null) return inner;
+          continue;
+        }
+        if (typeof candidate === 'string') {
+          const trimmed = candidate.trim();
+          if (!trimmed) continue;
+          return trimmed;
+        }
+        return candidate;
+      }
+      return undefined;
+    };
+
+    const enclosureObj = Array.isArray(enclosure) ? enclosure?.[0] : enclosure;
+    const enclosureLength = enclosureObj?.length || enclosureObj?.['@length'] || enclosureObj?.['$']?.length || enclosureObj?.['@attributes']?.length;
+
+    const sizeValue = resolveFirst(
+      attrMap.size,
+      attrMap.filesize,
+      attrMap['contentlength'],
+      attrMap['content-length'],
+      attrMap.length,
+      attrMap.nzbsize,
+      item.size,
+      item.Size,
+      enclosureLength
+    );
+    const parsedSize = sizeValue !== undefined ? Number.parseInt(String(sizeValue), 10) : NaN;
+    const indexer = resolveFirst(
+      attrMap.indexername,
+      attrMap.indexer,
+      attrMap['hydraindexername'],
+      attrMap['hydraindexer'],
+      item.hydraIndexerName,
+      item.hydraindexername,
+      item.hydraIndexer,
+      item.hydraindexer,
+      item.indexer,
+      item.Indexer
+    );
+    const indexerId = resolveFirst(attrMap.indexerid, attrMap['hydraindexerid'], item.hydraIndexerId, item.hydraindexerid, indexer) || 'nzbhydra';
 
     const guidRaw = item.guid || item['guid'];
     let guidValue = null;
@@ -361,13 +426,25 @@ function executeIndexerPlan(plan) {
 }
 
 function getNzbdavCategory(type) {
+  let baseCategory;
+  let suffixKey;
+
   if (type === 'series' || type === 'tv') {
-    return NZBDAV_CATEGORY_SERIES;
+    baseCategory = NZBDAV_CATEGORY_SERIES;
+    suffixKey = 'TV';
+  } else if (type === 'movie') {
+    baseCategory = NZBDAV_CATEGORY_MOVIES;
+    suffixKey = 'MOVIE';
+  } else {
+    baseCategory = NZBDAV_CATEGORY_DEFAULT;
+    suffixKey = 'DEFAULT';
   }
-  if (type === 'movie') {
-    return NZBDAV_CATEGORY_MOVIES;
+
+  if (NZBDAV_CATEGORY_OVERRIDE) {
+    return `${NZBDAV_CATEGORY_OVERRIDE}_${suffixKey}`;
   }
-  return NZBDAV_CATEGORY_DEFAULT;
+
+  return baseCategory;
 }
 
 function buildNzbdavApiParams(mode, extra = {}) {
