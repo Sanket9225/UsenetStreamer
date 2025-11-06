@@ -15,6 +15,45 @@ const port = Number(process.env.PORT || 7000);
 app.use(cors());
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
+function extractTokenFromRequest(req) {
+  if (req.query && typeof req.query.token === 'string') {
+    return req.query.token.trim();
+  }
+  const authHeader = req.headers['authorization'] || req.headers['x-addon-token'];
+  if (typeof authHeader === 'string') {
+    const parts = authHeader.split(' ');
+    if (parts.length === 2 && /^token$/i.test(parts[0])) {
+      return parts[1].trim();
+    }
+    return authHeader.trim();
+  }
+  return '';
+}
+
+function ensureSharedSecret(req, res, next) {
+  if (!ADDON_SHARED_SECRET) {
+    next();
+    return;
+  }
+  if (req.method === 'OPTIONS') {
+    next();
+    return;
+  }
+  const providedToken = extractTokenFromRequest(req);
+  if (!providedToken || providedToken !== ADDON_SHARED_SECRET) {
+    res.status(401).json({ error: 'Unauthorized: invalid or missing addon token' });
+    return;
+  }
+  next();
+}
+
+app.use((req, res, next) => {
+  if (req.path.startsWith('/assets/')) {
+    return next();
+  }
+  return ensureSharedSecret(req, res, next);
+});
+
 // Configure indexer manager (Prowlarr or NZBHydra)
 const INDEXER_MANAGER = (process.env.INDEXER_MANAGER || 'prowlarr').trim().toLowerCase();
 const INDEXER_MANAGER_URL = (process.env.INDEXER_MANAGER_URL || process.env.PROWLARR_URL || '').trim();
@@ -38,6 +77,7 @@ const INDEXER_MANAGER_CACHE_MINUTES = (() => {
   return Number.isFinite(raw) && raw >= 0 ? raw : 10;
 })();
 const INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
+const ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
 
 // Configure NZBDav
 const ADDON_BASE_URL = (process.env.ADDON_BASE_URL || '').trim();
@@ -1361,9 +1401,10 @@ app.get('/stream/:type/:id.json', async (req, res) => {
         });
 
         baseParams.set('downloadUrl', result.downloadUrl);
-        if (result.guid) baseParams.set('guid', result.guid);
-        if (result.size) baseParams.set('size', String(result.size));
-        if (result.title) baseParams.set('title', result.title);
+  if (result.guid) baseParams.set('guid', result.guid);
+  if (result.size) baseParams.set('size', String(result.size));
+  if (result.title) baseParams.set('title', result.title);
+  if (ADDON_SHARED_SECRET) baseParams.set('token', ADDON_SHARED_SECRET);
 
         const streamUrl = `${addonBaseUrl}/nzb/stream?${baseParams.toString()}`;
         const name = 'UsenetStreamer';

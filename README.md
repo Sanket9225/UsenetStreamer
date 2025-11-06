@@ -11,6 +11,7 @@ UsenetStreamer is a Stremio addon that bridges a Usenet indexer manager (Prowlar
 - Direct WebDAV streaming from NZBDav (no local mounts required).
 - Configurable via environment variables (see `.env.example`).
 - Fallback failure clip when NZBDav cannot deliver media.
+- Optional shared-secret gate so only authorized manifest/stream requests succeed.
 
 ## Getting Started
 
@@ -41,6 +42,7 @@ docker run -d \
    -e INDEXER_MANAGER_URL=https://your-prowlarr-host:9696 \
    -e INDEXER_MANAGER_API_KEY=your-prowlarr-api-key \
    -e INDEXER_MANAGER_INDEXERS=-1 \
+   -e ADDON_SHARED_SECRET=super-secret-token \
    -e NZBDAV_URL=http://localhost:3000 \
    -e NZBDAV_API_KEY=your-nzbdav-api-key \
    -e NZBDAV_WEBDAV_URL=http://localhost:3000 \
@@ -56,12 +58,14 @@ If you prefer to keep secrets in a file, use `--env-file /path/to/usenetstreamer
 
 Using NZBHydra instead? Set `INDEXER_MANAGER=nzbhydra`, point `INDEXER_MANAGER_URL` at your Hydra instance, and provide comma-separated indexer names via `INDEXER_MANAGER_INDEXERS` if you want to limit the search scope. Leave `INDEXER_MANAGER_INDEXERS` blank to let Hydra decide.
 
+When `ADDON_SHARED_SECRET` is set, every request must include `?token=${ADDON_SHARED_SECRET}` (e.g. `https://your-domain/manifest.json?token=super-secret-token`). Stream URLs emitted by the addon include the token automatically.
+
 
 ## Environment Variables
 
 - `INDEXER_MANAGER`, `INDEXER_MANAGER_URL`, `INDEXER_MANAGER_API_KEY`, `INDEXER_MANAGER_STRICT_ID_MATCH`, `INDEXER_MANAGER_INDEXERS`
 - `NZBDAV_URL`, `NZBDAV_API_KEY`, `NZBDAV_WEBDAV_URL`, `NZBDAV_WEBDAV_USER`, `NZBDAV_WEBDAV_PASS`
-- `ADDON_BASE_URL`
+- `ADDON_BASE_URL`, `ADDON_SHARED_SECRET`
 
 `INDEXER_MANAGER` defaults to `prowlarr`. Set it to `nzbhydra` to target an NZBHydra instance.
 
@@ -70,6 +74,8 @@ Using NZBHydra instead? Set `INDEXER_MANAGER=nzbhydra`, point `INDEXER_MANAGER_U
 `INDEXER_MANAGER_INDEXERS` accepts a comma-separated list. For Prowlarr, use indexer IDs (e.g. `1,3,9`; `-1` means “all Usenet indexers”). For NZBHydra, provide the indexer names as displayed in its UI. The addon logs the effective value on each request.
 
 `INDEXER_MANAGER_CACHE_MINUTES` (optional) overrides the default NZBHydra cache duration (10 minutes). Leave unset to keep the default. Prowlarr ignores this value.
+
+`ADDON_SHARED_SECRET` locks access behind a shared token. Anyone visiting the manifest or stream endpoints must append `?token=<your-secret>`. Stremio supports this out of the box—just add the manifest URL with the token included.
 
 See `.env.example` for the authoritative list.
 
@@ -97,4 +103,4 @@ Tips:
 - Keep port 7000 (or whichever you use) firewalled; let the reverse proxy handle public traffic.
 - Renew certificates automatically (cron/systemd timer or your proxy’s auto-renew feature).
 - If you deploy behind Cloudflare or another CDN, ensure WebDAV/body sizes are allowed and HTTPS certificates stay valid.
-- Finally, add `https://myusenet.duckdns.org/manifest.json` (replace with your domain) to Stremio’s addon catalog. Use straight HTTPS—the addon will not show up over HTTP.
+- Finally, add `https://myusenet.duckdns.org/manifest.json?token=super-secret-token` (replace with your domain + secret) to Stremio’s addon catalog. Use straight HTTPS—the addon will not show up over HTTP.
