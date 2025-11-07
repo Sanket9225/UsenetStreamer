@@ -133,29 +133,16 @@ function getAudioQualityRank(audioQuality) {
 }
 
 /**
- * Sort streams based on method with multi-level sorting
- * @param {Array} results - Array of Prowlarr results
+ * Sort items within a single group using the specified method
+ * @param {Array} items - Items to sort
  * @param {string} sortMethod - Sorting method
- * @param {string} preferredLanguage - Preferred language for grouping
- * @returns {Array} Sorted results
+ * @returns {Array} Sorted items
  */
-function sortStreams(results, sortMethod, preferredLanguage) {
-  const sortedResults = [...results];
+function sortWithinGroup(items, sortMethod) {
+  const sorted = [...items];
 
-  // Main sorting function with multi-level criteria
-  sortedResults.sort((a, b) => {
-    // Level 1: Group by preferred language (if set)
-    if (preferredLanguage && preferredLanguage !== 'No Preference') {
-      const langA = detectLanguage(a.title);
-      const langB = detectLanguage(b.title);
-      const aMatchesPreferred = langA === preferredLanguage;
-      const bMatchesPreferred = langB === preferredLanguage;
-
-      if (aMatchesPreferred && !bMatchesPreferred) return -1;
-      if (!aMatchesPreferred && bMatchesPreferred) return 1;
-    }
-
-    // Level 2: Sort by the chosen method within each language group
+  sorted.sort((a, b) => {
+    // Primary sort based on method
     let primaryComparison = 0;
 
     switch (sortMethod) {
@@ -188,8 +175,7 @@ function sortStreams(results, sortMethod, preferredLanguage) {
 
     if (primaryComparison !== 0) return primaryComparison;
 
-    // Level 3: If primary sort is equal, sort by video quality
-    // (only applies when sort method is not "Quality First")
+    // If primary sort is equal, sort by video quality (if not already sorting by quality)
     if (sortMethod !== 'Quality First') {
       const qualityA = extractQuality(a.title);
       const qualityB = extractQuality(b.title);
@@ -200,7 +186,7 @@ function sortStreams(results, sortMethod, preferredLanguage) {
       if (videoComparison !== 0) return videoComparison;
     }
 
-    // Level 4: If video quality is equal, sort by audio quality
+    // If video quality is equal, sort by audio quality
     const audioA = extractAudioQuality(a.title);
     const audioB = extractAudioQuality(b.title);
     const audioRankA = getAudioQualityRank(audioA);
@@ -209,11 +195,60 @@ function sortStreams(results, sortMethod, preferredLanguage) {
 
     if (audioComparison !== 0) return audioComparison;
 
-    // Level 5: Final tiebreaker - sort by size (larger is better quality)
+    // Final tiebreaker - sort by size
     return (b.size || 0) - (a.size || 0);
   });
 
-  return sortedResults;
+  return sorted;
+}
+
+/**
+ * Sort streams with proper language grouping
+ * @param {Array} results - Array of Prowlarr results
+ * @param {string} sortMethod - Sorting method
+ * @param {string} preferredLanguage - Preferred language for grouping
+ * @returns {object} Object with sortedResults array and groupInfo
+ */
+function sortStreams(results, sortMethod, preferredLanguage) {
+  // If no preferred language, just sort everything as one group
+  if (!preferredLanguage || preferredLanguage === 'No Preference') {
+    const sorted = sortWithinGroup(results, sortMethod);
+    return {
+      sortedResults: sorted,
+      groupInfo: null
+    };
+  }
+
+  // Split into two groups: preferred language and others
+  const preferredGroup = [];
+  const otherGroup = [];
+
+  for (const item of results) {
+    const detectedLang = detectLanguage(item.title);
+    if (detectedLang === preferredLanguage) {
+      preferredGroup.push(item);
+    } else {
+      otherGroup.push(item);
+    }
+  }
+
+  // Sort each group independently
+  const sortedPreferred = sortWithinGroup(preferredGroup, sortMethod);
+  const sortedOthers = sortWithinGroup(otherGroup, sortMethod);
+
+  // Combine groups: preferred first, then others
+  const sortedResults = [...sortedPreferred, ...sortedOthers];
+
+  // Return sorted results with group boundary information
+  return {
+    sortedResults,
+    groupInfo: {
+      preferredLanguage,
+      preferredCount: sortedPreferred.length,
+      otherCount: sortedOthers.length,
+      separatorIndex: sortedPreferred.length // Index where "Other Languages" group starts
+    }
+  };
 }
 
 module.exports = {

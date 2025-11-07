@@ -206,8 +206,11 @@ async function handleStreamRequest(args) {
   }
 
   // Sort results based on user preference
-  const sortedResults = sortStreams(filteredResults, sortMethod, preferredLanguage);
+  const { sortedResults, groupInfo } = sortStreams(filteredResults, sortMethod, preferredLanguage);
   console.log(`[SORT] Applied sorting method: ${sortMethod}`);
+  if (groupInfo) {
+    console.log(`[SORT] Language grouping: ${groupInfo.preferredCount} ${groupInfo.preferredLanguage}, ${groupInfo.otherCount} others`);
+  }
 
   // Limit results if maxResults is set
   let limitedResults = sortedResults;
@@ -218,7 +221,7 @@ async function handleStreamRequest(args) {
 
   const addonBaseUrl = ADDON_BASE_URL.replace(/\/$/, '');
 
-  const streams = limitedResults
+  let streams = limitedResults
     .map((result) => {
       const sizeInGB = result.size ? (result.size / 1073741824).toFixed(2) : null;
       const sizeString = sizeInGB ? `${sizeInGB} GB` : 'Size Unknown';
@@ -263,6 +266,36 @@ async function handleStreamRequest(args) {
       };
     })
     .filter(Boolean);
+
+  // Insert visual separators between language groups
+  if (groupInfo && groupInfo.preferredCount > 0 && groupInfo.otherCount > 0) {
+    const separatorIndex = groupInfo.separatorIndex;
+
+    // Create separator entries
+    const preferredSeparator = {
+      name: 'UsenetStreamer',
+      title: `━━━━━ ⭐ ${groupInfo.preferredLanguage} (${groupInfo.preferredCount}) ━━━━━`,
+      url: 'https://stremio.com',
+      behaviorHints: {
+        notWebReady: true
+      }
+    };
+
+    const otherSeparator = {
+      name: 'UsenetStreamer',
+      title: `━━━━━ 🌍 Other Languages (${groupInfo.otherCount}) ━━━━━`,
+      url: 'https://stremio.com',
+      behaviorHints: {
+        notWebReady: true
+      }
+    };
+
+    // Insert separators at the beginning of each group
+    streams.splice(separatorIndex, 0, otherSeparator);
+    streams.splice(0, 0, preferredSeparator);
+
+    console.log(`[STREMIO] Added language group separators at positions 0 and ${separatorIndex + 1}`);
+  }
 
   console.log(`[STREMIO] Returning ${streams.length} NZB streams`);
 
