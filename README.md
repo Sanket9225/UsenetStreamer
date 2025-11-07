@@ -4,22 +4,6 @@
 
 UsenetStreamer is a Stremio addon that bridges a Usenet indexer manager (Prowlarr or NZBHydra) and NZBDav. It hosts no media itself; it simply orchestrates search and streaming through your existing Usenet stack. The addon searches Usenet indexers through the manager, queues NZB downloads in NZBDav, and exposes the resulting media as Stremio streams.
 
-## Changes in this branch vs upstream
-
-This branch contains a set of focused fixes and improvements to make streaming work reliably with external players (Infuse, VLC, etc.). Key changes compared to the upstream/main branch:
-
-- **Path-based token authentication:** Changed from query-parameter style (`?token=...`) to path-based routing (`https://your-domain.com/TOKEN/manifest.json` and `https://your-domain.com/TOKEN/stream/...`). This improves compatibility with players that struggle with query strings.
-- Calculate and set Content-Length for proxied WebDAV responses when the origin server only returns a Content-Range header. Many players require Content-Length to open remote streams successfully.
-- Auto-convert HTTP 200 -> 206 when a Content-Range header is present so range requests are reported as Partial Content to clients.
-- Perform a HEAD preflight to obtain the file size when the client does not request a byte range and the WebDAV server omits Content-Length.
-- Ensure Accept-Ranges: bytes and expose critical headers (Content-Length, Content-Range, Content-Type, Accept-Ranges) to clients (CORS/Expose-Headers).
-- Infer and set proper video MIME types (e.g. video/x-matroska, video/mp4) when origin provides generic Content-Type.
-- Add Content-Disposition with a sanitized filename to help players that prefer a filename hint.
-- Improve Range/HEAD emulation: when emulating HEAD we request a tiny range (bytes=0-0) to force origin servers to respond with range headers.
-- Add defensive logging for request/response headers to aid debugging playback issues.
-
-These changes are intentionally low-risk and confined to the streaming/proxying code paths to maximize compatibility with external playback clients.
-
 ## Features
 
 - ID-aware search plans (IMDb/TMDB/TVDB) with automatic metadata enrichment.
