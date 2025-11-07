@@ -69,9 +69,21 @@ app.get('/configure', (req, res) => {
 app.get('/nzb/stream', handleNzbdavStream);
 app.head('/nzb/stream', handleNzbdavStream);
 
+// CORS middleware for custom routes (SDK normally handles this)
+const setCorsHeaders = (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  next();
+};
+
 // Custom manifest endpoints to handle authentication properly
 // These override the SDK's default manifest routes
-app.get('/manifest.json', (req, res) => {
+app.get('/manifest.json', setCorsHeaders, (req, res) => {
   if (MANIFEST_AUTH_PASSWORD) {
     // Return manifest with config requirement
     const manifest = getManifestConfig(true);
@@ -82,16 +94,23 @@ app.get('/manifest.json', (req, res) => {
   }
 });
 
-app.get('/:userData/manifest.json', validateUserData, (req, res) => {
+app.get('/:userData/manifest.json', setCorsHeaders, validateUserData, (req, res) => {
   // User authenticated, return manifest without config requirement
   const manifest = getManifestConfig(false);
   res.json(manifest);
 });
 
+// Handle OPTIONS preflight requests for CORS
+app.options('/manifest.json', setCorsHeaders);
+app.options('/:userData/manifest.json', setCorsHeaders);
+
 // Authentication middleware for stream routes with userData prefix
 if (MANIFEST_AUTH_PASSWORD) {
-  app.use('/:userData/stream', validateUserData);
+  app.use('/:userData/stream', setCorsHeaders, validateUserData);
 }
+
+// Apply CORS to all SDK stream routes
+app.use('/stream', setCorsHeaders);
 
 // Mount the addon interface routes for stream endpoints
 // The SDK's getRouter handles stream endpoints
