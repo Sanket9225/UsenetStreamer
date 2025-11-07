@@ -16,9 +16,13 @@ app.use(cors());
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 function extractTokenFromRequest(req) {
-  if (req.query && typeof req.query.token === 'string') {
-    return req.query.token.trim();
+  // Extract token from URL path (e.g., /TOKEN/manifest.json)
+  const pathMatch = req.path.match(/^\/([^\/]+)\/(manifest\.json|stream|nzb)/);
+  if (pathMatch && pathMatch[1]) {
+    return pathMatch[1].trim();
   }
+  
+  // Fallback: Check authorization header
   const authHeader = req.headers['authorization'] || req.headers['x-addon-token'];
   if (typeof authHeader === 'string') {
     const parts = authHeader.split(' ');
@@ -27,6 +31,7 @@ function extractTokenFromRequest(req) {
     }
     return authHeader.trim();
   }
+  
   return '';
 }
 
@@ -1120,12 +1125,12 @@ async function proxyNzbdavStream(req, res, viewPath, fileNameHint = '') {
 }
 
 // Manifest endpoint
-app.get('/manifest.json', (req, res) => {
+app.get('/:token/manifest.json', (req, res) => {
   ensureAddonConfigured();
 
   res.json({
   id: 'com.usenet.streamer',
-  version: '1.1.0',
+  version: '1.2.0',
   name: 'UsenetStreamer',
   description: 'Usenet-powered instant streams for Stremio via Prowlarr/NZBHydra and NZBDav',
   logo: `${ADDON_BASE_URL.replace(/\/$/, '')}/assets/icon.png`,
@@ -1136,7 +1141,7 @@ app.get('/manifest.json', (req, res) => {
   });
 });
 
-app.get('/stream/:type/:id.json', async (req, res) => {
+app.get('/:token/stream/:type/:id.json', async (req, res) => {
   const { type, id } = req.params;
   console.log(`[REQUEST] Received request for ${type} ID: ${id}`);
 
@@ -1547,9 +1552,9 @@ app.get('/stream/:type/:id.json', async (req, res) => {
   if (result.guid) baseParams.set('guid', result.guid);
   if (result.size) baseParams.set('size', String(result.size));
   if (result.title) baseParams.set('title', result.title);
-  if (ADDON_SHARED_SECRET) baseParams.set('token', ADDON_SHARED_SECRET);
 
-        const streamUrl = `${addonBaseUrl}/nzb/stream?${baseParams.toString()}`;
+        const tokenPath = ADDON_SHARED_SECRET ? `/${ADDON_SHARED_SECRET}` : '';
+        const streamUrl = `${addonBaseUrl}${tokenPath}/nzb/stream?${baseParams.toString()}`;
         const name = 'UsenetStreamer';
         const behaviorHints = {
           notWebReady: true,
@@ -1654,8 +1659,8 @@ async function handleNzbdavStream(req, res) {
   }
 }
 
-app.get('/nzb/stream', handleNzbdavStream);
-app.head('/nzb/stream', handleNzbdavStream);
+app.get('/:token/nzb/stream', handleNzbdavStream);
+app.head('/:token/nzb/stream', handleNzbdavStream);
 
 app.listen(port, '0.0.0.0', () => {
   console.log(`Addon running at http://0.0.0.0:${port}`);
