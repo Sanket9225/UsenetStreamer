@@ -78,7 +78,7 @@ function matchesQualityFilter(quality, filter) {
 }
 
 /**
- * Get quality rank for sorting
+ * Get quality rank for sorting (video quality)
  * @param {string} quality - Quality string
  * @returns {number} Rank (higher is better)
  */
@@ -93,66 +93,125 @@ function getQualityRank(quality) {
 }
 
 /**
- * Sort streams based on method
+ * Extract audio quality from title
+ * @param {string} title - Release title
+ * @returns {string|null} Audio quality or null
+ */
+function extractAudioQuality(title) {
+  if (!title) return null;
+
+  // Check for high-quality audio formats (TrueHD, DTS-HD, Atmos)
+  if (/TrueHD|DTS-HD|Atmos|DTS\.HD/i.test(title)) {
+    return 'HD';
+  }
+
+  // Check for enhanced audio (EAC3, DD+, E-AC-3)
+  if (/EAC3|E-AC-3|DD\+|DDP/i.test(title)) {
+    return 'Enhanced';
+  }
+
+  // Check for standard audio (AC3, DTS, DD)
+  if (/\bAC3\b|\bDTS\b|\bDD\b/i.test(title)) {
+    return 'Standard';
+  }
+
+  return null;
+}
+
+/**
+ * Get audio quality rank for sorting
+ * @param {string} audioQuality - Audio quality string
+ * @returns {number} Rank (higher is better)
+ */
+function getAudioQualityRank(audioQuality) {
+  const ranks = {
+    'HD': 3,        // TrueHD, DTS-HD, Atmos
+    'Enhanced': 2,  // EAC3, DD+
+    'Standard': 1   // AC3, DTS, DD
+  };
+  return ranks[audioQuality] || 0;
+}
+
+/**
+ * Sort streams based on method with multi-level sorting
  * @param {Array} results - Array of Prowlarr results
  * @param {string} sortMethod - Sorting method
- * @param {string} preferredLanguage - Preferred language for language-first sorting
+ * @param {string} preferredLanguage - Preferred language for grouping
  * @returns {Array} Sorted results
  */
 function sortStreams(results, sortMethod, preferredLanguage) {
   const sortedResults = [...results];
 
-  switch (sortMethod) {
-    case 'Quality First':
-      sortedResults.sort((a, b) => {
-        const qualityA = extractQuality(a.title);
-        const qualityB = extractQuality(b.title);
-        const rankA = getQualityRank(qualityA);
-        const rankB = getQualityRank(qualityB);
-
-        if (rankA !== rankB) return rankB - rankA;
-        return (b.size || 0) - (a.size || 0);
-      });
-      break;
-
-    case 'Size First':
-      sortedResults.sort((a, b) => (b.size || 0) - (a.size || 0));
-      break;
-
-    case 'Date First':
-      sortedResults.sort((a, b) => {
-        const ageA = a.age || 0;
-        const ageB = b.age || 0;
-        return ageA - ageB; // Lower age = newer
-      });
-      break;
-
-    default:
-      // Default to Quality First
-      sortedResults.sort((a, b) => {
-        const qualityA = extractQuality(a.title);
-        const qualityB = extractQuality(b.title);
-        const rankA = getQualityRank(qualityA);
-        const rankB = getQualityRank(qualityB);
-
-        if (rankA !== rankB) return rankB - rankA;
-        return (b.size || 0) - (a.size || 0);
-      });
-  }
-
-  // If preferred language is set, boost those to the top
-  if (preferredLanguage && preferredLanguage !== 'No Preference') {
-    sortedResults.sort((a, b) => {
+  // Main sorting function with multi-level criteria
+  sortedResults.sort((a, b) => {
+    // Level 1: Group by preferred language (if set)
+    if (preferredLanguage && preferredLanguage !== 'No Preference') {
       const langA = detectLanguage(a.title);
       const langB = detectLanguage(b.title);
-      const aMatches = langA === preferredLanguage;
-      const bMatches = langB === preferredLanguage;
+      const aMatchesPreferred = langA === preferredLanguage;
+      const bMatchesPreferred = langB === preferredLanguage;
 
-      if (aMatches && !bMatches) return -1;
-      if (!aMatches && bMatches) return 1;
-      return 0;
-    });
-  }
+      if (aMatchesPreferred && !bMatchesPreferred) return -1;
+      if (!aMatchesPreferred && bMatchesPreferred) return 1;
+    }
+
+    // Level 2: Sort by the chosen method within each language group
+    let primaryComparison = 0;
+
+    switch (sortMethod) {
+      case 'Quality First':
+        const qualityA = extractQuality(a.title);
+        const qualityB = extractQuality(b.title);
+        const videoRankA = getQualityRank(qualityA);
+        const videoRankB = getQualityRank(qualityB);
+        primaryComparison = videoRankB - videoRankA;
+        break;
+
+      case 'Size First':
+        primaryComparison = (b.size || 0) - (a.size || 0);
+        break;
+
+      case 'Date First':
+        const ageA = a.age || 0;
+        const ageB = b.age || 0;
+        primaryComparison = ageA - ageB; // Lower age = newer
+        break;
+
+      default:
+        // Default to Quality First
+        const defaultQualityA = extractQuality(a.title);
+        const defaultQualityB = extractQuality(b.title);
+        const defaultRankA = getQualityRank(defaultQualityA);
+        const defaultRankB = getQualityRank(defaultQualityB);
+        primaryComparison = defaultRankB - defaultRankA;
+    }
+
+    if (primaryComparison !== 0) return primaryComparison;
+
+    // Level 3: If primary sort is equal, sort by video quality
+    // (only applies when sort method is not "Quality First")
+    if (sortMethod !== 'Quality First') {
+      const qualityA = extractQuality(a.title);
+      const qualityB = extractQuality(b.title);
+      const videoRankA = getQualityRank(qualityA);
+      const videoRankB = getQualityRank(qualityB);
+      const videoComparison = videoRankB - videoRankA;
+
+      if (videoComparison !== 0) return videoComparison;
+    }
+
+    // Level 4: If video quality is equal, sort by audio quality
+    const audioA = extractAudioQuality(a.title);
+    const audioB = extractAudioQuality(b.title);
+    const audioRankA = getAudioQualityRank(audioA);
+    const audioRankB = getAudioQualityRank(audioB);
+    const audioComparison = audioRankB - audioRankA;
+
+    if (audioComparison !== 0) return audioComparison;
+
+    // Level 5: Final tiebreaker - sort by size (larger is better quality)
+    return (b.size || 0) - (a.size || 0);
+  });
 
   return sortedResults;
 }
@@ -160,6 +219,7 @@ function sortStreams(results, sortMethod, preferredLanguage) {
 module.exports = {
   detectLanguage,
   extractQuality,
+  extractAudioQuality,
   matchesQualityFilter,
   sortStreams
 };
