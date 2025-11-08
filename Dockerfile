@@ -2,9 +2,14 @@ FROM denoland/deno:alpine
 
 WORKDIR /app
 
+# Copy only what’s needed
 COPY . .
 
+# Pre-cache dependencies
 RUN deno cache main.ts
-EXPOSE 7000
 
-CMD ["deno", "run", "--allow-net", "--allow-env", "--allow-read", "main.ts"]
+# Expose the port (can match your .env PORT)
+EXPOSE 7001
+
+# Run the app (no type checking for faster startup)
+CMD ["deno", "run", "--no-check", "--allow-net", "--allow-env", "--allow-read", "main.ts"]
