@@ -1,15 +1,19 @@
 // deno-lint-ignore-file no-explicit-any
-import { getJsonValue, redis, setJsonValue } from "../utils/redis.ts";
-import { getWebdavClient } from "../utils/webdav.ts";
+import { getJsonValue, redis, setJsonValue } from "../../utils/redis.ts";
 import type { Request, Response } from "express";
-import { LRUCache as LRU } from 'lru-cache'
-import { findBestVideoFile } from "../utils/findBestVideoFile.ts";
-import { streamFailureVideo } from "./streamFailureVideo.ts";
-import { parseRequestedEpisode } from "../utils/parseRequestedEpisode.ts";
-import type { EpisodeInfo, QueryParams } from "../utils/parseRequestedEpisode.ts";
+import { LRUCache as LRU } from 'lru-cache';
+import { findBestVideoFile } from "../../utils/findBestVideoFile.ts";
+import { streamFailureVideo } from "../streamFailureVideo.ts";
+import { parseRequestedEpisode } from "../../utils/parseRequestedEpisode.ts";
+import type { EpisodeInfo, QueryParams } from "../../utils/parseRequestedEpisode.ts";
+import { proxyNzbdavStream } from "./proxyNzbdav.ts";
+import { buildNzbdavApiParams, getNzbdavCategory, sleep } from "./nzbUtils.ts";
 
-import { STREAM_HIGH_WATER_MARK, NZBDAV_POLL_TIMEOUT_MS, NZBDAV_HISTORY_TIMEOUT_MS, NZBDAV_CATEGORY_SERIES, NZBDAV_CATEGORY_MOVIES, NZBDAV_CATEGORY_DEFAULT, NZBDAV_URL, NZBDAV_API_KEY, NZBDAV_API_TIMEOUT_MS, NZBDAV_POLL_INTERVAL_MS } from "../env.ts";
-import { md5 } from "../utils/md5Encoder.ts";
+import {
+    NZBDAV_POLL_TIMEOUT_MS, NZBDAV_HISTORY_TIMEOUT_MS, NZBDAV_URL, NZBDAV_API_KEY, NZBDAV_API_TIMEOUT_MS, NZBDAV_POLL_INTERVAL_MS,
+    NZBDAV_CACHE_TTL_MS, STREAM_METADATA_CACHE_TTL_MS, NZBDAV_CACHE_MAX_ITEMS, STREAM_METADATA_CACHE_MAX_ITEMS
+} from "../../env.ts";
+import { md5 } from "../../utils/md5Encoder.ts";
 
 interface StreamCache {
     downloadUrl: string;
@@ -25,28 +29,17 @@ interface StreamCache {
     type: "series" | "movie";
 }
 
-function sleep(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
+// LRU cache for NZBDAV streams
+const nzbdavStreamCache = new LRU<string, any>({
+    max: NZBDAV_CACHE_MAX_ITEMS,
+    ttl: NZBDAV_CACHE_TTL_MS,
+});
 
-function getNzbdavCategory(type: string): string {
-    if (type === 'series' || type === 'tv') {
-        return NZBDAV_CATEGORY_SERIES;
-    }
-    if (type === 'movie') {
-        return NZBDAV_CATEGORY_MOVIES;
-    }
-    return NZBDAV_CATEGORY_DEFAULT;
-}
-
-function buildNzbdavApiParams(mode: string, extra: Record<string, any> = {}) {
-    return {
-        mode,
-        // apikey: NZBDAV_API_KEY, // why send more data then we need?
-        ...extra,
-        output: "json",
-    };
-}
+// LRU cache for stream metadata
+const streamMetadataCache = new LRU<string, { data: StreamCache }>({
+    max: STREAM_METADATA_CACHE_MAX_ITEMS,
+    ttl: STREAM_METADATA_CACHE_TTL_MS,
+});
 
 async function addNzbToNzbdav(nzbUrl: string, category: string, jobLabel: string): Promise<{ nzoId: string }> {
 
@@ -188,36 +181,17 @@ async function waitForNzbdavHistorySlot(nzoId: string, category: string): Promis
     );
 }
 
-const NZBDAV_CACHE_TTL_MS = 3600000; // 1 hour
-const STREAM_METADATA_CACHE_TTL_MS = 60000; // 1 minute
-
-const NZBDAV_CACHE_MAX_ITEMS = 100;
-const STREAM_METADATA_CACHE_MAX_ITEMS = 500;
-
-// LRU cache for NZBDAV streams
-const nzbdavStreamCache = new LRU<string, any>({
-    max: NZBDAV_CACHE_MAX_ITEMS,
-    ttl: NZBDAV_CACHE_TTL_MS,
-});
-
-// LRU cache for stream metadata
-const streamMetadataCache = new LRU<string, { data: StreamCache }>({
-    max: STREAM_METADATA_CACHE_MAX_ITEMS,
-    ttl: STREAM_METADATA_CACHE_TTL_MS,
-});
-
 async function getOrCreateNzbdavStream(cacheKey: string, builder: () => Promise<any>) {
     const existing = nzbdavStreamCache.get(cacheKey);
 
     if (existing) {
-        if (existing.status === "ready") {
-            return existing.data;
-        }
-        if (existing.status === "pending") {
-            return existing.promise;
-        }
-        if (existing.status === "failed") {
-            throw existing.error;
+        switch (existing.status) {
+            case "ready":
+                return existing.data;
+            case "pending":
+                return existing.promise;
+            case "failed":
+                throw existing.error;
         }
     }
 
@@ -341,7 +315,7 @@ async function buildNzbdavStream({
 }) {
     const cacheKey = `streams:${md5(downloadUrl)}`;
     const cachedArray = await getJsonValue<any>(cacheKey, '$');
-    const cached = cachedArray?.[0] ?? null;
+    const cached = cachedArray ?? null;
 
     if (cached?.viewPath) {
         console.log(`[NZBDAV] Instant cache hit: ${cached.viewPath}`);
@@ -380,54 +354,4 @@ async function buildNzbdavStream({
     return result;
 }
 
-export async function proxyNzbdavStream(
-    req: Request,
-    res: Response,
-    viewPath: string,
-    fileNameHint = "",
-) {
-    if (!new Set(["GET", "HEAD"]).has(req.method)) return res.status(405).end();
 
-    const client = getWebdavClient();
-    const path = viewPath.replace(/^\/+/, "");
-
-    const filename = (fileNameHint || path.split("/").pop() || "stream")
-        .replace(/[\\/:*?"<>|]/g, "_");
-
-    let stat;
-    try {
-        stat = await client.stat(path);
-    } catch {
-        const served = await streamFailureVideo(req, res);
-        if (!served && !res.headersSent) res.status(502).json({ error: "UPSTREAM HERE" });
-        return;
-    }
-
-    const size = stat.size;
-    res.set("Accept-Ranges", "bytes");
-    res.set("Content-Disposition", `inline; filename="${filename}"`);
-    res.set("Content-Type", stat.mime || "video/mp4");
-
-    if (req.method === "HEAD") return res.set("Content-Length", size).status(200).end();
-
-    let start = 0;
-    let end = size - 1;
-    if (req.headers.range) {
-        const parts = req.headers.range.replace(/bytes=/, "").split("-");
-        start = parseInt(parts[0], 10);
-        end = parts[1] ? parseInt(parts[1], 10) : size - 1;
-    }
-
-    const stream = client.createReadStream(path, {
-        headers: { range: `bytes=${start}-${end}` },
-        highWaterMark: STREAM_HIGH_WATER_MARK,
-    });
-
-    res.status(start === 0 ? 200 : 206);
-    if (start > 0) res.set("Content-Range", `bytes ${start}-${end}/${size}`);
-    res.set("Content-Length", (end - start + 1).toString());
-
-    stream.pipe(res);
-
-    req.on("close", () => stream.destroy());
-}

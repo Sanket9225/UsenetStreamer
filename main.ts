@@ -1,11 +1,11 @@
-import express, { Request, Response } from "express";
+import express, { Request, Response, Next } from "express";
 import cors from "cors";
 import { join } from "@std/path/posix";
 import { getMediaAndSearchResults } from "./utils/getMediaAndSearchResults.ts";
 
 import { ADDON_BASE_URL, PORT, } from "./env.ts";
 import { md5 } from "./utils/md5Encoder.ts";
-import { streamNzbdavProxy } from "./lib/nzbDav.ts";
+import { streamNzbdavProxy } from "./lib/nzbDav/nzbDav.ts";
 import { setJsonValue } from "./utils/redis.ts";
 
 import { streamFailureVideo } from "./lib/streamFailureVideo.ts"
@@ -41,7 +41,7 @@ app.get("/assets/icon.png", async (_req: Request, res: Response) => {
 });
 
 app.get("/", (_req: Request, res: Response) => {
-    res.send("Hello, the server is running!");
+    res.send("Hello, the server is running! This is using the mkcfdc version of UsenetStreamer by Sanket9225.");
 });
 
 app.get("/stream/:type/:imdbId", async (req: Request, res: Response) => {

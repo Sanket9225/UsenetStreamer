@@ -43,6 +43,28 @@ export const NZBDAV_VIDEO_EXTENSIONS = new Set([
     '.mpeg'
 ]);
 
+export const VIDEO_MIME_MAP = new Map([
+    [".mp4", "video/mp4"],
+    [".m4v", "video/mp4"],
+    [".mkv", "video/x-matroska"],
+    [".webm", "video/webm"],
+    [".avi", "video/x-msvideo"],
+    [".mov", "video/quicktime"],
+    [".wmv", "video/x-ms-wmv"],
+    [".flv", "video/x-flv"],
+    [".ts", "video/mp2t"],
+    [".m2ts", "video/mp2t"],
+    [".mpg", "video/mpeg"],
+    [".mpeg", "video/mpeg"],
+]);
+
+export const STREAM_METADATA_CACHE_TTL_MS = 60000; // 1 minute
+
+export const NZBDAV_CACHE_MAX_ITEMS = 100;
+export const STREAM_METADATA_CACHE_MAX_ITEMS = 500;
+
+
+
 export const STREAM_HIGH_WATER_MARK = (() => {
     const parsed = Number(Deno.env.get("STREAM_HIGH_WATER_MARK"));
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 1024 * 1024;
