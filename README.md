@@ -9,6 +9,30 @@ downloads in NZBDav, and exposes the resulting media as Stremio streams.
 
 ### This Version uses Deno. Not Node.
 
+### Features added:
+
+1. Rewrote using Deno 2.5 web ready API's where possible to reduce dependencies.
+2. Redis JSON Caching for every outside API (Cinemeta, Prowlarr)
+3. Auto delete bad lookups. A file fails, delete it from the cache..
+4. Secure API Keys so they are not shared in URLS.
+5. Uses the redis streams: cache to prevent downloading the same thing 500
+   times... ooops!
+6. Code split so it's easier to follow.
+7. Now ES7 compliant.
+8. Uses the webdav module to push the videos to Streaming, reducing the amount.
+   This has been undone, since it was very ineffecient and caused many issues.
+   of code.
+9. No more Express dependency. Uses Deno.serve directly. Hopefully this will
+   reduce the mem usage by quiet a bit.. we will see, I'm probably wrong.
+
+### Features missing in this version:
+
+1. Only works with Prowlarr so far since that's what I've always used and that's
+   how Sanket9225 originally released.
+2. I think I'm missing some spots where the error video should show..
+3. My result filtering sucks compared to Sanket9225.. need to spend more time
+   there.
+
 ## Features
 
 - ID-aware search plans (IMDb/TMDB/TVDB) with automatic metadata enrichment.
@@ -116,24 +140,3 @@ Tips:
 - Finally, add `https://myusenet.duckdns.org/manifest.json` (replace with your
   domain) to Stremio’s addon catalog. Use straight HTTPS—the addon will not show
   up over HTTP.
-
-### Features added:
-
-1. Rewrote using Deno 2.5 web ready API's where possible to reduce dependencies.
-2. Redis JSON Caching for every outside API (Cinemeta, Prowlarr)
-3. Auto delete bad lookups. A file fails, delete it from the cache..
-4. Secure API Keys so they are not shared in URLS.
-5. Uses the redis streams: cache to prevent downloading the same thing 500
-   times... ooops!
-6. Code split so it's easier to follow.
-7. Now ES7 compliant.
-8. Uses the webdav module to push the videos to Streaming, reducing the amount
-   of code.
-
-### Features missing in this version:
-
-1. Only works with Prowlarr so far since that's what I've always used and that's
-   how Sanket9225 originally released.
-2. I think I'm missing some spots where the error video should show..
-3. My result filtering sucks compared to Sanket9225.. need to spend more time
-   there.

@@ -71,8 +71,9 @@ async function handler(req: Request): Promise<Response> {
     if (streamMatch && method === "GET") {
         const type = streamMatch[1] as "movie" | "series";
         const imdbIdParam = streamMatch[2];
+        const decodedIdParam = decodeURIComponent(imdbIdParam);
 
-        const fullId = imdbIdParam.replace(".json", "");
+        const fullId = decodedIdParam.replace(".json", "");
 
         let imdbIdToUse = fullId;
         let requestedEpisode: RequestedEpisode | undefined = undefined;
