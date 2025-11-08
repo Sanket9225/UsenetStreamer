@@ -1,187 +1,92 @@
+const { filenameParse } = require('@ctrl/video-filename-parser');
+
 /**
- * Normalize language codes to full language names
- * @param {string} code - Language code (e.g., "GER", "DE", "GERMAN")
- * @returns {string|null} Normalized language name or null
+ * Parse release name using video-filename-parser
+ * @param {string} title - Release title
+ * @returns {object} Parsed data or empty object on error
  */
-function normalizeLanguage(code) {
-  if (!code) return null;
+function parseRelease(title) {
+  if (!title) return {};
 
-  const normalized = code.toUpperCase();
+  try {
+    return filenameParse(title);
+  } catch (error) {
+    console.error(`[PARSE ERROR] Failed to parse: ${title}`, error.message);
+    return {};
+  }
+}
 
-  const languageMap = {
-    // German
-    'DE': 'German',
-    'GER': 'German',
-    'GERMAN': 'German',
-    'DEUTSCH': 'German',
+/**
+ * Get video quality rank for sorting
+ * @param {string} resolution - Resolution from parser (e.g., "2160P", "1080P")
+ * @returns {number} Rank (higher is better)
+ */
+function getVideoQualityRank(resolution) {
+  if (!resolution) return 0;
 
-    // French
-    'FR': 'French',
-    'FRE': 'French',
-    'FRENCH': 'French',
-    'FRANÇAIS': 'French',
-    'VF': 'French',
-    'VFF': 'French',
-
-    // Spanish
-    'ES': 'Spanish',
-    'SPA': 'Spanish',
-    'SPANISH': 'Spanish',
-    'ESPAÑOL': 'Spanish',
-    'CASTELLANO': 'Spanish',
-    'LAT': 'Spanish',
-    'LATINO': 'Spanish',
-
-    // Italian
-    'IT': 'Italian',
-    'ITA': 'Italian',
-    'ITALIAN': 'Italian',
-    'ITALIANO': 'Italian',
-
-    // Portuguese
-    'PT': 'Portuguese',
-    'POR': 'Portuguese',
-    'PORTUGUESE': 'Portuguese',
-    'PORTUGUÊS': 'Portuguese',
-    'PT-BR': 'Portuguese',
-
-    // Russian
-    'RU': 'Russian',
-    'RUS': 'Russian',
-    'RUSSIAN': 'Russian',
-    'РУССКИЙ': 'Russian',
-
-    // Japanese
-    'JA': 'Japanese',
-    'JAP': 'Japanese',
-    'JPN': 'Japanese',
-    'JAPANESE': 'Japanese',
-    '日本語': 'Japanese',
-
-    // Korean
-    'KO': 'Korean',
-    'KOR': 'Korean',
-    'KOREAN': 'Korean',
-    '한국어': 'Korean',
-
-    // Chinese
-    'ZH': 'Chinese',
-    'CHI': 'Chinese',
-    'CHINESE': 'Chinese',
-    '中文': 'Chinese',
-    'MANDARIN': 'Chinese',
-
-    // English
-    'EN': 'English',
-    'ENG': 'English',
-    'ENGLISH': 'English',
-
-    // Dutch
-    'NL': 'Dutch',
-    'DUT': 'Dutch',
-    'DUTCH': 'Dutch',
-    'NEDERLANDS': 'Dutch',
-
-    // Polish
-    'PL': 'Polish',
-    'POL': 'Polish',
-    'POLISH': 'Polish',
-    'POLSKI': 'Polish',
-
-    // Turkish
-    'TR': 'Turkish',
-    'TUR': 'Turkish',
-    'TURKISH': 'Turkish',
-    'TÜRKÇE': 'Turkish',
-
-    // Arabic
-    'AR': 'Arabic',
-    'ARA': 'Arabic',
-    'ARABIC': 'Arabic',
-    'العربية': 'Arabic',
-
-    // Hindi
-    'HI': 'Hindi',
-    'HIN': 'Hindi',
-    'HINDI': 'Hindi',
-    'हिन्दी': 'Hindi'
+  const normalized = resolution.toUpperCase();
+  const ranks = {
+    '2160P': 4,
+    '4K': 4,
+    'UHD': 4,
+    '1080P': 3,
+    '720P': 2,
+    '480P': 1
   };
 
-  return languageMap[normalized] || null;
+  return ranks[normalized] || 0;
 }
 
 /**
- * Check if release is a complete Bluray (may contain multiple audio tracks)
- * @param {string} title - Release title
- * @returns {boolean} True if complete Bluray
+ * Get audio quality rank for sorting
+ * Audio quality hierarchy: TrueHD Atmos = DTS-HD MA > DTS-HD > EAC3 > AC3 = DTS > AAC
+ * @param {string} audioCodec - Audio codec from parser
+ * @returns {number} Rank (higher is better)
  */
-function isCompleteBluray(title) {
-  if (!title) return false;
+function getAudioQualityRank(audioCodec) {
+  if (!audioCodec) return 0;
 
-  const completeBlurayPatterns = [
-    /\bCOMPLETE\.BLURAY\b/i,
-    /\bFULL\.BLURAY\b/i,
-    /\bBD50\b/i,
-    /\bBD25\b/i,
-    /\bBDMV\b/i,
-    /\bBluRay\.COMPLETE\b/i
-  ];
+  const codec = audioCodec.toUpperCase();
 
-  return completeBlurayPatterns.some(pattern => pattern.test(title));
+  // TrueHD Atmos / DTS-HD MA (highest quality)
+  if (codec.includes('TRUEHD') && codec.includes('ATMOS')) return 6;
+  if (codec.includes('DTS-HD') && codec.includes('MA')) return 6;
+  if (codec.includes('DTS-HD.MA')) return 6;
+
+  // DTS-HD (without MA)
+  if (codec.includes('DTS-HD')) return 5;
+
+  // EAC3 / DD+ / DDP
+  if (codec.includes('EAC3') || codec.includes('E-AC-3') || codec.includes('DD+') || codec.includes('DDP')) return 4;
+
+  // AC3 / DTS (standard quality)
+  if (codec.includes('AC3') || codec.includes('DD ') || codec === 'DD') return 3;
+  if (codec.includes('DTS') && !codec.includes('DTS-HD')) return 3;
+
+  // AAC (lowest)
+  if (codec.includes('AAC')) return 2;
+
+  // TrueHD (without Atmos info)
+  if (codec.includes('TRUEHD')) return 6;
+
+  return 1;
 }
 
 /**
- * Detect language from release title
- * Returns detected language(s) or null if no explicit language tag
- *
- * IMPORTANT: Returns null for releases without explicit language tags
- * (e.g., US/UK releases are assumed English-only but return null)
- *
- * @param {string} title - Release title
- * @returns {string|null} Detected language, "MULTi", or null
+ * Extract quality string from parsed data
+ * @param {object} parsed - Parsed release data
+ * @returns {string} Quality string (e.g., "4K", "1080p", "720p")
  */
-function detectLanguage(title) {
-  if (!title) return null;
+function extractQuality(parsed) {
+  if (!parsed || !parsed.resolution) return null;
 
-  // Check for MULTi first (multiple audio tracks)
-  if (/\bMULTi\b/i.test(title)) {
-    return 'MULTi';
-  }
+  const res = parsed.resolution.toUpperCase();
+  if (res === '2160P' || res === 'UHD') return '4K';
+  if (res === '1080P') return '1080p';
+  if (res === '720P') return '720p';
+  if (res === '480P') return '480p';
 
-  // Extract potential language tags (words between dots or spaces)
-  // Look for language codes/names in typical release name format
-  const tokens = title.split(/[\.\s\-_]+/);
-
-  for (const token of tokens) {
-    const normalizedLang = normalizeLanguage(token);
-    if (normalizedLang) {
-      return normalizedLang;
-    }
-  }
-
-  // No explicit language tag found
-  // This includes US/UK releases which are English-only but don't have ENG tag
-  return null;
-}
-
-/**
- * Extract quality from title
- * @param {string} title - Release title
- * @returns {string|null} Quality (4K, 1080p, 720p, 480p) or null
- */
-function extractQuality(title) {
-  if (!title) return null;
-
-  const qualityMatch = title.match(/(2160p|4K|UHD|1080p|720p|480p)/i);
-  if (!qualityMatch) return null;
-
-  const quality = qualityMatch[0].toUpperCase();
-  if (quality === '2160P' || quality === 'UHD') return '4K';
-  if (quality === '1080P') return '1080p';
-  if (quality === '720P') return '720p';
-  if (quality === '480P') return '480p';
-
-  return quality;
+  return parsed.resolution;
 }
 
 /**
@@ -209,63 +114,55 @@ function matchesQualityFilter(quality, filter) {
 }
 
 /**
- * Get quality rank for sorting (video quality)
- * @param {string} quality - Quality string
- * @returns {number} Rank (higher is better)
+ * Detect language group for release
+ * Returns: 'preferred', 'english', or 'other'
+ * @param {object} parsed - Parsed release data
+ * @param {string} preferredLanguage - User's preferred language
+ * @returns {string} Language group ('preferred', 'english', 'other')
  */
-function getQualityRank(quality) {
-  const ranks = {
-    '4K': 4,
-    '1080p': 3,
-    '720p': 2,
-    '480p': 1
-  };
-  return ranks[quality] || 0;
+function detectLanguageGroup(parsed, preferredLanguage) {
+  if (!parsed || !preferredLanguage || preferredLanguage === 'No Preference') {
+    return 'english'; // Default group when no preference
+  }
+
+  // Check if it's a MULTi release
+  if (parsed.multi === true) {
+    return 'preferred'; // MULTi releases contain preferred language
+  }
+
+  // Get languages from parser
+  const languages = parsed.languages || [];
+
+  // If no languages detected, assume English
+  if (languages.length === 0) {
+    return 'english';
+  }
+
+  // Check if preferred language is in the languages array
+  const hasPreferredLanguage = languages.some(lang =>
+    lang.toLowerCase() === preferredLanguage.toLowerCase()
+  );
+
+  if (hasPreferredLanguage) {
+    return 'preferred';
+  }
+
+  // Check if English is in the languages
+  const hasEnglish = languages.some(lang =>
+    lang.toLowerCase() === 'english'
+  );
+
+  if (hasEnglish) {
+    return 'english';
+  }
+
+  // Everything else goes to "other" group
+  return 'other';
 }
 
 /**
- * Extract audio quality from title
- * @param {string} title - Release title
- * @returns {string|null} Audio quality or null
- */
-function extractAudioQuality(title) {
-  if (!title) return null;
-
-  // Check for high-quality audio formats (TrueHD, DTS-HD, Atmos)
-  if (/TrueHD|DTS-HD|Atmos|DTS\.HD/i.test(title)) {
-    return 'HD';
-  }
-
-  // Check for enhanced audio (EAC3, DD+, E-AC-3)
-  if (/EAC3|E-AC-3|DD\+|DDP/i.test(title)) {
-    return 'Enhanced';
-  }
-
-  // Check for standard audio (AC3, DTS, DD)
-  if (/\bAC3\b|\bDTS\b|\bDD\b/i.test(title)) {
-    return 'Standard';
-  }
-
-  return null;
-}
-
-/**
- * Get audio quality rank for sorting
- * @param {string} audioQuality - Audio quality string
- * @returns {number} Rank (higher is better)
- */
-function getAudioQualityRank(audioQuality) {
-  const ranks = {
-    'HD': 3,        // TrueHD, DTS-HD, Atmos
-    'Enhanced': 2,  // EAC3, DD+
-    'Standard': 1   // AC3, DTS, DD
-  };
-  return ranks[audioQuality] || 0;
-}
-
-/**
- * Sort items within a single group using the specified method
- * @param {Array} items - Items to sort
+ * Sort items within a single group
+ * @param {Array} items - Items to sort (array of {result, parsed} objects)
  * @param {string} sortMethod - Sorting method
  * @returns {Array} Sorted items
  */
@@ -273,142 +170,214 @@ function sortWithinGroup(items, sortMethod) {
   const sorted = [...items];
 
   sorted.sort((a, b) => {
+    const parsedA = a.parsed;
+    const parsedB = b.parsed;
+
     // Primary sort based on method
     let primaryComparison = 0;
 
     switch (sortMethod) {
       case 'Quality First':
-        const qualityA = extractQuality(a.title);
-        const qualityB = extractQuality(b.title);
-        const videoRankA = getQualityRank(qualityA);
-        const videoRankB = getQualityRank(qualityB);
-        primaryComparison = videoRankB - videoRankA;
+        const videoRankA = getVideoQualityRank(parsedA.resolution);
+        const videoRankB = getVideoQualityRank(parsedB.resolution);
+        primaryComparison = videoRankB - videoRankA; // Higher quality first
         break;
 
       case 'Size First':
-        primaryComparison = (b.size || 0) - (a.size || 0);
+        primaryComparison = (b.result.size || 0) - (a.result.size || 0); // Larger first
         break;
 
       case 'Date First':
-        const ageA = a.age || 0;
-        const ageB = b.age || 0;
-        primaryComparison = ageA - ageB; // Lower age = newer
+        const ageA = a.result.age || 0;
+        const ageB = b.result.age || 0;
+        primaryComparison = ageA - ageB; // Lower age = newer = first
         break;
 
       default:
         // Default to Quality First
-        const defaultQualityA = extractQuality(a.title);
-        const defaultQualityB = extractQuality(b.title);
-        const defaultRankA = getQualityRank(defaultQualityA);
-        const defaultRankB = getQualityRank(defaultQualityB);
-        primaryComparison = defaultRankB - defaultRankA;
+        const defaultVideoRankA = getVideoQualityRank(parsedA.resolution);
+        const defaultVideoRankB = getVideoQualityRank(parsedB.resolution);
+        primaryComparison = defaultVideoRankB - defaultVideoRankA;
     }
 
     if (primaryComparison !== 0) return primaryComparison;
 
-    // If primary sort is equal, sort by video quality (if not already sorting by quality)
+    // Tiebreaker 1: Video quality (if not already sorting by quality)
     if (sortMethod !== 'Quality First') {
-      const qualityA = extractQuality(a.title);
-      const qualityB = extractQuality(b.title);
-      const videoRankA = getQualityRank(qualityA);
-      const videoRankB = getQualityRank(qualityB);
+      const videoRankA = getVideoQualityRank(parsedA.resolution);
+      const videoRankB = getVideoQualityRank(parsedB.resolution);
       const videoComparison = videoRankB - videoRankA;
 
       if (videoComparison !== 0) return videoComparison;
     }
 
-    // If video quality is equal, sort by audio quality
-    const audioA = extractAudioQuality(a.title);
-    const audioB = extractAudioQuality(b.title);
-    const audioRankA = getAudioQualityRank(audioA);
-    const audioRankB = getAudioQualityRank(audioB);
+    // Tiebreaker 2: Audio quality
+    const audioRankA = getAudioQualityRank(parsedA.audioCodec);
+    const audioRankB = getAudioQualityRank(parsedB.audioCodec);
     const audioComparison = audioRankB - audioRankA;
 
     if (audioComparison !== 0) return audioComparison;
 
-    // Final tiebreaker - sort by size
-    return (b.size || 0) - (a.size || 0);
+    // Tiebreaker 3: Size
+    return (b.result.size || 0) - (a.result.size || 0);
   });
 
   return sorted;
 }
 
 /**
- * Sort streams with proper 3-group language grouping
+ * Filter and sort streams with 3-group language grouping
  * @param {Array} results - Array of Prowlarr results
  * @param {string} sortMethod - Sorting method
  * @param {string} preferredLanguage - Preferred language for grouping
+ * @param {string} qualityFilter - Quality filter (e.g., "All", "1080p", "4K + 1080p")
  * @returns {object} Object with sortedResults array and groupInfo
  */
-function sortStreams(results, sortMethod, preferredLanguage) {
+function filterAndSortStreams(results, sortMethod, preferredLanguage, qualityFilter) {
+  // Parse all releases and pair with original results
+  const parsedItems = results.map(result => ({
+    result,
+    parsed: parseRelease(result.title)
+  }));
+
+  // Filter by quality
+  let filteredItems = parsedItems;
+  if (qualityFilter && qualityFilter !== 'All') {
+    filteredItems = parsedItems.filter(item => {
+      const quality = extractQuality(item.parsed);
+      return matchesQualityFilter(quality, qualityFilter);
+    });
+  }
+
   // If no preferred language, just sort everything as one group
   if (!preferredLanguage || preferredLanguage === 'No Preference') {
-    const sorted = sortWithinGroup(results, sortMethod);
+    const sorted = sortWithinGroup(filteredItems, sortMethod);
     return {
-      sortedResults: sorted,
+      sortedResults: sorted.map(item => ({ ...item.result, parsed: item.parsed })),
       groupInfo: null
     };
   }
 
-  // Split into THREE groups based on language detection rules:
-  // 1. Preferred language group (explicit match OR MULTi)
-  // 2. Complete Bluray group (may contain multiple audio tracks)
-  // 3. Other languages group (everything else, including English-only without tag)
+  // Split into THREE groups
   const preferredGroup = [];
-  const completeBlurayGroup = [];
+  const englishGroup = [];
   const otherGroup = [];
 
-  for (const item of results) {
-    const detectedLang = detectLanguage(item.title);
-    const isComplete = isCompleteBluray(item.title);
+  for (const item of filteredItems) {
+    const langGroup = detectLanguageGroup(item.parsed, preferredLanguage);
 
-    // Group 1: Preferred language OR MULTi releases
-    if (detectedLang === preferredLanguage || detectedLang === 'MULTi') {
+    if (langGroup === 'preferred') {
       preferredGroup.push(item);
-    }
-    // Group 2: Complete Bluray releases without explicit language tag
-    else if (isComplete && detectedLang === null) {
-      completeBlurayGroup.push(item);
-    }
-    // Group 3: Everything else (other languages, English-only, no tag)
-    else {
+    } else if (langGroup === 'english') {
+      englishGroup.push(item);
+    } else {
       otherGroup.push(item);
     }
   }
 
   // Sort each group independently
   const sortedPreferred = sortWithinGroup(preferredGroup, sortMethod);
-  const sortedCompleteBluray = sortWithinGroup(completeBlurayGroup, sortMethod);
-  const sortedOthers = sortWithinGroup(otherGroup, sortMethod);
+  const sortedEnglish = sortWithinGroup(englishGroup, sortMethod);
+  const sortedOther = sortWithinGroup(otherGroup, sortMethod);
 
-  // Combine groups: preferred first, then complete bluray, then others
-  const sortedResults = [...sortedPreferred, ...sortedCompleteBluray, ...sortedOthers];
+  // Combine groups: preferred first, then english, then other
+  const allSorted = [...sortedPreferred, ...sortedEnglish, ...sortedOther];
 
   // Calculate separator indices for visual grouping
   const group1End = sortedPreferred.length;
-  const group2End = group1End + sortedCompleteBluray.length;
+  const group2End = group1End + sortedEnglish.length;
 
-  // Return sorted results with group boundary information
+  // Return sorted results with parsed data included
   return {
-    sortedResults,
+    sortedResults: allSorted.map(item => ({ ...item.result, parsed: item.parsed })),
     groupInfo: {
       preferredLanguage,
       preferredCount: sortedPreferred.length,
-      completeBlurayCount: sortedCompleteBluray.length,
-      otherCount: sortedOthers.length,
-      group1SeparatorIndex: 0, // Before first group
-      group2SeparatorIndex: group1End, // Between group 1 and 2
-      group3SeparatorIndex: group2End  // Between group 2 and 3
+      englishCount: sortedEnglish.length,
+      otherCount: sortedOther.length,
+      group1End,       // Index where English group starts
+      group2End        // Index where Other Languages group starts
     }
   };
 }
 
+/**
+ * Format title for Stremio display
+ * Clean, readable format: "{Resolution} | {Audio Codec} | {Release Group}"
+ * @param {object} parsed - Parsed release data
+ * @returns {string} Formatted title
+ */
+function formatStremioTitle(parsed) {
+  if (!parsed) return 'Unknown';
+
+  const parts = [];
+
+  // Resolution
+  const resolution = extractQuality(parsed) || parsed.resolution;
+  if (resolution) {
+    // Add REMUX tag if present
+    const remux = parsed.edition?.remux ? ' REMUX' : '';
+    parts.push(resolution + remux);
+  }
+
+  // Audio codec with channels
+  if (parsed.audioCodec) {
+    let audio = parsed.audioCodec;
+
+    // Simplify codec names
+    if (audio.includes('Dolby TrueHD') || audio.includes('TrueHD')) {
+      audio = 'TrueHD';
+    } else if (audio.includes('DTS-HD')) {
+      audio = 'DTS-HD MA';
+    } else if (audio.includes('Dolby Digital Plus') || audio.includes('EAC3') || audio.includes('E-AC-3') || audio.includes('DD+') || audio.includes('DDP')) {
+      audio = 'EAC3';
+    } else if (audio.includes('Dolby Digital') || audio.includes('AC3') || audio.includes(' DD')) {
+      audio = 'AC3';
+    } else if (audio.includes('DTS')) {
+      audio = 'DTS';
+    } else if (audio.includes('AAC')) {
+      audio = 'AAC';
+    }
+
+    if (parsed.audioChannels) {
+      audio += ' ' + parsed.audioChannels;
+    }
+
+    parts.push(audio);
+  }
+
+  // Release group
+  if (parsed.group) {
+    parts.push(parsed.group);
+  }
+
+  // Add special flags (HDR, DV, source)
+  const flags = [];
+  if (parsed.edition?.hdr) flags.push('HDR');
+  if (parsed.edition?.dolbyVision) flags.push('DV');
+
+  // Source info (WEB-DL, BluRay, etc.)
+  if (parsed.sources && parsed.sources.length > 0) {
+    const source = parsed.sources[0];
+    if (source === 'WEBDL') flags.push('WEB-DL');
+    else if (source === 'BLURAY') flags.push('BluRay');
+    else flags.push(source);
+  }
+
+  if (flags.length > 0) {
+    parts.push(flags.join(' '));
+  }
+
+  return parts.join(' | ');
+}
+
 module.exports = {
-  detectLanguage,
-  normalizeLanguage,
-  isCompleteBluray,
+  parseRelease,
   extractQuality,
-  extractAudioQuality,
   matchesQualityFilter,
-  sortStreams
+  filterAndSortStreams,
+  formatStremioTitle,
+  getVideoQualityRank,
+  getAudioQualityRank,
+  detectLanguageGroup
 };

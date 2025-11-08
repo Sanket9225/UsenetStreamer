@@ -3,7 +3,7 @@ const { ensureAddonConfigured, ensureProwlarrConfigured, ensureNzbdavConfigured,
 const { pickFirstDefined, normalizeImdb, normalizeNumericId, extractYear } = require('../utils/parsers');
 const { fetchCinemetaMetadata } = require('../services/cinemeta');
 const { searchProwlarr } = require('../services/prowlarr');
-const { detectLanguage, extractQuality, matchesQualityFilter, sortStreams } = require('../utils/streamFilters');
+const { filterAndSortStreams, formatStremioTitle } = require('../utils/streamFilters');
 
 /**
  * Collect values from multiple sources using extractors
@@ -195,21 +195,19 @@ async function handleStreamRequest(args) {
     primaryId
   });
 
-  // Apply quality filter
-  let filteredResults = finalNzbResults;
-  if (qualityFilter !== 'All') {
-    filteredResults = finalNzbResults.filter((result) => {
-      const quality = extractQuality(result.title);
-      return matchesQualityFilter(quality, qualityFilter);
-    });
-    console.log(`[FILTER] Quality filter '${qualityFilter}' reduced results from ${finalNzbResults.length} to ${filteredResults.length}`);
-  }
+  // Filter by quality and sort into language groups using video-filename-parser
+  const { sortedResults, groupInfo } = filterAndSortStreams(
+    finalNzbResults,
+    sortMethod,
+    preferredLanguage,
+    qualityFilter
+  );
 
-  // Sort results based on user preference
-  const { sortedResults, groupInfo } = sortStreams(filteredResults, sortMethod, preferredLanguage);
-  console.log(`[SORT] Applied sorting method: ${sortMethod}`);
+  console.log(`[FILTER+SORT] Applied quality filter: ${qualityFilter}, sort method: ${sortMethod}`);
   if (groupInfo) {
-    console.log(`[SORT] Language grouping: ${groupInfo.preferredCount} ${groupInfo.preferredLanguage}/MULTi, ${groupInfo.completeBlurayCount} Complete Bluray, ${groupInfo.otherCount} others`);
+    console.log(`[GROUPS] Preferred: ${groupInfo.preferredCount}, English: ${groupInfo.englishCount}, Other: ${groupInfo.otherCount}`);
+  } else {
+    console.log(`[SORT] No language grouping (sorted ${sortedResults.length} items)`);
   }
 
   // Limit results if maxResults is set
@@ -223,15 +221,14 @@ async function handleStreamRequest(args) {
 
   let streams = limitedResults
     .map((result) => {
+      // Get parsed data from result (added by filterAndSortStreams)
+      const parsed = result.parsed || {};
+
+      // Format size
       const sizeInGB = result.size ? (result.size / 1073741824).toFixed(2) : null;
       const sizeString = sizeInGB ? `${sizeInGB} GB` : 'Size Unknown';
 
-      const quality = extractQuality(result.title) || '';
-      const detectedLanguage = detectLanguage(result.title);
-
-      // Add star indicator for preferred language or MULTi
-      const languageIndicator = (preferredLanguage !== 'No Preference' && (detectedLanguage === preferredLanguage || detectedLanguage === 'MULTi')) ? '⭐ ' : '';
-
+      // Create stream URL with parameters
       const baseParams = new URLSearchParams({
         indexerId: String(result.indexerId),
         type,
@@ -250,16 +247,15 @@ async function handleStreamRequest(args) {
         bingeGroup: 'usenetstreamer'
       };
 
-      // Build title with language indicator, quality, size, and language info
-      const languageLabel = detectedLanguage ? ` [${detectedLanguage}]` : '';
-      const titleParts = [
-        languageIndicator + result.title,
-        ['📰 NZB', quality, sizeString].filter(Boolean).join(' • ') + languageLabel,
-        result.indexer
-      ];
+      // Format clean title using parser data
+      // Format: "{Resolution} | {Audio Codec} | {Release Group}"
+      const formattedTitle = formatStremioTitle(parsed);
+
+      // Add size and indexer info on second line
+      const secondLine = `📰 ${sizeString} • ${result.indexer}`;
 
       return {
-        title: titleParts.join('\n'),
+        title: `${formattedTitle}\n${secondLine}`,
         name,
         url: streamUrl,
         behaviorHints
@@ -272,11 +268,11 @@ async function handleStreamRequest(args) {
     const separators = [];
     let offset = 0;
 
-    // Group 1 separator: Preferred Language / MULTi
+    // Group 1 separator: Preferred Language
     if (groupInfo.preferredCount > 0) {
       const preferredSeparator = {
         name: 'UsenetStreamer',
-        title: `━━━━━ ⭐ ${groupInfo.preferredLanguage} / MULTi (${groupInfo.preferredCount}) ━━━━━`,
+        title: `━━━━━ ⭐ ${groupInfo.preferredLanguage} (${groupInfo.preferredCount}) ━━━━━`,
         url: 'https://stremio.com',
         behaviorHints: {
           notWebReady: true
@@ -286,29 +282,24 @@ async function handleStreamRequest(args) {
       offset++;
     }
 
-    // Group 2 separator: Complete Bluray (may contain preferred language)
-    if (groupInfo.completeBlurayCount > 0) {
-      const completeBlurayIndex = groupInfo.group2SeparatorIndex + offset;
-      const completeBlurayTitle = `━━━━━ 💿 Complete Bluray - May contain ${groupInfo.preferredLanguage} (${groupInfo.completeBlurayCount}) ━━━━━`;
-      const completeBlurayTitleShort = `━━━━━ 💿 Complete Bluray (${groupInfo.completeBlurayCount}) ━━━━━`;
-
-      const completeBlurayLabel = groupInfo.preferredCount > 0 ? completeBlurayTitle : completeBlurayTitleShort;
-
-      const completeBluraySeparator = {
+    // Group 2 separator: English
+    if (groupInfo.englishCount > 0) {
+      const englishIndex = groupInfo.group1End + offset;
+      const englishSeparator = {
         name: 'UsenetStreamer',
-        title: completeBlurayLabel,
+        title: `━━━━━ 🇬🇧 English (${groupInfo.englishCount}) ━━━━━`,
         url: 'https://stremio.com',
         behaviorHints: {
           notWebReady: true
         }
       };
-      separators.push({ index: completeBlurayIndex, separator: completeBluraySeparator });
+      separators.push({ index: englishIndex, separator: englishSeparator });
       offset++;
     }
 
     // Group 3 separator: Other Languages
     if (groupInfo.otherCount > 0) {
-      const otherIndex = groupInfo.group3SeparatorIndex + offset;
+      const otherIndex = groupInfo.group2End + offset;
       const otherSeparator = {
         name: 'UsenetStreamer',
         title: `━━━━━ 🌍 Other Languages (${groupInfo.otherCount}) ━━━━━`,
