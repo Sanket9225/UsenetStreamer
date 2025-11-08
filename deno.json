@@ -1,0 +1,15 @@
+{
+  "tasks": {
+    "dev": "deno run --allow-env --allow-net --allow-read --env-file=.env main.ts"
+  },
+  "imports": {
+    "@std/encoding": "jsr:@std/encoding@^1.0.10",
+    "@std/path": "jsr:@std/path@^1.1.2",
+    "@std/streams": "jsr:@std/streams@^1.0.13",
+    "@takker/md5": "jsr:@takker/md5@^0.1.0",
+    "cors": "npm:cors@^2.8.5",
+    "express": "npm:express@^5.1.0",
+    "ioredis": "npm:ioredis@^5.8.2",
+    "webdav": "npm:webdav@^5.8.0"
+  }
+}

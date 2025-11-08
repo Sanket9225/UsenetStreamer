@@ -1,0 +1,25 @@
+{
+  "name": "Deno Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "denoland.vscode-deno",
+        "esbenp.prettier-vscode",
+        "Redis.redis-for-vscode"
+      ],
+      "settings": {
+        "deno.enable": true,
+        "deno.unstable": true,
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "denoland.vscode-deno"
+      }
+    }
+  },
+  "forwardPorts": [
+    8000
+  ],
+  "workspaceFolder": "/app"
+}

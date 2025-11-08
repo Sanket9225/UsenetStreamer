@@ -29,15 +29,8 @@ services:
         condition: service_healthy
     ports:
       - "7000:7000"
-    environment:
-      PROWLARR_URL: "http://prowlarr:9696"
-      PROWLARR_API_KEY: "key"
-      NZBDAV_URL: "http://nzbdav:3000"
-      NZBDAV_API_KEY: "key"
-      NZBDAV_WEBDAV_URL: "http://nzbdav:3000"
-      NZBDAV_WEBDAV_USER: "user"
-      NZBDAV_WEBDAV_PASS: "password"
-      ADDON_BASE_URL: "https://usenet-streamer.inter.domain.rocks"
+    env_file:
+      - .env
     networks:
       - media
 

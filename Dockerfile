@@ -1,18 +1,10 @@
-# Use a lightweight Node.js image
-FROM node:20-alpine
+FROM denoland/deno:alpine
 
-# Set working directory inside container
-WORKDIR /usr/src/app
+WORKDIR /app
 
-# Install dependencies
-COPY package*.json ./
-RUN npm ci --omit=dev
-
-# Copy application code
 COPY . .
 
-# Expose the port the addon listens on
+RUN deno cache main.ts
 EXPOSE 7000
 
-# Run the server
-CMD ["npm", "start"]
+CMD ["deno", "run", "--allow-net", "--allow-env", "--allow-read", "main.ts"]
