@@ -41,6 +41,9 @@ async function handleStreamRequest(args) {
   const { type, id, config } = args;
   const meta = args.extra || {};
 
+  console.log(`[DEBUG] Full args object:`, JSON.stringify(args, null, 2));
+  console.log(`[DEBUG] args.config:`, config);
+
   // Extract user preferences from config
   const userConfig = config || {};
   const preferredLanguage = userConfig.preferredLanguage || 'No Preference';
@@ -49,6 +52,7 @@ async function handleStreamRequest(args) {
   const maxResults = parseInt(userConfig.maxResults, 10) || 0;
 
   console.log(`[REQUEST] Received request for ${type} ID: ${id}`);
+  console.log(`[CONFIG] Raw config from SDK:`, config);
   console.log(`[CONFIG] User preferences:`, { preferredLanguage, sortMethod, qualityFilter, maxResults });
 
   const primaryId = id.split(':')[0];

@@ -112,8 +112,56 @@ if (MANIFEST_AUTH_PASSWORD) {
 // Apply CORS to all SDK stream routes
 app.use('/stream', setCorsHeaders);
 
-// Mount the addon interface routes for stream endpoints
-// The SDK's getRouter handles stream endpoints
+// Custom stream route handlers to inject config before SDK processes it
+// This ensures the SDK's handler receives the decoded config
+const { decodeUserData } = require('./src/middleware/auth');
+
+// Stream handler WITH userData (configured addon)
+app.get('/:userData/stream/:type/:id.json', async (req, res, next) => {
+  try {
+    console.log(`[BRIDGE] Intercepting stream request with userData`);
+
+    // Decode userData to get config
+    const config = decodeUserData(req.params.userData);
+    console.log(`[BRIDGE] Decoded config:`, config);
+
+    // Call the addon's stream handler directly with config
+    const result = await handleStreamRequest({
+      type: req.params.type,
+      id: req.params.id,
+      config: config || {},
+      extra: req.query || {}
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('[BRIDGE ERROR]', error);
+    res.json({ streams: [] });
+  }
+});
+
+// Stream handler WITHOUT userData (unconfigured addon - uses defaults)
+app.get('/stream/:type/:id.json', async (req, res, next) => {
+  try {
+    console.log(`[BRIDGE] Intercepting stream request without userData (using defaults)`);
+
+    // Call the addon's stream handler with empty config (will use defaults)
+    const result = await handleStreamRequest({
+      type: req.params.type,
+      id: req.params.id,
+      config: {},
+      extra: req.query || {}
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('[BRIDGE ERROR]', error);
+    res.json({ streams: [] });
+  }
+});
+
+// Mount the addon interface routes (mostly for other endpoints)
+// Our custom handlers above take precedence for stream endpoints
 const addonRouter = getRouter(addonInterface);
 app.use(addonRouter);
 
