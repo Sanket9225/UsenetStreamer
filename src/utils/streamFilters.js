@@ -454,12 +454,12 @@ function formatStremioTitle(parsed, size = null, indexer = '') {
   }
 
   // LINE 1: Resolution & Audio
-  const line1Parts = ['🎬'];
+  const line1Parts = [];
 
   // Resolution
   const resolution = extractQuality(parsed) || parsed.resolution;
   if (resolution) {
-    line1Parts.push(resolution);
+    line1Parts.push(`🎬 ${resolution}`);
   }
 
   // Audio codec with Atmos and channels
@@ -476,7 +476,7 @@ function formatStremioTitle(parsed, size = null, indexer = '') {
       audio += ' ' + parsed.audioChannels;
     }
 
-    line1Parts.push(audio);
+    line1Parts.push(`🔊 ${audio}`);
   }
 
   const line1 = line1Parts.join(' • ');
