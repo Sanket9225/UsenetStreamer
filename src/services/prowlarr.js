@@ -96,7 +96,7 @@ async function searchProwlarr({ metaIds, type, movieTitle, releaseYear, seasonNu
   }
 
   const baseSearchParams = {
-    limit: '25',
+    limit: '100',
     offset: '0',
     indexerIds: '-1'
   };
