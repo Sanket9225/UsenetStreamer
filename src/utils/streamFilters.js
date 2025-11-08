@@ -118,24 +118,39 @@ function matchesQualityFilter(quality, filter) {
  * Returns: 'preferred', 'english', or 'other'
  * @param {object} parsed - Parsed release data
  * @param {string} preferredLanguage - User's preferred language
+ * @param {string} title - Original release title for additional detection
  * @returns {string} Language group ('preferred', 'english', 'other')
  */
-function detectLanguageGroup(parsed, preferredLanguage) {
+function detectLanguageGroup(parsed, preferredLanguage, title = '') {
   if (!parsed || !preferredLanguage || preferredLanguage === 'No Preference') {
     return 'english'; // Default group when no preference
-  }
-
-  // Check if it's a MULTi release
-  if (parsed.multi === true) {
-    return 'preferred'; // MULTi releases contain preferred language
   }
 
   // Get languages from parser
   const languages = parsed.languages || [];
 
-  // If no languages detected, assume English
-  if (languages.length === 0) {
-    return 'english';
+  // Check if it's a MULTi release
+  if (parsed.multi === true) {
+    // For MULTi releases, check if preferred language is actually in the languages array
+    const hasPreferredInMulti = languages.some(lang =>
+      lang.toLowerCase() === preferredLanguage.toLowerCase()
+    );
+
+    if (hasPreferredInMulti) {
+      return 'preferred';
+    }
+
+    // If MULTi but doesn't contain preferred language, check for English
+    const hasEnglishInMulti = languages.some(lang =>
+      lang.toLowerCase() === 'english'
+    );
+
+    if (hasEnglishInMulti) {
+      return 'english';
+    }
+
+    // MULTi but neither preferred nor English
+    return 'other';
   }
 
   // Check if preferred language is in the languages array
@@ -153,6 +168,43 @@ function detectLanguageGroup(parsed, preferredLanguage) {
   );
 
   if (hasEnglish) {
+    return 'english';
+  }
+
+  // If no languages detected, check title for language indicators
+  if (languages.length === 0) {
+    const titleUpper = title.toUpperCase();
+
+    // Check for common language tags in title
+    const languageTags = {
+      'GERMAN': 'german',
+      'FRENCH': 'french',
+      'SPANISH': 'spanish',
+      'ITALIAN': 'italian',
+      'PORTUGUESE': 'portuguese',
+      'RUSSIAN': 'russian',
+      'JAPANESE': 'japanese',
+      'KOREAN': 'korean',
+      'CHINESE': 'chinese',
+      'ARABIC': 'arabic',
+      'HINDI': 'hindi',
+      'DUTCH': 'dutch',
+      'POLISH': 'polish',
+      'TURKISH': 'turkish'
+    };
+
+    for (const [tag, lang] of Object.entries(languageTags)) {
+      if (titleUpper.includes(tag)) {
+        // Found a language tag in title
+        if (lang.toLowerCase() === preferredLanguage.toLowerCase()) {
+          return 'preferred';
+        }
+        // It's some other language
+        return 'other';
+      }
+    }
+
+    // No language indicators found, assume English
     return 'english';
   }
 
@@ -234,29 +286,65 @@ function sortWithinGroup(items, sortMethod) {
  * @returns {object} Object with sortedResults array and groupInfo
  */
 function filterAndSortStreams(results, sortMethod, preferredLanguage, qualityFilter) {
+  console.log(`\n[FILTER] ===== Starting filtering and sorting for ${results.length} results =====`);
+  console.log(`[FILTER] Quality filter: ${qualityFilter}, Sort method: ${sortMethod}, Preferred language: ${preferredLanguage}`);
+
   // Parse all releases and pair with original results
   const parsedItems = results.map(result => ({
     result,
     parsed: parseRelease(result.title)
   }));
 
+  console.log(`[FILTER] Parsed ${parsedItems.length} releases`);
+
   // Filter by quality
   let filteredItems = parsedItems;
+  let filteredCount = 0;
+
   if (qualityFilter && qualityFilter !== 'All') {
+    console.log(`[FILTER] Applying quality filter: ${qualityFilter}`);
+
     filteredItems = parsedItems.filter(item => {
       const quality = extractQuality(item.parsed);
-      return matchesQualityFilter(quality, qualityFilter);
+      const matches = matchesQualityFilter(quality, qualityFilter);
+
+      if (!matches) {
+        filteredCount++;
+        console.log(`[FILTER] ❌ FILTERED OUT (quality: ${quality || 'unknown'}): ${item.result.title}`);
+      }
+
+      return matches;
     });
+
+    console.log(`[FILTER] Quality filter results: ${filteredItems.length} passed, ${filteredCount} filtered out`);
+  } else {
+    console.log(`[FILTER] No quality filter applied (showing all qualities)`);
   }
 
   // If no preferred language, just sort everything as one group
   if (!preferredLanguage || preferredLanguage === 'No Preference') {
+    console.log(`[FILTER] No preferred language - sorting all items as single group`);
     const sorted = sortWithinGroup(filteredItems, sortMethod);
+
+    // Log sorted results
+    console.log(`[SORT] Sorted ${sorted.length} items by ${sortMethod}:`);
+    sorted.slice(0, 10).forEach((item, idx) => {
+      const quality = extractQuality(item.parsed) || 'unknown';
+      const audioRank = getAudioQualityRank(item.parsed.audioCodec);
+      const size = item.result.size ? (item.result.size / 1073741824).toFixed(2) + ' GB' : 'unknown';
+      console.log(`[SORT]   ${idx + 1}. ${quality} | Audio rank: ${audioRank} | Size: ${size} | ${item.result.title}`);
+    });
+    if (sorted.length > 10) {
+      console.log(`[SORT]   ... and ${sorted.length - 10} more items`);
+    }
+
     return {
       sortedResults: sorted.map(item => ({ ...item.result, parsed: item.parsed })),
       groupInfo: null
     };
   }
+
+  console.log(`\n[LANGUAGE] ===== Starting language grouping (preferred: ${preferredLanguage}) =====`);
 
   // Split into THREE groups
   const preferredGroup = [];
@@ -264,21 +352,63 @@ function filterAndSortStreams(results, sortMethod, preferredLanguage, qualityFil
   const otherGroup = [];
 
   for (const item of filteredItems) {
-    const langGroup = detectLanguageGroup(item.parsed, preferredLanguage);
+    const langGroup = detectLanguageGroup(item.parsed, preferredLanguage, item.result.title);
+    const detectedLangs = item.parsed.languages || [];
+    const langStr = detectedLangs.length > 0 ? detectedLangs.join(', ') : 'none detected';
 
     if (langGroup === 'preferred') {
       preferredGroup.push(item);
+      console.log(`[LANGUAGE] ⭐ PREFERRED: [${langStr}] ${item.result.title}`);
     } else if (langGroup === 'english') {
       englishGroup.push(item);
+      console.log(`[LANGUAGE] 🇬🇧 ENGLISH: [${langStr}] ${item.result.title}`);
     } else {
       otherGroup.push(item);
+      console.log(`[LANGUAGE] 🌍 OTHER: [${langStr}] ${item.result.title}`);
     }
   }
 
+  console.log(`\n[LANGUAGE] Group counts: Preferred=${preferredGroup.length}, English=${englishGroup.length}, Other=${otherGroup.length}`);
+
   // Sort each group independently
+  console.log(`\n[SORT] ===== Sorting within language groups (method: ${sortMethod}) =====`);
+
+  console.log(`[SORT] Sorting ${preferredGroup.length} preferred language items...`);
   const sortedPreferred = sortWithinGroup(preferredGroup, sortMethod);
+
+  console.log(`[SORT] Sorting ${englishGroup.length} English items...`);
   const sortedEnglish = sortWithinGroup(englishGroup, sortMethod);
+
+  console.log(`[SORT] Sorting ${otherGroup.length} other language items...`);
   const sortedOther = sortWithinGroup(otherGroup, sortMethod);
+
+  // Log top items from each group
+  if (sortedPreferred.length > 0) {
+    console.log(`\n[SORT] Top Preferred Language items (${sortMethod}):`);
+    sortedPreferred.slice(0, 5).forEach((item, idx) => {
+      const quality = extractQuality(item.parsed) || 'unknown';
+      const audioRank = getAudioQualityRank(item.parsed.audioCodec);
+      console.log(`[SORT]   ${idx + 1}. ${quality} | Audio rank: ${audioRank} | ${item.result.title}`);
+    });
+  }
+
+  if (sortedEnglish.length > 0) {
+    console.log(`\n[SORT] Top English items (${sortMethod}):`);
+    sortedEnglish.slice(0, 5).forEach((item, idx) => {
+      const quality = extractQuality(item.parsed) || 'unknown';
+      const audioRank = getAudioQualityRank(item.parsed.audioCodec);
+      console.log(`[SORT]   ${idx + 1}. ${quality} | Audio rank: ${audioRank} | ${item.result.title}`);
+    });
+  }
+
+  if (sortedOther.length > 0) {
+    console.log(`\n[SORT] Top Other Language items (${sortMethod}):`);
+    sortedOther.slice(0, 5).forEach((item, idx) => {
+      const quality = extractQuality(item.parsed) || 'unknown';
+      const audioRank = getAudioQualityRank(item.parsed.audioCodec);
+      console.log(`[SORT]   ${idx + 1}. ${quality} | Audio rank: ${audioRank} | ${item.result.title}`);
+    });
+  }
 
   // Combine groups: preferred first, then english, then other
   const allSorted = [...sortedPreferred, ...sortedEnglish, ...sortedOther];
@@ -286,6 +416,9 @@ function filterAndSortStreams(results, sortMethod, preferredLanguage, qualityFil
   // Calculate separator indices for visual grouping
   const group1End = sortedPreferred.length;
   const group2End = group1End + sortedEnglish.length;
+
+  console.log(`\n[FILTER+SORT] ===== Complete: ${allSorted.length} total items =====`);
+  console.log(`[FILTER+SORT] Order: ${sortedPreferred.length} Preferred → ${sortedEnglish.length} English → ${sortedOther.length} Other\n`);
 
   // Return sorted results with parsed data included
   return {

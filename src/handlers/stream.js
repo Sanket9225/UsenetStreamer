@@ -263,6 +263,8 @@ async function handleStreamRequest(args) {
     })
     .filter(Boolean);
 
+  console.log(`[STREMIO] Created ${streams.length} stream objects (before separators)`);
+
   // Insert visual separators between language groups
   if (groupInfo) {
     const separators = [];
@@ -320,7 +322,7 @@ async function handleStreamRequest(args) {
     console.log(`[STREMIO] Added ${separators.length} language group separators`);
   }
 
-  console.log(`[STREMIO] Returning ${streams.length} NZB streams`);
+  console.log(`[STREMIO] ===== Returning ${streams.length} total items to Stremio =====\n`);
 
   return { streams };
 }

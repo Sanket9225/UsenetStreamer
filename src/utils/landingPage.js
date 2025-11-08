@@ -193,7 +193,7 @@ function generateLandingPage(manifest) {
           if (input.type === 'checkbox') {
             config[key] = input.checked;
           } else if (input.type === 'number') {
-            config[key] = parseFloat(value);
+            config[key] = parseInt(value, 10) || 0;
           } else {
             config[key] = value;
           }

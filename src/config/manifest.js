@@ -93,7 +93,7 @@ function getManifestConfig(requiresConfig = false) {
         key: 'maxResults',
         type: 'number',
         title: 'Max Results (0 = unlimited)',
-        default: '0',
+        default: 0,
         required: false
       }
     ];
