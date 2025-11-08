@@ -435,73 +435,159 @@ function filterAndSortStreams(results, sortMethod, preferredLanguage, qualityFil
 }
 
 /**
- * Format title for Stremio display
- * Clean, readable format: "{Resolution} | {Audio Codec} | {Release Group}"
+ * Format title for Stremio display - 3-line format with emojis
+ * Line 1: 🎬 {Resolution} • {Audio Codec} {Atmos} {Channels}
+ * Line 2: {Emoji} {HDR/DV} • {Source} • {Release Group}
+ * Line 3: 💾 {Size} • 📡 {Indexer}
  * @param {object} parsed - Parsed release data
- * @returns {string} Formatted title
+ * @param {number} size - File size in bytes
+ * @param {string} indexer - Indexer name
+ * @returns {object} Object with line1, line2, line3
  */
-function formatStremioTitle(parsed) {
-  if (!parsed) return 'Unknown';
+function formatStremioTitle(parsed, size = null, indexer = '') {
+  if (!parsed) {
+    return {
+      line1: '🎬 Unknown',
+      line2: '',
+      line3: formatSizeAndIndexer(size, indexer)
+    };
+  }
 
-  const parts = [];
+  // LINE 1: Resolution & Audio
+  const line1Parts = ['🎬'];
 
   // Resolution
   const resolution = extractQuality(parsed) || parsed.resolution;
   if (resolution) {
-    // Add REMUX tag if present
-    const remux = parsed.edition?.remux ? ' REMUX' : '';
-    parts.push(resolution + remux);
+    line1Parts.push(resolution);
   }
 
-  // Audio codec with channels
+  // Audio codec with Atmos and channels
   if (parsed.audioCodec) {
-    let audio = parsed.audioCodec;
+    let audio = simplifyAudioCodec(parsed.audioCodec);
 
-    // Simplify codec names
-    if (audio.includes('Dolby TrueHD') || audio.includes('TrueHD')) {
-      audio = 'TrueHD';
-    } else if (audio.includes('DTS-HD')) {
-      audio = 'DTS-HD MA';
-    } else if (audio.includes('Dolby Digital Plus') || audio.includes('EAC3') || audio.includes('E-AC-3') || audio.includes('DD+') || audio.includes('DDP')) {
-      audio = 'EAC3';
-    } else if (audio.includes('Dolby Digital') || audio.includes('AC3') || audio.includes(' DD')) {
-      audio = 'AC3';
-    } else if (audio.includes('DTS')) {
-      audio = 'DTS';
-    } else if (audio.includes('AAC')) {
-      audio = 'AAC';
+    // Check for Atmos
+    if (parsed.audioCodec.toUpperCase().includes('ATMOS')) {
+      audio += ' Atmos';
     }
 
+    // Add channels
     if (parsed.audioChannels) {
       audio += ' ' + parsed.audioChannels;
     }
 
-    parts.push(audio);
+    line1Parts.push(audio);
+  }
+
+  const line1 = line1Parts.join(' • ');
+
+  // LINE 2: HDR/DV, Source, REMUX, MULTi, Release Group
+  const line2Parts = [];
+  const hdrFlags = [];
+
+  // HDR and Dolby Vision
+  if (parsed.edition?.dolbyVision) hdrFlags.push('DV');
+  if (parsed.edition?.hdr) {
+    const hdrType = typeof parsed.edition.hdr === 'string' ? parsed.edition.hdr : 'HDR';
+    hdrFlags.push(hdrType);
+  }
+
+  // Source with emoji
+  let sourceEmoji = '';
+  let sourceName = '';
+
+  if (parsed.sources && parsed.sources.length > 0) {
+    const source = parsed.sources[0];
+    if (source === 'BLURAY') {
+      sourceEmoji = '📀';
+      sourceName = 'BluRay';
+    } else if (source === 'WEBDL' || source === 'WEB') {
+      sourceEmoji = '🌐';
+      sourceName = source === 'WEBDL' ? 'WEB-DL' : 'WEB';
+    } else {
+      sourceEmoji = '📺';
+      sourceName = source;
+    }
+
+    // Add REMUX if present
+    if (parsed.edition?.remux) {
+      sourceName += ' REMUX';
+    }
+  }
+
+  // Start with emoji
+  if (hdrFlags.length > 0) {
+    line2Parts.push('✨ ' + hdrFlags.join(' '));
+    if (sourceName) {
+      line2Parts.push(sourceName);
+    }
+  } else if (sourceName) {
+    line2Parts.push(sourceEmoji + ' ' + sourceName);
+  }
+
+  // MULTi audio indicator
+  if (parsed.multi === true) {
+    line2Parts.push('🌍 MULTi');
   }
 
   // Release group
   if (parsed.group) {
-    parts.push(parsed.group);
+    line2Parts.push(parsed.group);
   }
 
-  // Add special flags (HDR, DV, source)
-  const flags = [];
-  if (parsed.edition?.hdr) flags.push('HDR');
-  if (parsed.edition?.dolbyVision) flags.push('DV');
+  const line2 = line2Parts.length > 0 ? line2Parts.join(' • ') : '';
 
-  // Source info (WEB-DL, BluRay, etc.)
-  if (parsed.sources && parsed.sources.length > 0) {
-    const source = parsed.sources[0];
-    if (source === 'WEBDL') flags.push('WEB-DL');
-    else if (source === 'BLURAY') flags.push('BluRay');
-    else flags.push(source);
+  // LINE 3: Size and Indexer
+  const line3 = formatSizeAndIndexer(size, indexer);
+
+  return { line1, line2, line3 };
+}
+
+/**
+ * Simplify audio codec name
+ * @param {string} audioCodec - Raw audio codec from parser
+ * @returns {string} Simplified codec name
+ */
+function simplifyAudioCodec(audioCodec) {
+  if (!audioCodec) return '';
+
+  const codec = audioCodec.toUpperCase();
+
+  if (codec.includes('TRUEHD') || codec.includes('TRUE-HD')) return 'TrueHD';
+  if (codec.includes('DTS-HD')) return 'DTS-HD MA';
+  if (codec.includes('EAC3') || codec.includes('E-AC-3') || codec.includes('DD+') || codec.includes('DDP')) return 'EAC3';
+  if (codec.includes('AC3') || codec.includes('DD ') || codec === 'DD') return 'AC3';
+  if (codec.includes('DTS')) return 'DTS';
+  if (codec.includes('AAC')) return 'AAC';
+  if (codec.includes('OPUS')) return 'Opus';
+  if (codec.includes('FLAC')) return 'FLAC';
+
+  return audioCodec;
+}
+
+/**
+ * Format size and indexer for line 3
+ * @param {number} size - File size in bytes
+ * @param {string} indexer - Indexer name
+ * @returns {string} Formatted line 3
+ */
+function formatSizeAndIndexer(size, indexer) {
+  const parts = [];
+
+  // Size
+  if (size) {
+    const sizeInGB = (size / 1073741824).toFixed(2);
+    parts.push(`💾 ${sizeInGB} GB`);
+  } else {
+    parts.push('💾 Size Unknown');
   }
 
-  if (flags.length > 0) {
-    parts.push(flags.join(' '));
+  // Indexer
+  if (indexer) {
+    parts.push(`📡 ${indexer}`);
   }
 
-  return parts.join(' | ');
+  return parts.join(' • ');
 }
 
 module.exports = {

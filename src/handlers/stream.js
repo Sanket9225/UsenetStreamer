@@ -228,10 +228,6 @@ async function handleStreamRequest(args) {
       // Get parsed data from result (added by filterAndSortStreams)
       const parsed = result.parsed || {};
 
-      // Format size
-      const sizeInGB = result.size ? (result.size / 1073741824).toFixed(2) : null;
-      const sizeString = sizeInGB ? `${sizeInGB} GB` : 'Size Unknown';
-
       // Create stream URL with parameters
       const baseParams = new URLSearchParams({
         indexerId: String(result.indexerId),
@@ -251,15 +247,18 @@ async function handleStreamRequest(args) {
         bingeGroup: 'usenetstreamer'
       };
 
-      // Format clean title using parser data
-      // Format: "{Resolution} | {Audio Codec} | {Release Group}"
-      const formattedTitle = formatStremioTitle(parsed);
+      // Format clean 3-line title using parser data
+      // Line 1: 🎬 {Resolution} • {Audio Codec} {Atmos} {Channels}
+      // Line 2: {Emoji} {HDR/DV} • {Source} • {Release Group}
+      // Line 3: 💾 {Size} • 📡 {Indexer}
+      const { line1, line2, line3 } = formatStremioTitle(parsed, result.size, result.indexer);
 
-      // Add size and indexer info on second line
-      const secondLine = `📰 ${sizeString} • ${result.indexer}`;
+      // Combine lines with newlines, omit empty lines
+      const titleLines = [line1, line2, line3].filter(line => line && line.trim());
+      const formattedTitle = titleLines.join('\n');
 
       return {
-        title: `${formattedTitle}\n${secondLine}`,
+        title: formattedTitle,
         name,
         url: streamUrl,
         behaviorHints
