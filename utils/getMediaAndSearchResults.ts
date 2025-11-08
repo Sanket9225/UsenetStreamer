@@ -18,6 +18,10 @@ interface CinemetaData {
 interface ProwlarrResult {
     guid: string | null;
     title: string;
+    downloadUrl: string;
+    size: number;
+    fileName?: string;
+    category?: string;
 }
 
 const CINEMETA_CACHE_TTL = 86400 * 7;

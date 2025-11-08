@@ -1,21 +1,35 @@
 /*
 Credit goes to panteLx for their work decoding and implementing proper header handling.
 https://github.com/panteLx/UsenetStreamer
+
+Tried my best not to use node stream... it's just not stable enough for long streams.
 */
 
-import { VIDEO_MIME_MAP, NZBDAV_URL, NZBDAV_WEBDAV_USER, NZBDAV_WEBDAV_PASS, } from "../../env.ts";
+import { Readable } from "node:stream";
 import { extname } from "@std/path/posix";
 import { Request, Response } from "express";
+import {
+    VIDEO_MIME_MAP,
+    NZBDAV_URL,
+    NZBDAV_WEBDAV_USER,
+    NZBDAV_WEBDAV_PASS,
+} from "../../env.ts";
 
 function inferMimeType(fileName: string) {
-    if (!fileName) return "application/octet-stream";
     const ext = extname(fileName.toLowerCase());
     return VIDEO_MIME_MAP.get(ext) || "application/octet-stream";
 }
 
-function sanitizeFileName(fileName: string) {
-    return fileName.replace(/[\\/:*?"<>|]+/g, "_") || "stream";
+function sanitizeFileName(file: string) {
+    return file.replace(/[\\/:*?"<>|]+/g, "_") || "stream";
 }
+
+// ─── Disable all timeouts to avoid 1hr stream death ───
+const zeroTimeout = (obj: Request | Response) => {
+    if (!obj) return;
+    if (typeof obj.setTimeout === "function") try { obj.setTimeout(0); } catch { }
+    if (obj.socket && typeof obj.socket.setTimeout === "function") try { obj.socket.setTimeout(0); } catch { }
+};
 
 export async function proxyNzbdavStream(
     req: Request,
@@ -23,141 +37,97 @@ export async function proxyNzbdavStream(
     viewPath: string,
     fileNameHint = ""
 ) {
-    const NZBDAV_SUPPORTED_METHODS = new Set(["GET", "HEAD"]);
-    const method = (req.method || "GET").toUpperCase();
 
-    if (!NZBDAV_SUPPORTED_METHODS.has(method)) {
-        res.status(405).send("Method Not Allowed");
+    zeroTimeout(res);
+    zeroTimeout(req);
+
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("Keep-Alive", "timeout=0");
+
+    const method = req.method.toUpperCase();
+    if (!["GET", "HEAD"].includes(method)) {
+        res.status(405).end("Method Not Allowed");
         return;
     }
 
     const emulateHead = method === "HEAD";
-    const proxiedMethod = emulateHead ? "GET" : method;
+    const upstreamMethod = emulateHead ? "GET" : method;
 
-    // Normalize and encode path
-    const normalizedPath = viewPath.replace(/^\/+/, "");
-    const encodedPath = normalizedPath.split("/").map(encodeURIComponent).join("/");
-    const webdavBase = NZBDAV_URL.replace(/\/+$/, "");
-    const targetUrl = `${webdavBase}/${encodedPath}`;
+    const cleanPath = viewPath.replace(/^\/+/, "");
+    const encodedPath = cleanPath.split("/").map(encodeURIComponent).join("/");
+    const base = NZBDAV_URL.replace(/\/+$/, "");
+    const targetUrl = `${base}/${encodedPath}`;
 
-    // File name
-    let derivedFileName = fileNameHint.trim() || normalizedPath.split("/").pop() || "stream";
-    derivedFileName = sanitizeFileName(decodeURIComponent(derivedFileName));
+    let fileName = fileNameHint || cleanPath.split("/").pop() || "stream";
+    fileName = sanitizeFileName(decodeURIComponent(fileName));
 
-    // Upstream headers
-    const headers: Record<string, string> = {};
-    const range = req.headers.range || req.headers["Range"];
-    const ifRange = req.headers["if-range"] || req.headers["If-Range"];
-    const acceptEncoding = req.headers["accept-encoding"] || req.headers["Accept-Encoding"];
-    if (range) headers.Range = range;
-    if (ifRange) headers["If-Range"] = ifRange;
-    headers["Accept-Encoding"] = acceptEncoding || "identity";
+    const headers: Record<string, string> = {
+        "Connection": "keep-alive",
+        "Accept-Encoding": req.headers["accept-encoding"] || "identity",
+    };
+
+    if (req.headers.range) headers["Range"] = req.headers.range;
+    if (req.headers["if-range"]) headers["If-Range"] = req.headers["if-range"];
 
     if (emulateHead && !headers.Range) {
         headers.Range = "bytes=0-0";
     }
 
     if (NZBDAV_WEBDAV_USER && NZBDAV_WEBDAV_PASS) {
-        const token = btoa(`${NZBDAV_WEBDAV_USER}:${NZBDAV_WEBDAV_PASS}`);
+        const token = btoa(
+            `${NZBDAV_WEBDAV_USER}:${NZBDAV_WEBDAV_PASS}`,
+        );
         headers.Authorization = `Basic ${token}`;
     }
 
-    console.log(`[NZBDAV] Proxying ${proxiedMethod} ${targetUrl}`);
-
     const ac = new AbortController();
-    const signal = ac.signal;
+    res.on("close", () => ac.abort());
 
-    let clientAborted = false;
-    res.on("close", () => {
-        if (!clientAborted) {
-            clientAborted = true;
-            console.warn("[NZBDAV] Stream aborted by client");
-            ac.abort();
-        }
-    });
+    const upstream = await fetch(targetUrl, {
+        method: upstreamMethod,
+        headers,
+        signal: ac.signal,
+    }).catch(() => null);
 
-    let upstream: Response;
-    try {
-        upstream = await fetch(targetUrl, { method: proxiedMethod, headers, signal });
-    } catch (err) {
-        console.error("[NZBDAV] Fetch failed:", err);
-        res.sendStatus(502);
+    if (!upstream || !upstream.ok || !upstream.body) {
+        res.sendStatus(upstream?.status || 502);
         return;
     }
 
-    if (!upstream.ok || !upstream.body) {
-        res.sendStatus(upstream.status);
-        return;
-    }
-
-    const headerBlocklist = new Set([
-        "transfer-encoding",
-        "www-authenticate",
-        "set-cookie",
-        "cookie",
-        "authorization",
-    ]);
-
-    upstream.headers.forEach((value: string, key: string) => {
-        if (!headerBlocklist.has(key.toLowerCase())) {
-            res.setHeader(key, value);
-        }
+    const block = new Set(["transfer-encoding", "set-cookie", "authorization"]);
+    upstream.headers.forEach((value, key) => {
+        if (!block.has(key.toLowerCase())) res.setHeader(key, value);
     });
 
-    if (!upstream.headers.get("content-disposition")) {
-        res.setHeader("Content-Disposition", `inline; filename="${derivedFileName}"`);
+    if (!res.getHeader("Content-Disposition")) {
+        res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
     }
+
     if (!res.getHeader("Content-Type") || res.getHeader("Content-Type") === "application/octet-stream") {
-        res.setHeader("Content-Type", inferMimeType(derivedFileName));
+        res.setHeader("Content-Type", inferMimeType(fileName));
     }
 
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Expose-Headers", "Content-Length,Content-Range,Content-Type");
+    res.setHeader(
+        "Access-Control-Expose-Headers",
+        "Content-Length,Content-Range,Content-Type",
+    );
 
-    const contentRange = upstream.headers.get("content-range");
-    if (contentRange) {
-        // Example: Content-Range: bytes 100-999/2000
-        const match = contentRange.match(/bytes (\d+)-(\d+)\/(\d+)/);
-        if (match) {
-            const start = parseInt(match[1], 10);
-            const end = parseInt(match[2], 10);
-            res.setHeader("Content-Length", String(end - start + 1));
-        }
+    const rangeHeader = upstream.headers.get("content-range");
+    const match = rangeHeader?.match(/bytes (\d+)-(\d+)\/(\d+|\*)/);
+    if (match && match[3] !== "*") {
+        const len = Number(match[2]) - Number(match[1]) + 1;
+        res.setHeader("Content-Length", String(len));
     }
 
     res.status(upstream.status === 206 ? 206 : 200);
 
     if (emulateHead) {
+        upstream.body.cancel();
         res.end();
         return;
     }
 
-    const writable = new WritableStream<Uint8Array>({
-        write(chunk) {
-            return new Promise<void>((resolve, reject) => {
-                if (!res.writableEnded) {
-                    res.write(chunk, (err: Error) => (err ? reject(err) : resolve()));
-                } else {
-                    reject(new Error("Client disconnected"));
-                }
-            });
-        },
-        close() {
-            res.end();
-        },
-        abort(err) {
-            // Already logged above, so avoid duplicate
-            if (!clientAborted) console.warn("[NZBDAV] Stream aborted:", err);
-            res.end();
-        },
-    });
-
-    try {
-        await upstream.body!.pipeTo(writable);
-    } catch (err: unknown) {
-        if (err.name !== "AbortError") {
-            console.error("[NZBDAV] Streaming error:", err);
-        }
-    }
+    Readable.fromWeb(upstream.body).pipe(res);
 }

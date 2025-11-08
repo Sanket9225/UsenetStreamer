@@ -1,4 +1,4 @@
-import express, { Request, Response, Next } from "express";
+import express, { Request, Response } from "express";
 import cors from "cors";
 import { join } from "@std/path/posix";
 import { getMediaAndSearchResults } from "./utils/getMediaAndSearchResults.ts";
@@ -6,21 +6,13 @@ import { getMediaAndSearchResults } from "./utils/getMediaAndSearchResults.ts";
 import { ADDON_BASE_URL, PORT, } from "./env.ts";
 import { md5 } from "./utils/md5Encoder.ts";
 import { streamNzbdavProxy } from "./lib/nzbDav/nzbDav.ts";
-import { setJsonValue } from "./utils/redis.ts";
+import { redis } from "./utils/redis.ts";
 
 import { streamFailureVideo } from "./lib/streamFailureVideo.ts"
 
 interface RequestedEpisode {
     season: number;
     episode: number;
-}
-
-interface ProwlarrResult {
-    downloadUrl: string;
-    title: string;
-    size: number;
-    fileName?: string;
-    category?: string;
 }
 
 const app = express();
@@ -67,46 +59,62 @@ app.get("/stream/:type/:imdbId", async (req: Request, res: Response) => {
     console.log(`imdbIdToUse: ${imdbIdToUse}, requestedEpisode: ${JSON.stringify(requestedEpisode)}`);
 
     try {
-        const response = await getMediaAndSearchResults(
-            type,
-            imdbIdToUse,
-            requestedEpisode
-        ) as unknown as { results: ProwlarrResult[] };
+        const { results } = await getMediaAndSearchResults(type, imdbIdToUse, requestedEpisode);
 
-        const { results } = response;
+        // Step 1: Check existing keys
+        const getPipeline = redis.pipeline();
+        results.forEach(r => {
+            const hash = md5(r.downloadUrl);
+            const streamKey = `streams:${hash}`;
+            getPipeline.call("JSON.GET", streamKey, "$");
+        });
+        const execResult = await getPipeline.exec() as any[] | null;
+        const existingResults = execResult ?? [];
 
-        const prowlarrKey = `prowlarr:${imdbIdToUse}${requestedEpisode ? `:S${requestedEpisode.season}E${requestedEpisode.episode}` : ""
-            }`;
-        await setJsonValue(prowlarrKey, "$", results, 60 * 60 * 24);
+        // Step 2: Prepare SET pipeline for new keys
+        const setPipeline = redis.pipeline();
+        const streams = results.map((r, idx) => {
+            const hash = md5(r.downloadUrl);
+            const streamKey = `streams:${hash}`;
+            const existingTuple = existingResults[idx];
+            const existingRaw = existingTuple && !existingTuple[0] ? existingTuple[1] : null;
 
-        // Pre-populate streams:* for every result
-        await Promise.all(
-            results.map(async (r) => {
-                const hash = md5(r.downloadUrl);
-                const streamKey = `streams:${hash}`;
+            let name = 'NEW';
 
+            if (existingRaw) {
+                try {
+                    const data = JSON.parse(existingRaw)[0];
+                    if (data?.nzoId) name = 'CACHED';
+                } catch {
+                    // JSON parse failed, treat as NEW
+                }
+            } else {
                 const streamData = {
                     downloadUrl: r.downloadUrl,
                     title: r.title,
                     size: r.size,
                     fileName: r.fileName,
                 };
-                await setJsonValue(streamKey, "$", streamData, 60 * 60 * 48, 'NX');
-            })
-        );
+                setPipeline.call("JSON.SET", streamKey, "$", JSON.stringify(streamData), "NX");
+                setPipeline.expire(streamKey, 60 * 60 * 48);
+            }
 
-        //@TODDO: this is what stremio sees, make it pretty.
-        const streams = results.map(r => ({
-            title: r.title,
-            url: `${ADDON_BASE_URL}/nzb/stream?key=${md5(r.downloadUrl)}`,
-            size: r.size,
-        }));
+            return {
+                name,
+                title: r.title,
+                url: `${ADDON_BASE_URL}/nzb/stream?key=${hash}`,
+                size: r.size,
+            };
+        });
 
+        await setPipeline.exec();
         res.json({ streams });
+
     } catch (err) {
         console.error("Stream list error:", err);
         res.status(502).json({ error: "Failed to load streams" });
     }
+
 });
 
 app.get("/nzb/stream", async (req: Request, res: Response) => {
