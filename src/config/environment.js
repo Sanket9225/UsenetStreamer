@@ -51,17 +51,6 @@ const INDEXER_MANAGER_STRICT_ID_MATCH = toBoolean(
   process.env.INDEXER_MANAGER_STRICT_ID_MATCH || process.env.PROWLARR_STRICT_ID_MATCH,
   false
 );
-const INDEXER_MANAGER_INDEXERS = (() => {
-  const fallback = INDEXER_MANAGER === 'nzbhydra' ? '' : '-1';
-  const raw = (process.env.INDEXER_MANAGER_INDEXERS || process.env.PROWLARR_INDEXER_IDS || '').trim();
-  if (!raw) return fallback;
-  const joined = raw
-    .split(',')
-    .map((id) => id.trim())
-    .filter((id) => id.length > 0)
-    .join(',');
-  return joined || fallback;
-})();
 const INDEXER_MANAGER_LABEL = INDEXER_MANAGER === 'nzbhydra' ? 'NZBHydra' : 'Prowlarr';
 const INDEXER_MANAGER_CACHE_MINUTES = toPositiveInt(process.env.INDEXER_MANAGER_CACHE_MINUTES, 10);
 const INDEXER_MANAGER_BASE_URL = stripTrailingSlashes(INDEXER_MANAGER_URL);
@@ -182,7 +171,6 @@ module.exports = {
   INDEXER_MANAGER_URL,
   INDEXER_MANAGER_API_KEY,
   INDEXER_MANAGER_STRICT_ID_MATCH,
-  INDEXER_MANAGER_INDEXERS,
   INDEXER_MANAGER_LABEL,
   INDEXER_MANAGER_CACHE_MINUTES,
   INDEXER_MANAGER_BASE_URL,

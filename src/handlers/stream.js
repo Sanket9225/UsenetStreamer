@@ -26,7 +26,7 @@ const {
 const { ensureAddonConfigured, ensureProwlarrConfigured, ensureNzbdavConfigured, isValidImdbId } = require('../utils/validators');
 const { pickFirstDefined, normalizeImdb, normalizeNumericId, extractYear } = require('../utils/parsers');
 const { fetchCinemetaMetadata } = require('../services/cinemeta');
-const { searchProwlarr } = require('../services/prowlarr');
+const { searchIndexer } = require('../services/indexer_manager');
 const {
   normalizeReleaseTitle,
   fetchCompletedNzbdavHistory,
@@ -455,8 +455,8 @@ async function handleStreamRequest(args) {
     console.warn(`[NZBDAV] Unable to load NZBDav history: ${historyError.message}`);
   }
 
-  // Search Prowlarr
-  const finalNzbResults = await searchProwlarr({
+  // Search indexer manager (Prowlarr or NZBHydra)
+  const finalNzbResults = await searchIndexer({
     metaIds,
     type,
     movieTitle,
