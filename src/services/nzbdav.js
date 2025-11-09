@@ -799,6 +799,7 @@ async function proxyNzbdavStream(req, res, viewPath, fileNameHint = '', streamDa
   const nzbdavResponse = await axios.request(requestConfig);
 
   // Fix range request status codes: if response has Content-Range but status is 200, change to 206
+  // Exception: HEAD emulation should always return 200
   let responseStatus = nzbdavResponse.status;
   const responseHeadersLower = Object.keys(nzbdavResponse.headers || {}).reduce((map, key) => {
     map[key.toLowerCase()] = nzbdavResponse.headers[key];
@@ -806,8 +807,13 @@ async function proxyNzbdavStream(req, res, viewPath, fileNameHint = '', streamDa
   }, {});
 
   const incomingContentRange = responseHeadersLower['content-range'];
-  if (incomingContentRange && responseStatus === 200) {
+  if (incomingContentRange && responseStatus === 200 && !emulateHead) {
     responseStatus = 206;
+  }
+
+  // HEAD requests should always return 200, not 206
+  if (emulateHead) {
+    responseStatus = 200;
   }
 
   res.status(responseStatus);
@@ -861,22 +867,31 @@ async function proxyNzbdavStream(req, res, viewPath, fileNameHint = '', streamDa
       const end = Number(match[2]);
       const totalSize = match[3] !== '*' ? Number(match[3]) : null;
 
-      // Calculate actual chunk length from range (end - start + 1)
-      const chunkLength = Number.isFinite(start) && Number.isFinite(end) ? end - start + 1 : null;
-
-      console.log('[NZBDAV] Calculated chunk length:', { start, end, chunkLength, totalSize });
-
-      if (Number.isFinite(chunkLength) && chunkLength > 0) {
-        // Set Content-Length to chunk length (not total size)
-        res.setHeader('Content-Length', String(chunkLength));
-        console.log(`[NZBDAV] ✅ Set Content-Length: ${chunkLength} (from Content-Range: bytes ${start}-${end}/${totalSize || '*'})`);
+      // For HEAD emulation: use total size, not chunk length
+      if (emulateHead) {
+        if (Number.isFinite(totalSize)) {
+          res.setHeader('Content-Length', String(totalSize));
+          res.setHeader('X-Total-Length', String(totalSize));
+          console.log(`[NZBDAV] ✅ HEAD emulation: Set Content-Length: ${totalSize} (total file size)`);
+        }
       } else {
-        console.error('[NZBDAV] ❌ Failed to calculate valid chunk length!');
-      }
+        // Calculate actual chunk length from range (end - start + 1)
+        const chunkLength = Number.isFinite(start) && Number.isFinite(end) ? end - start + 1 : null;
 
-      // Optionally set X-Total-Length to total file size
-      if (Number.isFinite(totalSize)) {
-        res.setHeader('X-Total-Length', String(totalSize));
+        console.log('[NZBDAV] Calculated chunk length:', { start, end, chunkLength, totalSize });
+
+        if (Number.isFinite(chunkLength) && chunkLength > 0) {
+          // Set Content-Length to chunk length (not total size)
+          res.setHeader('Content-Length', String(chunkLength));
+          console.log(`[NZBDAV] ✅ Set Content-Length: ${chunkLength} (from Content-Range: bytes ${start}-${end}/${totalSize || '*'})`);
+        } else {
+          console.error('[NZBDAV] ❌ Failed to calculate valid chunk length!');
+        }
+
+        // Optionally set X-Total-Length to total file size
+        if (Number.isFinite(totalSize)) {
+          res.setHeader('X-Total-Length', String(totalSize));
+        }
       }
     } else {
       console.error('[NZBDAV] ❌ Failed to parse Content-Range header!');
@@ -884,6 +899,9 @@ async function proxyNzbdavStream(req, res, viewPath, fileNameHint = '', streamDa
   } else if ((!contentLengthHeader || Number(contentLengthHeader) === 0) && Number.isFinite(totalFileSize)) {
     res.setHeader('Content-Length', String(totalFileSize));
     console.log(`[NZBDAV] Set Content-Length: ${totalFileSize} (from HEAD request)`);
+  } else if ((!contentLengthHeader || Number(contentLengthHeader) === 0) && streamData && Number.isFinite(streamData.size)) {
+    res.setHeader('Content-Length', String(streamData.size));
+    console.log(`[NZBDAV] Set Content-Length: ${streamData.size} (from streamData fallback)`);
   } else if (!contentLengthHeader || Number(contentLengthHeader) === 0) {
     console.warn('[NZBDAV] Warning: No Content-Length or Content-Range header available');
   }

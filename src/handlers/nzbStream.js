@@ -68,7 +68,48 @@ async function handleNzbdavStream(req, res) {
     // Handle HEAD requests before proxying
     if ((req.method || 'GET').toUpperCase() === 'HEAD') {
       const inferredMime = inferMimeType(streamData.fileName || title || 'stream');
-      const totalSize = Number.isFinite(streamData.size) ? streamData.size : undefined;
+      let totalSize = Number.isFinite(streamData.size) ? streamData.size : undefined;
+
+      // If size is missing, try to fetch it via HEAD request to WebDAV
+      if (!Number.isFinite(totalSize)) {
+        const { NZBDAV_WEBDAV_URL, NZBDAV_WEBDAV_USER, NZBDAV_WEBDAV_PASS } = require('../config/environment');
+        const { normalizeNzbdavPath } = require('../utils/parsers');
+        const axios = require('axios');
+
+        try {
+          const normalizedPath = normalizeNzbdavPath(streamData.viewPath);
+          const encodedPath = normalizedPath
+            .split('/')
+            .map((segment) => encodeURIComponent(segment))
+            .join('/');
+          const webdavBase = NZBDAV_WEBDAV_URL.replace(/\/+$/, '');
+          const targetUrl = `${webdavBase}${encodedPath}`;
+
+          const headConfig = {
+            url: targetUrl,
+            method: 'HEAD',
+            headers: { 'User-Agent': 'UsenetStreamer' },
+            timeout: 30000,
+            validateStatus: (status) => status < 500
+          };
+
+          if (NZBDAV_WEBDAV_USER && NZBDAV_WEBDAV_PASS) {
+            headConfig.auth = {
+              username: NZBDAV_WEBDAV_USER,
+              password: NZBDAV_WEBDAV_PASS
+            };
+          }
+
+          const headResponse = await axios.request(headConfig);
+          const headContentLength = headResponse.headers?.['content-length'];
+          if (headContentLength) {
+            totalSize = Number(headContentLength);
+            console.log(`[NZBDAV] HEAD fallback retrieved size: ${totalSize} bytes`);
+          }
+        } catch (headError) {
+          console.warn('[NZBDAV] HEAD fallback failed:', headError.message);
+        }
+      }
 
       res.setHeader('Accept-Ranges', 'bytes');
       res.setHeader('Content-Type', inferredMime);

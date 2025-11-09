@@ -98,7 +98,7 @@ const NZBDAV_STREAM_TIMEOUT_MS = 240000;
 // Stream Configuration
 const STREAM_HIGH_WATER_MARK = (() => {
   const parsed = Number(process.env.STREAM_HIGH_WATER_MARK);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1024 * 1024;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 4 * 1024 * 1024;
 })();
 
 // External Metadata Provider Support
