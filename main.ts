@@ -12,7 +12,7 @@ import { jsonResponse, textResponse } from "./utils/responseUtils.ts";
 
 async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
-    const { pathname, searchParams } = url;
+    const { pathname } = url;
     const method = req.method;
 
     if (method === "OPTIONS") {
@@ -119,7 +119,7 @@ async function handler(req: Request): Promise<Response> {
                 return {
                     name,
                     title: r.title,
-                    url: `${ADDON_BASE_URL}/nzb/stream?key=${hash}`,
+                    url: `${ADDON_BASE_URL}/nzb/stream/${hash}`,
                     size: r.size,
                 };
             });
@@ -133,8 +133,9 @@ async function handler(req: Request): Promise<Response> {
         }
     }
 
-    if (pathname === "/nzb/stream" && (method === "GET" || method === "HEAD")) {
-        const key = searchParams.get("key");
+    if ((method === "GET" || method === "HEAD") && pathname.startsWith("/nzb/stream/")) {
+        const match = pathname.match(/^\/nzb\/stream\/([^/]+)$/);
+        const key = match?.[1];
 
         if (!key) {
             const failureResponse = await streamFailureVideo(req);
