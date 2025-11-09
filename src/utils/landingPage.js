@@ -537,6 +537,74 @@ function generateLandingPage(manifest) {
     label:has(input[type="checkbox"]):hover {
       color: var(--primary);
     }
+
+    /* Indexer Selection Styles */
+    .indexer-list {
+      max-height: 250px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--input);
+      padding: 0.5rem;
+    }
+
+    .indexer-item {
+      display: flex;
+      align-items: center;
+      padding: 0.5rem;
+      border-radius: calc(var(--radius) * 0.75);
+      transition: background 0.15s ease;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .indexer-item:hover {
+      background: var(--secondary);
+    }
+
+    .indexer-item input[type="checkbox"] {
+      margin-right: 0.75rem;
+      margin-top: 0;
+    }
+
+    .indexer-item-label {
+      flex: 1;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .indexer-item-protocol {
+      font-size: 0.75rem;
+      color: var(--muted-foreground);
+      background: var(--muted);
+      padding: 0.125rem 0.5rem;
+      border-radius: calc(var(--radius) * 0.5);
+    }
+
+    .indexer-actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      padding: 0.5rem;
+      background: var(--secondary);
+      border-radius: var(--radius);
+    }
+
+    .indexer-action-btn {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.625rem;
+      background: var(--muted);
+      color: var(--card-foreground);
+      border: none;
+      border-radius: calc(var(--radius) * 0.5);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-weight: 500;
+    }
+
+    .indexer-action-btn:hover {
+      background: var(--border);
+    }
   </style>
 </head>
 <body>
@@ -577,6 +645,23 @@ function generateLandingPage(manifest) {
 
         <!-- Configuration Form (hidden until authenticated) -->
         <form id="configForm" class="hidden">
+          <!-- Indexer Selection Section -->
+          <div id="indexerSection">
+            <label for="indexerSelection">
+              Prowlarr Indexers
+            </label>
+            <div id="indexerLoadingMessage" style="color: var(--muted-foreground); font-size: 0.875rem; padding: 0.5rem 0;">
+              Loading indexers...
+            </div>
+            <div id="indexerErrorMessage" class="error-message" style="display: none;">
+              Failed to load indexers
+            </div>
+            <div id="indexerList" class="indexer-list hidden"></div>
+            <div style="margin-top: 0.5rem; font-size: 0.875rem; color: var(--muted-foreground);">
+              <span id="indexerSelectionCount">No indexers selected</span> • Leave empty to use all indexers
+            </div>
+          </div>
+
           ${configFields}
           <div class="button-group">
             <button type="submit" class="button">Install</button>
@@ -633,6 +718,131 @@ function generateLandingPage(manifest) {
       // Store authenticated password in memory for this session
       let authenticatedPassword = null;
 
+      // Store available indexers and selected state
+      let availableIndexers = [];
+      let selectedIndexerIds = [];
+
+      // Update indexer selection count
+      function updateIndexerCount() {
+        const countElement = document.getElementById('indexerSelectionCount');
+        if (selectedIndexerIds.length === 0) {
+          countElement.textContent = 'No indexers selected';
+        } else if (selectedIndexerIds.length === 1) {
+          countElement.textContent = '1 indexer selected';
+        } else {
+          countElement.textContent = selectedIndexerIds.length + ' indexers selected';
+        }
+      }
+
+      // Fetch indexers from API
+      async function fetchIndexers() {
+        const indexerLoadingMessage = document.getElementById('indexerLoadingMessage');
+        const indexerErrorMessage = document.getElementById('indexerErrorMessage');
+        const indexerList = document.getElementById('indexerList');
+
+        try {
+          const response = await fetch(baseUrl + '/indexers');
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.message || 'Failed to fetch indexers');
+          }
+
+          availableIndexers = data.indexers || [];
+
+          if (availableIndexers.length === 0) {
+            indexerLoadingMessage.textContent = 'No indexers available';
+            return;
+          }
+
+          // Hide loading message and show indexer list
+          indexerLoadingMessage.style.display = 'none';
+          indexerList.classList.remove('hidden');
+
+          // Render indexer checkboxes
+          renderIndexers();
+        } catch (error) {
+          console.error('Failed to fetch indexers:', error);
+          indexerLoadingMessage.style.display = 'none';
+          indexerErrorMessage.textContent = 'Failed to load indexers: ' + error.message;
+          indexerErrorMessage.style.display = 'block';
+        }
+      }
+
+      // Render indexer list with checkboxes
+      function renderIndexers() {
+        const indexerList = document.getElementById('indexerList');
+
+        // Add select all / deselect all buttons
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'indexer-actions';
+        actionsDiv.innerHTML = \`
+          <button type="button" class="indexer-action-btn" id="selectAllBtn">Select All</button>
+          <button type="button" class="indexer-action-btn" id="deselectAllBtn">Deselect All</button>
+        \`;
+        indexerList.appendChild(actionsDiv);
+
+        // Add indexer checkboxes
+        availableIndexers.forEach(indexer => {
+          const itemDiv = document.createElement('div');
+          itemDiv.className = 'indexer-item';
+
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.id = 'indexer_' + indexer.id;
+          checkbox.value = indexer.id;
+          checkbox.addEventListener('change', function() {
+            if (this.checked) {
+              if (!selectedIndexerIds.includes(indexer.id)) {
+                selectedIndexerIds.push(indexer.id);
+              }
+            } else {
+              selectedIndexerIds = selectedIndexerIds.filter(id => id !== indexer.id);
+            }
+            updateIndexerCount();
+          });
+
+          const labelSpan = document.createElement('span');
+          labelSpan.className = 'indexer-item-label';
+          labelSpan.textContent = indexer.name;
+
+          const protocolSpan = document.createElement('span');
+          protocolSpan.className = 'indexer-item-protocol';
+          protocolSpan.textContent = indexer.protocol || 'usenet';
+
+          itemDiv.appendChild(checkbox);
+          itemDiv.appendChild(labelSpan);
+          itemDiv.appendChild(protocolSpan);
+
+          // Make the whole item clickable
+          itemDiv.addEventListener('click', function(e) {
+            if (e.target !== checkbox) {
+              checkbox.checked = !checkbox.checked;
+              checkbox.dispatchEvent(new Event('change'));
+            }
+          });
+
+          indexerList.appendChild(itemDiv);
+        });
+
+        // Add event listeners for select/deselect all buttons
+        document.getElementById('selectAllBtn').addEventListener('click', function() {
+          selectedIndexerIds = availableIndexers.map(i => i.id);
+          availableIndexers.forEach(indexer => {
+            document.getElementById('indexer_' + indexer.id).checked = true;
+          });
+          updateIndexerCount();
+        });
+
+        document.getElementById('deselectAllBtn').addEventListener('click', function() {
+          selectedIndexerIds = [];
+          availableIndexers.forEach(indexer => {
+            document.getElementById('indexer_' + indexer.id).checked = false;
+          });
+          updateIndexerCount();
+        });
+      }
+
       // Helper function to build config with password
       function buildConfig() {
         const formData = new FormData(configForm);
@@ -641,6 +851,11 @@ function generateLandingPage(manifest) {
         // Include the authenticated password
         if (authenticatedPassword) {
           config.password = authenticatedPassword;
+        }
+
+        // Add selected indexers (only if some are selected)
+        if (selectedIndexerIds.length > 0) {
+          config.selectedIndexers = selectedIndexerIds;
         }
 
         // Add all form fields
@@ -689,6 +904,9 @@ function generateLandingPage(manifest) {
             authForm.classList.add('hidden');
             authSuccess.style.display = 'block';
             configForm.classList.remove('hidden');
+
+            // Fetch available indexers
+            fetchIndexers();
           } else {
             // Authentication failed
             authError.style.display = 'block';

@@ -4,6 +4,46 @@ const { isTorrentResult } = require('../utils/parsers');
 const { ensureProwlarrConfigured } = require('../utils/validators');
 
 /**
+ * Fetch available indexers from Prowlarr
+ * @returns {Promise<Array>} Array of indexer objects with id, name, and enable status
+ */
+async function getIndexers() {
+  ensureProwlarrConfigured();
+
+  try {
+    const response = await axios.get(`${PROWLARR_URL}/api/v1/indexer`, {
+      headers: { 'X-Api-Key': PROWLARR_API_KEY },
+      timeout: 10000
+    });
+
+    const indexers = Array.isArray(response.data) ? response.data : [];
+
+    // Filter to only enabled indexers and map to simplified format
+    const enabledIndexers = indexers
+      .filter(indexer => indexer.enable === true)
+      .map(indexer => ({
+        id: indexer.id,
+        name: indexer.name,
+        protocol: indexer.protocol,
+        priority: indexer.priority || 25
+      }))
+      .sort((a, b) => {
+        // Sort by priority (lower number = higher priority), then by name
+        if (a.priority !== b.priority) {
+          return a.priority - b.priority;
+        }
+        return a.name.localeCompare(b.name);
+      });
+
+    console.log(`[PROWLARR] Retrieved ${enabledIndexers.length} enabled indexers`);
+    return enabledIndexers;
+  } catch (error) {
+    console.error('[PROWLARR] Failed to fetch indexers:', error.message);
+    throw new Error(`Failed to fetch Prowlarr indexers: ${error.message}`);
+  }
+}
+
+/**
  * Search Prowlarr for content
  * @param {object} params - Search parameters
  * @param {object} params.metaIds - Object with imdb, tmdb, tvdb IDs
@@ -13,9 +53,10 @@ const { ensureProwlarrConfigured } = require('../utils/validators');
  * @param {number} params.seasonNum - Season number (for series)
  * @param {number} params.episodeNum - Episode number (for series)
  * @param {string} params.primaryId - Primary IMDb ID
+ * @param {Array<number>} params.selectedIndexers - Array of indexer IDs to search (optional, defaults to all)
  * @returns {Promise<Array>} Array of search results
  */
-async function searchProwlarr({ metaIds, type, movieTitle, releaseYear, seasonNum, episodeNum, primaryId }) {
+async function searchProwlarr({ metaIds, type, movieTitle, releaseYear, seasonNum, episodeNum, primaryId, selectedIndexers }) {
   ensureProwlarrConfigured();
 
   let searchType;
@@ -95,10 +136,20 @@ async function searchProwlarr({ metaIds, type, movieTitle, releaseYear, seasonNu
     console.log('[PROWLARR] Strict ID matching enabled; skipping text-based search');
   }
 
+  // Determine which indexers to use
+  let indexerIds = '-1'; // Default: all indexers
+  if (selectedIndexers && Array.isArray(selectedIndexers) && selectedIndexers.length > 0) {
+    // Use only selected indexers
+    indexerIds = selectedIndexers.join(',');
+    console.log(`[PROWLARR] Using selected indexers: ${indexerIds}`);
+  } else {
+    console.log('[PROWLARR] No indexers selected, using all available indexers');
+  }
+
   const baseSearchParams = {
     limit: '100',
     offset: '0',
-    indexerIds: '-1'
+    indexerIds
   };
 
   const deriveResultKey = (result) => {
@@ -226,5 +277,6 @@ async function searchProwlarr({ metaIds, type, movieTitle, releaseYear, seasonNu
 }
 
 module.exports = {
-  searchProwlarr
+  searchProwlarr,
+  getIndexers
 };

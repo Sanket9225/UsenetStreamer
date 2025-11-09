@@ -90,6 +90,21 @@ app.post('/verify-password', setCorsHeaders, (req, res) => {
   }
 });
 
+// Indexers endpoint to fetch available Prowlarr indexers
+app.get('/indexers', setCorsHeaders, async (req, res) => {
+  try {
+    const { getIndexers } = require('./src/services/prowlarr');
+    const indexers = await getIndexers();
+    res.json({ indexers });
+  } catch (error) {
+    console.error('[ERROR] Failed to fetch indexers:', error.message);
+    res.status(500).json({
+      error: 'Failed to fetch indexers',
+      message: error.message
+    });
+  }
+});
+
 // Manifest routes (handled by SDK but we add auth middleware for user data)
 // The SDK automatically adds these routes:
 // - GET /manifest.json
