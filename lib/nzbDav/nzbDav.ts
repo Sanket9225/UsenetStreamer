@@ -225,11 +225,9 @@ export async function streamNzbdavProxy(
     req: Request,
 ): Promise<Response> {
     const redisKey = `streams:${keyHash}`;
-    const url = new URL(req.url);
 
     let meta = streamMetadataCache.get(redisKey)?.data || null;
 
-    // 1. Fetch metadata
     if (!meta) {
         meta = await getJsonValue<StreamCache>(redisKey);
         if (meta) {
@@ -237,24 +235,22 @@ export async function streamNzbdavProxy(
         }
     }
 
-    // 2. Handle missing metadata
     if (!meta) {
         const failureResponse = await streamFailureVideo(req);
         if (failureResponse) return failureResponse;
 
-        // If failure video also failed, send the final error
         return new Response(JSON.stringify({ error: "This shit is broke as fuuuuck" }), {
             status: 502,
             headers: { "Content-Type": "application/json" }
         });
     }
 
-    // 3. Prepare stream parameters
     const { downloadUrl, type = "movie", title = "NZB Stream", prowlarrId } = meta;
-    const id = (meta as any).id ?? "";
+    const id = (meta as any).rawImdbId ?? "";
+    console.log("THIS IS ID: ", id);
 
     const category = getNzbdavCategory(type);
-    const episode = parseRequestedEpisode(type, id, url.searchParams);
+    const episode = parseRequestedEpisode(type, id);
 
     const cacheKey = [
         downloadUrl,
@@ -262,7 +258,6 @@ export async function streamNzbdavProxy(
         episode ? `${episode.season}x${episode.episode}` : undefined,
     ].join("|");
 
-    // 4. Get or create NZBDav stream
     try {
         const streamData = await getOrCreateNzbdavStream(cacheKey, () =>
             buildNzbdavStream({ downloadUrl, category, title, requestedEpisode: episode })
@@ -365,6 +360,7 @@ async function buildNzbdavStream({
         fileName: bestFile.name,
         downloadUrl: downloadUrl,
         title: title,
+        rawImdbId: cached?.rawImdbId,
     };
 
     await setJsonValue(cacheKey, '$', result);

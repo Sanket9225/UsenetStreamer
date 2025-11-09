@@ -123,6 +123,7 @@ async function handler(req: Request): Promise<Response> {
                         title: r.title,
                         size: r.size,
                         fileName: r.fileName,
+                        rawImdbId: fullId,
                     };
 
                     setPipeline.call("JSON.SET", streamKey, "$", JSON.stringify(streamData), "NX");

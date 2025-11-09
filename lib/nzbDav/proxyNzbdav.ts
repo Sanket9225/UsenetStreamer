@@ -2,12 +2,9 @@
 Credit goes to panteLx for their work decoding and implementing proper header handling.
 https://github.com/panteLx/UsenetStreamer
 
-Tried my best not to use node stream... it's just not stable enough for long streams.
 */
 
-// Removed Node/Express imports: "node:stream", "express"
 import { extname } from "@std/path/posix";
-// Deno's native Request and Response are used implicitly or globally
 
 import {
     VIDEO_MIME_MAP,
@@ -63,6 +60,7 @@ export async function proxyNzbdavStream(
     // Forward Range headers
     const range = req.headers.get("range");
     const ifRange = req.headers.get("if-range");
+    console.log(`[HTTP Request] Path: ${cleanPath} | Method: ${method} | Range Header: ${range || 'None'}`);
 
     if (range) requestHeaders.set("Range", range);
     if (ifRange) requestHeaders.set("If-Range", ifRange);

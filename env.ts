@@ -25,7 +25,6 @@ export const NZBDAV_WEBDAV_ROOT = "/";
 export const NZBDAV_WEBDAV_URL = (Deno.env.get("NZBDAV_WEBDAV_URL") || NZBDAV_URL).trim();
 export const NZBDAV_API_TIMEOUT_MS = 80000;
 export const NZBDAV_HISTORY_TIMEOUT_MS = 60000;
-export const NZBDAV_STREAM_TIMEOUT_MS = 240000;
 export const FAILURE_VIDEO_FILENAME = "failure_video.mp4";
 
 export const NZBDAV_VIDEO_EXTENSIONS = new Set([
@@ -62,10 +61,3 @@ export const STREAM_METADATA_CACHE_TTL_MS = 60000; // 1 minute
 
 export const NZBDAV_CACHE_MAX_ITEMS = 100;
 export const STREAM_METADATA_CACHE_MAX_ITEMS = 500;
-
-
-
-export const STREAM_HIGH_WATER_MARK = (() => {
-    const parsed = Number(Deno.env.get("STREAM_HIGH_WATER_MARK"));
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1024 * 1024;
-})();

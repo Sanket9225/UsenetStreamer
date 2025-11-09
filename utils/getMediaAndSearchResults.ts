@@ -59,11 +59,9 @@ export async function getMediaAndSearchResults(
 
     const { name: showName, year, tvdbId, tmdbId } = cinemetaData!;
 
-    const episodeSuffix = requestedEpisode
-        ? `S${requestedEpisode.season}E${requestedEpisode.episode}`
-        : '';
-
-    const searchKey = `prowlarr:search:${imdbId}${episodeSuffix}`;
+    const searchKey = requestedEpisode
+        ? `prowlarr:search:${imdbId}:${requestedEpisode.season}:${requestedEpisode.episode}`
+        : `prowlarr:search:${imdbId}`;
     let results: ProwlarrResult[] | null = await getJsonValue<ProwlarrResult[]>(searchKey);
 
     if (!results) {

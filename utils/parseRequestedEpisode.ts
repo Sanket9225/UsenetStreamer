@@ -11,18 +11,7 @@ export interface QueryParams {
 export function parseRequestedEpisode(
     type: string,
     id: string | null | undefined,
-    query: URLSearchParams = new URLSearchParams(),
 ): EpisodeInfo | undefined {
-    const seasonFromQuery = extractInt(
-        query.get("season") ?? query.get("Season") ?? query.get("S")
-    );
-    const episodeFromQuery = extractInt(
-        query.get("episode") ?? query.get("Episode") ?? query.get("E")
-    );
-
-    if (seasonFromQuery !== null && episodeFromQuery !== null) {
-        return { season: seasonFromQuery, episode: episodeFromQuery };
-    }
 
     // 2. Check ID String (e.g., used in routing: series:S01:E01)
     if (type === "series" && typeof id === "string" && id.includes(":")) {
