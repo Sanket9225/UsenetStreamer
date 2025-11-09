@@ -91,6 +91,17 @@ async function handleNzbdavStream(req, res) {
       buildNzbdavStream({ downloadUrl, category, title, requestedEpisode, existingSlot: existingSlotHint })
     );
 
+    // Build display filename for external players
+    // Prefer clean content title (e.g. "Frankenstein (2025).mkv") over release name
+    let displayFilename = streamData.fileName || 'stream';
+    if (params.contentTitle) {
+      const ext = posixPath.extname(streamData.fileName || '.mkv');
+      const cleanTitle = params.contentTitle.replace(/[\\/:*?"<>|]+/g, '_');
+      const yearSuffix = params.contentYear ? ` (${params.contentYear})` : '';
+      displayFilename = `${cleanTitle}${yearSuffix}${ext}`;
+      console.log(`[NZBDAV] Using clean display filename: ${displayFilename}`);
+    }
+
     // Handle HEAD requests before proxying
     if ((req.method || 'GET').toUpperCase() === 'HEAD') {
       const inferredMime = inferMimeType(streamData.fileName || title || 'stream');
@@ -141,7 +152,7 @@ async function handleNzbdavStream(req, res) {
       res.setHeader('Content-Type', inferredMime);
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Expose-Headers', 'Content-Length,Content-Range,Content-Type,Accept-Ranges');
-      res.setHeader('Content-Disposition', `inline; filename="${(streamData.fileName || 'stream').replace(/[\\/:*?"<>|]+/g, '_')}"`);
+      res.setHeader('Content-Disposition', `inline; filename="${displayFilename.replace(/[\\/:*?"<>|]+/g, '_')}"`);
 
       if (Number.isFinite(totalSize)) {
         res.setHeader('Content-Length', String(totalSize));
@@ -152,7 +163,7 @@ async function handleNzbdavStream(req, res) {
       return;
     }
 
-    await proxyNzbdavStream(req, res, streamData.viewPath, streamData.fileName || '', streamData);
+    await proxyNzbdavStream(req, res, streamData.viewPath, displayFilename, streamData);
   } catch (error) {
     if (error?.isNzbdavFailure) {
       console.warn('[NZBDAV] Stream failure detected:', error.failureMessage || error.message);

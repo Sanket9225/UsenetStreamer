@@ -551,7 +551,10 @@ async function handleStreamRequest(args) {
         indexerId: String(result.indexerId),
         type,
         id,
-        downloadUrl: result.downloadUrl
+        downloadUrl: result.downloadUrl,
+        // Add clean content title for external players
+        contentTitle: movieTitle || result.title,
+        contentYear: releaseYear
       };
 
       if (result.guid) streamParams.guid = result.guid;
