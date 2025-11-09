@@ -19,8 +19,14 @@ function generateLandingPage(manifest) {
   let configFields = '';
   if (hasConfig) {
     manifest.config.forEach(field => {
+      // Skip password field - it's handled by authentication form
+      if (field.key === 'password') {
+        return;
+      }
+
       const required = field.required ? 'required' : '';
-      const defaultValue = field.default || '';
+      // Use nullish coalescing to handle 0 and false as valid defaults
+      const defaultValue = field.default ?? '';
 
       if (field.type === 'text' || field.type === 'password' || field.type === 'number') {
         configFields += `
@@ -145,6 +151,48 @@ function generateLandingPage(manifest) {
     }
     .button:hover { background: #7a4a9b; }
     .button:active { background: #6a3a8b; }
+    .button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .button-group {
+      display: flex;
+      gap: 1vh;
+      margin-top: 2vh;
+    }
+    .button-group .button {
+      width: calc(50% - 0.5vh);
+    }
+    .secondary-button {
+      background: #5a6a7b;
+    }
+    .secondary-button:hover {
+      background: #4a5a6b;
+    }
+    .secondary-button:active {
+      background: #3a4a5b;
+    }
+    .error-message {
+      color: #d32f2f;
+      font-size: 1.8vh;
+      margin-top: 1vh;
+      display: none;
+    }
+    .success-message {
+      color: #2e7d32;
+      font-size: 1.8vh;
+      margin-bottom: 2vh;
+      display: none;
+    }
+    .copy-feedback {
+      color: #2e7d32;
+      font-size: 1.6vh;
+      margin-top: 1vh;
+      display: none;
+    }
+    .hidden {
+      display: none !important;
+    }
     .footer {
       margin-top: 3vh;
       font-size: 1.6vh;
@@ -162,9 +210,36 @@ function generateLandingPage(manifest) {
     ${types ? `<div class="types">${types}</div>` : ''}
 
     ${hasConfig ? `
-      <form id="configForm">
+      <!-- Password Authentication Form (shown first) -->
+      <form id="authForm">
+        <div style="margin-bottom: 1.5vh;">
+          <label for="auth_password" style="display: block; margin-bottom: 0.5vh; font-weight: bold;">
+            Enter Password to Configure *
+          </label>
+          <input
+            type="password"
+            id="auth_password"
+            name="auth_password"
+            required
+            autocomplete="off"
+            style="width: 100%; padding: 1vh; font-size: 1.8vh; border: 1px solid #ddd; border-radius: 0.5vh;"
+          />
+        </div>
+        <div class="error-message" id="authError">Invalid password</div>
+        <button type="submit" class="button" id="unlockButton">Unlock Configuration</button>
+      </form>
+
+      <!-- Success Message (shown after auth) -->
+      <div class="success-message" id="authSuccess">✓ Authenticated</div>
+
+      <!-- Configuration Form (hidden until authenticated) -->
+      <form id="configForm" class="hidden">
         ${configFields}
-        <button type="submit" class="button">Install</button>
+        <div class="button-group">
+          <button type="submit" class="button">Install</button>
+          <button type="button" class="button secondary-button" id="copyButton">Copy URL</button>
+        </div>
+        <div class="copy-feedback" id="copyFeedback">✓ URL copied to clipboard!</div>
       </form>
     ` : `
       <a href="stremio://${ADDON_BASE_URL.replace(/^https?:\/\//, '')}/manifest.json" class="button">
@@ -179,17 +254,30 @@ function generateLandingPage(manifest) {
 
   ${hasConfig ? `
     <script>
-      const form = document.getElementById('configForm');
+      const authForm = document.getElementById('authForm');
+      const configForm = document.getElementById('configForm');
+      const authError = document.getElementById('authError');
+      const authSuccess = document.getElementById('authSuccess');
+      const copyButton = document.getElementById('copyButton');
+      const copyFeedback = document.getElementById('copyFeedback');
       const baseUrl = window.location.protocol + '//' + window.location.host;
 
-      form.addEventListener('submit', function(e) {
-        e.preventDefault();
+      // Store authenticated password in memory for this session
+      let authenticatedPassword = null;
 
-        const formData = new FormData(form);
+      // Helper function to build config with password
+      function buildConfig() {
+        const formData = new FormData(configForm);
         const config = {};
 
+        // Include the authenticated password
+        if (authenticatedPassword) {
+          config.password = authenticatedPassword;
+        }
+
+        // Add all form fields
         for (let [key, value] of formData.entries()) {
-          const input = form.elements[key];
+          const input = configForm.elements[key];
           if (input.type === 'checkbox') {
             config[key] = input.checked;
           } else if (input.type === 'number') {
@@ -199,10 +287,100 @@ function generateLandingPage(manifest) {
           }
         }
 
+        return config;
+      }
+
+      // Password authentication
+      authForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const password = document.getElementById('auth_password').value;
+        const unlockButton = document.getElementById('unlockButton');
+
+        // Disable button during request
+        unlockButton.disabled = true;
+        unlockButton.textContent = 'Verifying...';
+        authError.style.display = 'none';
+
+        try {
+          const response = await fetch(baseUrl + '/verify-password', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ password })
+          });
+
+          const result = await response.json();
+
+          if (result.valid) {
+            // Authentication successful - save password in memory
+            authenticatedPassword = password;
+
+            // Show authenticated state
+            authForm.classList.add('hidden');
+            authSuccess.style.display = 'block';
+            configForm.classList.remove('hidden');
+          } else {
+            // Authentication failed
+            authError.style.display = 'block';
+            unlockButton.disabled = false;
+            unlockButton.textContent = 'Unlock Configuration';
+          }
+        } catch (error) {
+          console.error('Authentication error:', error);
+          authError.textContent = 'Connection error. Please try again.';
+          authError.style.display = 'block';
+          unlockButton.disabled = false;
+          unlockButton.textContent = 'Unlock Configuration';
+        }
+      });
+
+      // Config form submission (install)
+      configForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const config = buildConfig();
         const userData = btoa(JSON.stringify(config));
         const installUrl = 'stremio://' + baseUrl.replace(/^https?:\\/\\//, '') + '/' + userData + '/manifest.json';
 
         window.location.href = installUrl;
+      });
+
+      // Copy URL button
+      copyButton.addEventListener('click', async function() {
+        const config = buildConfig();
+        const userData = btoa(JSON.stringify(config));
+        const manifestUrl = baseUrl + '/' + userData + '/manifest.json';
+
+        try {
+          await navigator.clipboard.writeText(manifestUrl);
+          copyFeedback.style.display = 'block';
+
+          // Hide feedback after 3 seconds
+          setTimeout(() => {
+            copyFeedback.style.display = 'none';
+          }, 3000);
+        } catch (error) {
+          console.error('Copy failed:', error);
+          // Fallback for older browsers
+          const textArea = document.createElement('textarea');
+          textArea.value = manifestUrl;
+          textArea.style.position = 'fixed';
+          textArea.style.left = '-999999px';
+          document.body.appendChild(textArea);
+          textArea.select();
+          try {
+            document.execCommand('copy');
+            copyFeedback.style.display = 'block';
+            setTimeout(() => {
+              copyFeedback.style.display = 'none';
+            }, 3000);
+          } catch (err) {
+            alert('Failed to copy URL. Please try manually.');
+          }
+          document.body.removeChild(textArea);
+        }
       });
     </script>
   ` : ''}

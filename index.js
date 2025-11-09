@@ -37,6 +37,9 @@ const addonInterface = builder.getInterface();
 // Create Express app for custom routes
 const app = express();
 
+// Parse JSON bodies for API endpoints
+app.use(express.json());
+
 // Serve static assets
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
@@ -55,6 +58,38 @@ app.get('/configure', (req, res) => {
   res.send(generateLandingPage(manifest));
 });
 
+// CORS middleware for custom routes (SDK normally handles this)
+const setCorsHeaders = (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  next();
+};
+
+// Password verification endpoint for config page authentication
+app.post('/verify-password', setCorsHeaders, (req, res) => {
+  const { password } = req.body;
+
+  // If no password is set in environment, deny verification
+  if (!MANIFEST_AUTH_PASSWORD) {
+    return res.status(400).json({
+      valid: false,
+      error: 'Password authentication not configured'
+    });
+  }
+
+  // Check if password matches
+  if (password === MANIFEST_AUTH_PASSWORD) {
+    return res.json({ valid: true });
+  } else {
+    return res.json({ valid: false });
+  }
+});
+
 // Manifest routes (handled by SDK but we add auth middleware for user data)
 // The SDK automatically adds these routes:
 // - GET /manifest.json
@@ -68,18 +103,6 @@ app.get('/configure', (req, res) => {
 // NZB stream endpoint (custom route not handled by SDK)
 app.get('/nzb/stream', handleNzbdavStream);
 app.head('/nzb/stream', handleNzbdavStream);
-
-// CORS middleware for custom routes (SDK normally handles this)
-const setCorsHeaders = (req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-  next();
-};
 
 // Custom manifest endpoints to handle authentication properly
 // These override the SDK's default manifest routes
