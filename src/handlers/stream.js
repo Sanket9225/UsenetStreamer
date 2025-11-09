@@ -51,10 +51,11 @@ async function handleStreamRequest(args) {
   const qualityFilter = userConfig.qualityFilter || 'All';
   const maxResults = parseInt(userConfig.maxResults, 10) || 0;
   const selectedIndexers = userConfig.selectedIndexers || null;
+  const selectedCategories = userConfig.selectedCategories || null;
 
   console.log(`[REQUEST] Received request for ${type} ID: ${id}`);
   console.log(`[CONFIG] Raw config from SDK:`, config);
-  console.log(`[CONFIG] User preferences:`, { preferredLanguage, sortMethod, qualityFilter, maxResults, selectedIndexers });
+  console.log(`[CONFIG] User preferences:`, { preferredLanguage, sortMethod, qualityFilter, maxResults, selectedIndexers, selectedCategories });
 
   const primaryId = id.split(':')[0];
   if (!isValidImdbId(id)) {
@@ -198,7 +199,8 @@ async function handleStreamRequest(args) {
     seasonNum,
     episodeNum,
     primaryId,
-    selectedIndexers
+    selectedIndexers,
+    selectedCategories
   });
 
   // Filter by quality and sort into language groups using video-filename-parser

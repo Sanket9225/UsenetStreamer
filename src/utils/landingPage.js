@@ -605,6 +605,88 @@ function generateLandingPage(manifest) {
     .indexer-action-btn:hover {
       background: var(--border);
     }
+
+    /* Category Selection Styles */
+    .indexer-item-container {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .indexer-item-container:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .indexer-expand-btn {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: var(--muted-foreground);
+      cursor: pointer;
+      padding: 0.25rem 0.5rem;
+      font-size: 0.75rem;
+      transition: color 0.15s ease;
+    }
+
+    .indexer-expand-btn:hover {
+      color: var(--primary);
+    }
+
+    .category-section {
+      display: none;
+      margin-top: 0.5rem;
+      margin-left: 2rem;
+      padding: 0.5rem;
+      background: var(--secondary);
+      border-radius: calc(var(--radius) * 0.5);
+    }
+
+    .category-section.expanded {
+      display: block;
+    }
+
+    .category-item {
+      display: flex;
+      align-items: center;
+      padding: 0.25rem 0;
+      font-size: 0.8125rem;
+    }
+
+    .category-item input[type="checkbox"] {
+      margin-right: 0.5rem;
+      width: 1rem;
+      height: 1rem;
+    }
+
+    .category-item-label {
+      color: var(--card-foreground);
+    }
+
+    .category-actions {
+      display: flex;
+      gap: 0.375rem;
+      margin-bottom: 0.5rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .category-action-btn {
+      font-size: 0.6875rem;
+      padding: 0.1875rem 0.5rem;
+      background: var(--muted);
+      color: var(--card-foreground);
+      border: none;
+      border-radius: calc(var(--radius) * 0.4);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-weight: 500;
+    }
+
+    .category-action-btn:hover {
+      background: var(--border);
+    }
   </style>
 </head>
 <body>
@@ -658,7 +740,8 @@ function generateLandingPage(manifest) {
             </div>
             <div id="indexerList" class="indexer-list hidden"></div>
             <div style="margin-top: 0.5rem; font-size: 0.875rem; color: var(--muted-foreground);">
-              <span id="indexerSelectionCount">No indexers selected</span> • Leave empty to use all indexers
+              <span id="indexerSelectionCount">No indexers selected</span> • Leave empty to use all indexers<br>
+              Click "Show Categories" to filter specific categories (e.g., exclude ebooks, audio)
             </div>
           </div>
 
@@ -721,6 +804,7 @@ function generateLandingPage(manifest) {
       // Store available indexers and selected state
       let availableIndexers = [];
       let selectedIndexerIds = [];
+      let selectedCategoriesByIndexer = {}; // { indexerId: [categoryIds] }
 
       // Update indexer selection count
       function updateIndexerCount() {
@@ -769,7 +853,23 @@ function generateLandingPage(manifest) {
         }
       }
 
-      // Render indexer list with checkboxes
+      // Toggle category section visibility
+      function toggleCategories(indexerId) {
+        const categorySection = document.getElementById('categories_' + indexerId);
+        const expandBtn = document.getElementById('expand_' + indexerId);
+
+        if (categorySection) {
+          if (categorySection.classList.contains('expanded')) {
+            categorySection.classList.remove('expanded');
+            expandBtn.textContent = 'Show Categories ▼';
+          } else {
+            categorySection.classList.add('expanded');
+            expandBtn.textContent = 'Hide Categories ▲';
+          }
+        }
+      }
+
+      // Render indexer list with checkboxes and categories
       function renderIndexers() {
         const indexerList = document.getElementById('indexerList');
 
@@ -782,8 +882,11 @@ function generateLandingPage(manifest) {
         \`;
         indexerList.appendChild(actionsDiv);
 
-        // Add indexer checkboxes
+        // Add indexer checkboxes with categories
         availableIndexers.forEach(indexer => {
+          const containerDiv = document.createElement('div');
+          containerDiv.className = 'indexer-item-container';
+
           const itemDiv = document.createElement('div');
           itemDiv.className = 'indexer-item';
 
@@ -810,19 +913,109 @@ function generateLandingPage(manifest) {
           protocolSpan.className = 'indexer-item-protocol';
           protocolSpan.textContent = indexer.protocol || 'usenet';
 
+          // Add expand button for categories
+          const expandBtn = document.createElement('button');
+          expandBtn.type = 'button';
+          expandBtn.className = 'indexer-expand-btn';
+          expandBtn.id = 'expand_' + indexer.id;
+          expandBtn.textContent = 'Show Categories ▼';
+          expandBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            toggleCategories(indexer.id);
+          });
+
           itemDiv.appendChild(checkbox);
           itemDiv.appendChild(labelSpan);
           itemDiv.appendChild(protocolSpan);
+          if (indexer.categories && indexer.categories.length > 0) {
+            itemDiv.appendChild(expandBtn);
+          }
 
-          // Make the whole item clickable
+          // Make the whole item clickable (except expand button)
           itemDiv.addEventListener('click', function(e) {
-            if (e.target !== checkbox) {
+            if (e.target !== checkbox && e.target !== expandBtn) {
               checkbox.checked = !checkbox.checked;
               checkbox.dispatchEvent(new Event('change'));
             }
           });
 
-          indexerList.appendChild(itemDiv);
+          containerDiv.appendChild(itemDiv);
+
+          // Add category section if categories exist
+          if (indexer.categories && indexer.categories.length > 0) {
+            const categorySection = document.createElement('div');
+            categorySection.className = 'category-section';
+            categorySection.id = 'categories_' + indexer.id;
+
+            // Add category actions
+            const categoryActionsDiv = document.createElement('div');
+            categoryActionsDiv.className = 'category-actions';
+
+            const selectAllCatBtn = document.createElement('button');
+            selectAllCatBtn.type = 'button';
+            selectAllCatBtn.className = 'category-action-btn';
+            selectAllCatBtn.textContent = 'Select All';
+            selectAllCatBtn.addEventListener('click', function() {
+              selectedCategoriesByIndexer[indexer.id] = indexer.categories.map(c => c.id);
+              indexer.categories.forEach(cat => {
+                const catCheckbox = document.getElementById('cat_' + indexer.id + '_' + cat.id);
+                if (catCheckbox) catCheckbox.checked = true;
+              });
+            });
+
+            const deselectAllCatBtn = document.createElement('button');
+            deselectAllCatBtn.type = 'button';
+            deselectAllCatBtn.className = 'category-action-btn';
+            deselectAllCatBtn.textContent = 'Deselect All';
+            deselectAllCatBtn.addEventListener('click', function() {
+              selectedCategoriesByIndexer[indexer.id] = [];
+              indexer.categories.forEach(cat => {
+                const catCheckbox = document.getElementById('cat_' + indexer.id + '_' + cat.id);
+                if (catCheckbox) catCheckbox.checked = false;
+              });
+            });
+
+            categoryActionsDiv.appendChild(selectAllCatBtn);
+            categoryActionsDiv.appendChild(deselectAllCatBtn);
+            categorySection.appendChild(categoryActionsDiv);
+
+            // Add category checkboxes
+            indexer.categories.forEach(category => {
+              const categoryItem = document.createElement('div');
+              categoryItem.className = 'category-item';
+
+              const catCheckbox = document.createElement('input');
+              catCheckbox.type = 'checkbox';
+              catCheckbox.id = 'cat_' + indexer.id + '_' + category.id;
+              catCheckbox.value = category.id;
+              catCheckbox.addEventListener('change', function() {
+                if (!selectedCategoriesByIndexer[indexer.id]) {
+                  selectedCategoriesByIndexer[indexer.id] = [];
+                }
+
+                if (this.checked) {
+                  if (!selectedCategoriesByIndexer[indexer.id].includes(category.id)) {
+                    selectedCategoriesByIndexer[indexer.id].push(category.id);
+                  }
+                } else {
+                  selectedCategoriesByIndexer[indexer.id] = selectedCategoriesByIndexer[indexer.id].filter(id => id !== category.id);
+                }
+              });
+
+              const catLabel = document.createElement('label');
+              catLabel.className = 'category-item-label';
+              catLabel.htmlFor = catCheckbox.id;
+              catLabel.textContent = category.name;
+
+              categoryItem.appendChild(catCheckbox);
+              categoryItem.appendChild(catLabel);
+              categorySection.appendChild(categoryItem);
+            });
+
+            containerDiv.appendChild(categorySection);
+          }
+
+          indexerList.appendChild(containerDiv);
         });
 
         // Add event listeners for select/deselect all buttons
@@ -856,6 +1049,18 @@ function generateLandingPage(manifest) {
         // Add selected indexers (only if some are selected)
         if (selectedIndexerIds.length > 0) {
           config.selectedIndexers = selectedIndexerIds;
+        }
+
+        // Add selected categories (only if some are selected)
+        // Filter out empty category arrays
+        const nonEmptyCategories = {};
+        for (const [indexerId, categoryIds] of Object.entries(selectedCategoriesByIndexer)) {
+          if (Array.isArray(categoryIds) && categoryIds.length > 0) {
+            nonEmptyCategories[indexerId] = categoryIds;
+          }
+        }
+        if (Object.keys(nonEmptyCategories).length > 0) {
+          config.selectedCategories = nonEmptyCategories;
         }
 
         // Add all form fields
