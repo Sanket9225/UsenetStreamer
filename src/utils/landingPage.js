@@ -230,12 +230,6 @@ function generateLandingPage(manifest) {
       font-size: 0.95rem;
       line-height: 1.6;
       color: var(--muted-foreground);
-      margin-bottom: 0.5rem;
-    }
-
-    .types-text {
-      font-size: 0.875rem;
-      color: var(--muted-foreground);
       margin: 0;
     }
 
@@ -556,7 +550,6 @@ function generateLandingPage(manifest) {
             <h1 class="title">${addonName}</h1>
           </div>
           ${addonDescription ? `<p class="description">${addonDescription}</p>` : ''}
-          ${types ? `<p class="types-text">${types}</p>` : ''}
         </div>
       </div>
 
