@@ -1,6 +1,7 @@
 export interface EpisodeInfo {
-    season: number;
-    episode: number;
+    season?: number | undefined;
+    episode?: number | undefined;
+    imdbid: string;
 }
 
 export interface QueryParams {
@@ -18,10 +19,11 @@ export function parseRequestedEpisode(
         const parts = id.split(":");
         if (parts.length >= 3) {
             // parts[0] is imdbId, parts[1] is season, parts[2] is episode
+            const imdbid = parts[0];
             const season = extractInt(parts[1]);
             const episode = extractInt(parts[2]);
             if (season !== null && episode !== null) {
-                return { season, episode };
+                return { imdbid, season, episode };
             }
         }
     }

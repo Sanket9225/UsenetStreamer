@@ -18,8 +18,8 @@ interface FindFileParams {
 }
 
 interface EpisodeInfo {
-    season: number;
-    episode: number;
+    season?: number;
+    episode?: number;
 }
 
 export async function findBestVideoFile({

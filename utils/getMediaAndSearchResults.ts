@@ -3,8 +3,9 @@ import { getCinemetaData } from "../lib/cinemeta.ts";
 import { searchProwlarr } from "../lib/prowlarr.ts";
 
 interface RequestedEpisode {
-    season: number;
-    episode: number;
+    imdbid?: string;
+    season?: number | undefined;
+    episode?: number | undefined;
 }
 
 interface CinemetaData {
@@ -36,9 +37,10 @@ const PROWLARR_SEARCH_CACHE_TTL = 3600;
  */
 export async function getMediaAndSearchResults(
     type: 'movie' | 'series',
-    imdbId: string,
-    requestedEpisode?: RequestedEpisode | undefined
+    episodeInfo: RequestedEpisode
 ): Promise<{ cinemetaData: CinemetaData; results: ProwlarrResult[] }> {
+
+    const { imdbid: imdbId, season, episode } = episodeInfo;
 
     const cinemetaKey = `cinemeta:${type}:${imdbId}`;
     let cinemetaData: CinemetaData | null = await getJsonValue<CinemetaData>(cinemetaKey);
@@ -59,20 +61,13 @@ export async function getMediaAndSearchResults(
 
     const { name: showName, year, tvdbId, tmdbId } = cinemetaData!;
 
-    const searchKey = requestedEpisode
-        ? `prowlarr:search:${imdbId}:${requestedEpisode.season}:${requestedEpisode.episode}`
+    const searchKey = episode && season
+        ? `prowlarr:search:${imdbId}:${season}:${episode}`
         : `prowlarr:search:${imdbId}`;
     let results: ProwlarrResult[] | null = await getJsonValue<ProwlarrResult[]>(searchKey);
 
     if (!results) {
         console.log(`[Cache] Prowlarr search miss for ${searchKey}`);
-
-        const seasonEpisodeQuery = requestedEpisode
-            ? {
-                season: requestedEpisode.season,
-                episode: requestedEpisode.episode
-            }
-            : {};
 
         results = await searchProwlarr({
             imdbId,
@@ -81,10 +76,8 @@ export async function getMediaAndSearchResults(
             name: showName,
             year: String(year),
             type,
-            usenetOnly: true,
             limit: 10,
-            showName: showName,
-            ...seasonEpisodeQuery
+            ...episode && season ? { season, episode } : {},
         });
 
 

@@ -4,15 +4,11 @@ import { getMediaAndSearchResults } from "./utils/getMediaAndSearchResults.ts";
 import { ADDON_BASE_URL, PORT, } from "./env.ts";
 import { md5 } from "./utils/md5Encoder.ts";
 import { streamNzbdavProxy } from "./lib/nzbDav/nzbDav.ts";
+import { parseRequestedEpisode, type EpisodeInfo } from "./utils/parseRequestedEpisode.ts";
 import { redis } from "./utils/redis.ts";
 
 import { streamFailureVideo } from "./lib/streamFailureVideo.ts";
 import { jsonResponse, textResponse } from "./utils/responseUtils.ts";
-
-interface RequestedEpisode {
-    season: number;
-    episode: number;
-}
 
 async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
@@ -75,22 +71,12 @@ async function handler(req: Request): Promise<Response> {
 
         const fullId = decodedIdParam.replace(".json", "");
 
-        let imdbIdToUse = fullId;
-        let requestedEpisode: RequestedEpisode | undefined = undefined;
+        const requestedInfo = type === 'series' ? parseRequestedEpisode(type, fullId) ?? ({} as Partial<EpisodeInfo>) : { imdbid: fullId };
 
-        if (type === "series" && fullId.includes(":")) {
-            const [imdb, s, e] = fullId.split(":");
-            const season = parseInt(s, 10);
-            const episode = parseInt(e, 10);
-            if (!isNaN(season) && !isNaN(episode)) {
-                imdbIdToUse = imdb;
-                requestedEpisode = { season, episode };
-            }
-        }
-        console.log(`imdbIdToUse: ${imdbIdToUse}, requestedEpisode: ${JSON.stringify(requestedEpisode)}`);
+        console.log(`requestedInfo: ${JSON.stringify(requestedInfo)}`);
 
         try {
-            const { results } = await getMediaAndSearchResults(type, imdbIdToUse, requestedEpisode);
+            const { results } = await getMediaAndSearchResults(type, requestedInfo);
 
             const getPipeline = redis.pipeline();
             results.forEach(r => {

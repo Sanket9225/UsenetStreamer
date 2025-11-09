@@ -7,8 +7,6 @@ interface ProwlarrSearchOptions {
     tmdbId?: string;
     name?: string;
     year?: string;
-    showName?: string;
-    usenetOnly?: boolean;
     limit?: number;
     type?: 'movie' | 'series';
     season?: number;
@@ -117,25 +115,6 @@ export async function searchProwlarr(opts: ProwlarrSearchOptions): Promise<Prowl
         textQueryParts.push(`S${String(opts.season).padStart(2, "0")}E${String(opts.episode).padStart(2, "0")}`);
     }
 
-    interface RequestedEpisode {
-        season: number;
-        episode: number;
-    }
-
-    function fileMatchesEpisode(fileName: string, requestedEpisode: RequestedEpisode): boolean {
-        if (!requestedEpisode) {
-            return true;
-        }
-        const { season, episode } = requestedEpisode;
-        const patterns = [
-            new RegExp(`s0*${season}e0*${episode}(?![0-9])`, "i"),
-            new RegExp(`s0*${season}\.?e0*${episode}(?![0-9])`, "i"),
-            new RegExp(`0*${season}[xX]0*${episode}(?![0-9])`, "i"),
-            new RegExp(`[eE](?:pisode|p)\.?\\s*0*${episode}(?![0-9])`, "i"),
-        ];
-        return patterns.some((regex) => regex.test(fileName));
-    }
-
     const textQueryFallback = textQueryParts.filter(Boolean).join(" ").trim();
     if (textQueryFallback) {
         addPlan("search", textQueryFallback);
@@ -171,10 +150,10 @@ export async function searchProwlarr(opts: ProwlarrSearchOptions): Promise<Prowl
             ...baseSearchParams,
             type: plan.type,
             query: plan.query,
+            protocol: "usenet",
             categories: categories, // Apply categories to each plan
             ...(opts.season && { season: String(opts.season) }),
             ...(opts.episode && { ep: String(opts.episode) }),
-            ...(opts.usenetOnly && { protocol: "usenet" }),
         });
 
         console.log("[Prowlarr] Dispatching plan:", plan, "with params:", params.toString());
@@ -210,7 +189,7 @@ export async function searchProwlarr(opts: ProwlarrSearchOptions): Promise<Prowl
                 console.log(`[PROWLARR] Filtering out torrent result: ${r.title}`);
                 return false;
             }
-            if (opts.usenetOnly && r.protocol.toLowerCase() !== "usenet") {
+            if (r.protocol.toLowerCase() !== "usenet") {
                 console.log(`[PROWLARR] Filtering out non-usenet result: ${r.title}`);
                 return false;
             }
@@ -226,14 +205,14 @@ export async function searchProwlarr(opts: ProwlarrSearchOptions): Promise<Prowl
             }
 
             // Stricter filtering for show name
-            if (opts.showName) {
-                const normalizedShowName = opts.showName.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (opts.name) {
+                const normalizedShowName = opts.name.toLowerCase().replace(/[^a-z0-9]/g, '');
                 const normalizedResultTitle = r.title.toLowerCase().replace(/[^a-z0-9]/g, '');
                 if (!normalizedResultTitle.includes(normalizedShowName)) {
-                    console.log(`[PROWLARR] Filtering out result (show name mismatch): ${r.title} for show ${opts.showName}`);
+                    console.log(`[PROWLARR] Filtering out result (show name mismatch): ${r.title} for show ${opts.name}`);
                     return false;
                 }
-                console.log(`[PROWLARR] Keeping result (show name match): ${r.title} for show ${opts.showName}`);
+                console.log(`[PROWLARR] Keeping result (show name match): ${r.title} for show ${opts.name}`);
             }
 
             return true;
@@ -260,4 +239,23 @@ export async function searchProwlarr(opts: ProwlarrSearchOptions): Promise<Prowl
 
     console.log(`[PROWLARR] Final aggregated unique NZB results: ${dedupedNzbResults.length}`);
     return dedupedNzbResults;
+}
+
+interface RequestedEpisode {
+    season: number;
+    episode: number;
+}
+
+function fileMatchesEpisode(fileName: string, requestedEpisode: RequestedEpisode): boolean {
+    if (!requestedEpisode) {
+        return true;
+    }
+    const { season, episode } = requestedEpisode;
+    const patterns = [
+        new RegExp(`s0*${season}e0*${episode}(?![0-9])`, "i"),
+        new RegExp(`s0*${season}\.?e0*${episode}(?![0-9])`, "i"),
+        new RegExp(`0*${season}[xX]0*${episode}(?![0-9])`, "i"),
+        new RegExp(`[eE](?:pisode|p)\.?\\s*0*${episode}(?![0-9])`, "i"),
+    ];
+    return patterns.some((regex) => regex.test(fileName));
 }
