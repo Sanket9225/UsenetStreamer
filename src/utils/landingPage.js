@@ -62,16 +62,18 @@ function generateLandingPage(manifest) {
             <label for="${field.key}">
               ${field.title || field.key}${field.required ? ' *' : ''}
             </label>
-            <select
-              id="${field.key}"
-              name="${field.key}"
-              ${required}
-            >
-              ${field.options.map(opt => {
-                const selected = opt === defaultValue ? 'selected' : '';
-                return `<option value="${opt}" ${selected}>${opt}</option>`;
-              }).join('')}
-            </select>
+            <div class="select-wrapper">
+              <select
+                id="${field.key}"
+                name="${field.key}"
+                ${required}
+              >
+                ${field.options.map(opt => {
+                  const selected = opt === defaultValue ? 'selected' : '';
+                  return `<option value="${opt}" ${selected}>${opt}</option>`;
+                }).join('')}
+              </select>
+            </div>
           </div>`;
       }
     });
@@ -236,6 +238,14 @@ function generateLandingPage(manifest) {
       font-family: inherit;
     }
 
+    select {
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      padding-right: 2.5rem;
+      cursor: pointer;
+    }
+
     input[type="text"]:hover,
     input[type="password"]:hover,
     input[type="number"]:hover,
@@ -250,6 +260,29 @@ function generateLandingPage(manifest) {
       outline: none;
       border-color: var(--primary);
       box-shadow: 0 0 0 3px rgba(66, 153, 255, 0.15);
+    }
+
+    .select-wrapper {
+      position: relative;
+      width: 100%;
+    }
+
+    .select-wrapper::after {
+      content: '';
+      position: absolute;
+      right: 0.875rem;
+      top: 50%;
+      width: 0.625rem;
+      height: 0.625rem;
+      pointer-events: none;
+      border-right: 2px solid var(--card-foreground);
+      border-bottom: 2px solid var(--card-foreground);
+      transform: translateY(-70%) rotate(45deg);
+      transition: all 0.15s ease;
+    }
+
+    .select-wrapper:hover::after {
+      border-color: var(--primary);
     }
 
     input[type="checkbox"] {
