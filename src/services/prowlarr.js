@@ -20,28 +20,35 @@ async function getIndexers() {
 
     // Filter to only enabled indexers and map to format with categories
     const enabledIndexers = indexers
-      .filter(indexer => indexer.enable === true)
+      .filter(indexer => indexer && indexer.enable === true)
       .map(indexer => {
-        // Extract categories from capabilities
+        // Extract categories from capabilities with error handling
         const categories = [];
-        if (indexer.capabilities && indexer.capabilities.categories) {
-          indexer.capabilities.categories.forEach(cat => {
-            // Main category
-            categories.push({
-              id: cat.id,
-              name: cat.name
-            });
+        try {
+          if (indexer.capabilities && indexer.capabilities.categories && Array.isArray(indexer.capabilities.categories)) {
+            indexer.capabilities.categories.forEach(cat => {
+              if (!cat || !cat.id || !cat.name) return;
 
-            // Subcategories if they exist
-            if (cat.subCategories && Array.isArray(cat.subCategories)) {
-              cat.subCategories.forEach(subCat => {
-                categories.push({
-                  id: subCat.id,
-                  name: `${cat.name} > ${subCat.name}`
-                });
+              // Main category
+              categories.push({
+                id: cat.id,
+                name: cat.name
               });
-            }
-          });
+
+              // Subcategories if they exist
+              if (cat.subCategories && Array.isArray(cat.subCategories)) {
+                cat.subCategories.forEach(subCat => {
+                  if (!subCat || !subCat.id || !subCat.name) return;
+                  categories.push({
+                    id: subCat.id,
+                    name: `${cat.name} > ${subCat.name}`
+                  });
+                });
+              }
+            });
+          }
+        } catch (error) {
+          console.warn(`[PROWLARR] Failed to extract categories for indexer ${indexer.name}:`, error.message);
         }
 
         return {
@@ -175,13 +182,13 @@ async function searchProwlarr({ metaIds, type, movieTitle, releaseYear, seasonNu
   // Determine which categories to use
   // Collect all unique category IDs from all selected indexers
   let categories = null;
-  if (selectedCategories && typeof selectedCategories === 'object') {
+  if (selectedCategories && typeof selectedCategories === 'object' && Object.keys(selectedCategories).length > 0) {
     const categorySet = new Set();
 
     // If specific indexers are selected, only use categories for those indexers
     if (selectedIndexers && Array.isArray(selectedIndexers) && selectedIndexers.length > 0) {
       selectedIndexers.forEach(indexerId => {
-        const indexerCategories = selectedCategories[indexerId];
+        const indexerCategories = selectedCategories[String(indexerId)] || selectedCategories[indexerId];
         if (Array.isArray(indexerCategories) && indexerCategories.length > 0) {
           indexerCategories.forEach(catId => categorySet.add(catId));
         }
@@ -198,7 +205,11 @@ async function searchProwlarr({ metaIds, type, movieTitle, releaseYear, seasonNu
     if (categorySet.size > 0) {
       categories = Array.from(categorySet).join(',');
       console.log(`[PROWLARR] Using selected categories: ${categories}`);
+    } else {
+      console.log('[PROWLARR] No valid categories found in selection, using all categories');
     }
+  } else {
+    console.log('[PROWLARR] No category filtering applied, using all categories');
   }
 
   const baseSearchParams = {
