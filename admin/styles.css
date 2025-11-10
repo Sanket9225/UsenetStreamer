@@ -187,6 +187,21 @@ select:focus {
   align-items: center;
 }
 
+.support-note {
+  margin: 1rem 0 0;
+  color: #c2cad6;
+}
+
+.support-note a {
+  color: #40c4ff;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.support-note a:hover {
+  text-decoration: underline;
+}
+
 @media (max-width: 720px) {
   .manifest-row {
     flex-direction: column;

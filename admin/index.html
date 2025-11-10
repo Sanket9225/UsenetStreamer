@@ -15,10 +15,10 @@
 
     <section class="card">
       <h2>Authentication</h2>
-      <p class="hint">Enter the shared addon token (the same one you use in the manifest URL). It will be stored locally in your browser.</p>
-      <p class="warning">Treat this token like a password. If you expose the token and your public addon URL, anyone can open the admin panel and read or overwrite your credentials.</p>
+      <p class="hint">Enter the change token (the same one embedded in your manifest). Use this only if you think the addon URL is exposed to the world.</p>
+      <p class="warning">Treat this token like a password. If someone has both the token and the public addon URL, they can open the admin panel and view or modify your credentials.</p>
       <div class="field-row">
-        <label for="tokenInput">Addon Token</label>
+        <label for="tokenInput">Change Token</label>
         <input id="tokenInput" type="password" autocomplete="off" />
       </div>
       <button id="loadConfig" class="primary">Load Configuration</button>
@@ -26,16 +26,6 @@
     </section>
 
     <section class="card hidden" id="configSection">
-      <div class="manifest-row">
-        <div>
-          <strong>Manifest URL</strong>
-          <p id="manifestDescription" class="hint">Add this URL to Stremio once HTTPS and token are set.</p>
-        </div>
-        <div class="manifest-link">
-          <a id="manifestLink" href="#" target="_blank" rel="noopener">Not configured</a>
-        </div>
-      </div>
-
       <form id="configForm">
         <section class="group">
           <h3>Indexer Manager</h3>
@@ -124,8 +114,12 @@
               <input name="NZB_TRIAGE_PREFERRED_SIZE_GB" type="number" min="0" step="0.1" placeholder="20" />
             </label>
             <label>Number of NZBs to Inspect
-              <input name="NZB_TRIAGE_MAX_CANDIDATES" type="number" min="1" step="1" />
-              <span class="field-hint">Recommended value: 8. Higher or lower counts can slow checks or reduce accuracy.</span>
+              <select name="NZB_TRIAGE_MAX_CANDIDATES">
+                <option value="2">2</option>
+                <option value="4">4</option>
+                <option value="6">6</option>
+              </select>
+              <span class="field-hint">Pick 2 for the fastest responses, 4 or 6 to probe more candidates.</span>
             </label>
             <label>Max NNTP Connections
               <input name="NZB_TRIAGE_MAX_CONNECTIONS" type="number" min="1" step="1" />
@@ -139,8 +133,9 @@
             <label>Public Base URL
               <input name="ADDON_BASE_URL" type="url" placeholder="https://example.com" />
             </label>
-            <label>Shared Secret
+            <label>Change Token
               <input name="ADDON_SHARED_SECRET" type="password" autocomplete="new-password" />
+              <span class="field-hint">Use this if you believe the addon URL is exposed to the world.</span>
             </label>
           </div>
         </section>
@@ -150,6 +145,18 @@
           <span id="saveStatus" class="status-message"></span>
         </div>
       </form>
+
+      <div class="manifest-row">
+        <div>
+          <strong>Manifest URL</strong>
+          <p id="manifestDescription" class="hint">Add this URL to Stremio once HTTPS and token are set.</p>
+        </div>
+        <div class="manifest-link">
+          <a id="manifestLink" href="#" target="_blank" rel="noopener">Not configured</a>
+        </div>
+      </div>
+
+      <p class="support-note">If you like this addon, please consider <a href="https://buymeacoffee.com/gaikwadsank" target="_blank" rel="noopener">buying me a coffee</a>.</p>
     </section>
   </main>
   <script src="app.js"></script>
