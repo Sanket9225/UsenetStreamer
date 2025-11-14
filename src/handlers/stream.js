@@ -2,26 +2,7 @@ const axios = require('axios');
 const {
   ADDON_BASE_URL,
   specialCatalogPrefixes,
-  EXTERNAL_SPECIAL_PROVIDER_URL,
-  TRIAGE_ENABLED,
-  TRIAGE_TIME_BUDGET_MS,
-  TRIAGE_MAX_CANDIDATES,
-  TRIAGE_PREFERRED_SIZE_BYTES,
-  TRIAGE_PRIORITY_INDEXERS,
-  TRIAGE_NNTP_CONFIG,
-  TRIAGE_DOWNLOAD_CONCURRENCY,
-  TRIAGE_DOWNLOAD_TIMEOUT_MS,
-  TRIAGE_MAX_CONNECTIONS,
-  TRIAGE_STAT_TIMEOUT_MS,
-  TRIAGE_FETCH_TIMEOUT_MS,
-  TRIAGE_MAX_PARALLEL_NZBS,
-  TRIAGE_STAT_SAMPLE_COUNT,
-  TRIAGE_ARCHIVE_SAMPLE_COUNT,
-  TRIAGE_MAX_DECODED_BYTES,
-  TRIAGE_ARCHIVE_DIRS,
-  toFiniteNumber,
-  toBoolean,
-  parseCommaList
+  EXTERNAL_SPECIAL_PROVIDER_URL
 } = require('../config/environment');
 const { ensureAddonConfigured, ensureProwlarrConfigured, ensureNzbdavConfigured, isValidImdbId } = require('../utils/validators');
 const { pickFirstDefined, normalizeImdb, normalizeNumericId, extractYear } = require('../utils/parsers');
@@ -33,7 +14,6 @@ const {
   getNzbdavCategory
 } = require('../services/nzbdav');
 const { filterAndSortStreams, formatStremioTitle } = require('../utils/streamFilters');
-const { triageAndRank } = require('../../nzbTriageRunner');
 const { encodeStreamToken } = require('../utils/streamToken');
 
 /**
@@ -154,61 +134,6 @@ async function fetchSpecialMetadata(identifier) {
     console.warn(`[SPECIAL META] Failed to fetch metadata for ${identifier}: ${error.message}`);
     return null;
   }
-}
-
-/**
- * Extract triage configuration overrides from query parameters
- * @param {object} query - Query parameters object
- * @returns {object} Parsed triage overrides
- */
-function extractTriageOverrides(query) {
-  if (!query || typeof query !== 'object') return {};
-
-  // Parse preferred size
-  const sizeCandidate = query.triageSizeGb ?? query.triage_size_gb ?? query.preferredSizeGb;
-  const sizeGb = toFiniteNumber(sizeCandidate, null);
-  const sizeBytes = Number.isFinite(sizeGb) && sizeGb > 0 ? sizeGb * 1024 * 1024 * 1024 : null;
-
-  // Parse indexer IDs
-  let indexerSource = null;
-  if (typeof query.triageIndexerIds === 'string') {
-    indexerSource = query.triageIndexerIds;
-  } else if (Array.isArray(query.triageIndexerIds)) {
-    indexerSource = query.triageIndexerIds.join(',');
-  }
-  const indexers = indexerSource ? parseCommaList(indexerSource) : null;
-
-  // Parse enabled/disabled flags
-  const disabled = query.triageDisabled !== undefined ? toBoolean(query.triageDisabled, true) : null;
-  const enabled = query.triageEnabled !== undefined ? toBoolean(query.triageEnabled, false) : null;
-
-  return { sizeBytes, indexers, disabled, enabled };
-}
-
-/**
- * Build a map from normalized titles to triage results
- * @param {Map} decisions - Map of triage decisions
- * @returns {Map} Map from normalized title to triage info
- */
-function buildTriageTitleMap(decisions) {
-  const titleMap = new Map();
-
-  if (!decisions || decisions.size === 0) {
-    return titleMap;
-  }
-
-  for (const [downloadUrl, decision] of decisions) {
-    const normalizedTitle = decision?.normalizedTitle || normalizeReleaseTitle(decision?.title);
-    if (normalizedTitle) {
-      titleMap.set(normalizedTitle, {
-        decision: decision?.decision,
-        blockers: decision?.blockers,
-        downloadUrl
-      });
-    }
-  }
-
-  return titleMap;
 }
 
 /**
@@ -469,52 +394,9 @@ async function handleStreamRequest(args) {
     selectedCategories
   });
 
-  // Integrate NZB triage
-  const triageOverrides = extractTriageOverrides(args.extra || {});
-  const shouldAttemptTriage = finalNzbResults.length > 0 && !triageOverrides.disabled &&
-                              (triageOverrides.enabled || TRIAGE_ENABLED);
-
-  let triageOutcome = null;
-  let triageDecisions = new Map();
-  let triageTitleMap = new Map();
-
-  if (shouldAttemptTriage && TRIAGE_NNTP_CONFIG) {
-    console.log('[TRIAGE] Starting NZB triage process...');
-
-    const triageOptions = {
-      preferredSizeBytes: triageOverrides.sizeBytes ?? TRIAGE_PREFERRED_SIZE_BYTES,
-      preferredIndexerIds: triageOverrides.indexers ?? TRIAGE_PRIORITY_INDEXERS,
-      timeBudgetMs: TRIAGE_TIME_BUDGET_MS,
-      maxCandidates: TRIAGE_MAX_CANDIDATES,
-      nntpConfig: TRIAGE_NNTP_CONFIG,
-      downloadConcurrency: TRIAGE_DOWNLOAD_CONCURRENCY,
-      downloadTimeoutMs: TRIAGE_DOWNLOAD_TIMEOUT_MS,
-      archiveDirs: TRIAGE_ARCHIVE_DIRS,
-      statTimeoutMs: TRIAGE_STAT_TIMEOUT_MS,
-      fetchTimeoutMs: TRIAGE_FETCH_TIMEOUT_MS,
-      maxDecodedBytes: TRIAGE_MAX_DECODED_BYTES,
-      nntpMaxConnections: TRIAGE_MAX_CONNECTIONS,
-      maxParallelNzbs: TRIAGE_MAX_PARALLEL_NZBS,
-      statSampleCount: TRIAGE_STAT_SAMPLE_COUNT,
-      archiveSampleCount: TRIAGE_ARCHIVE_SAMPLE_COUNT
-    };
-
-    try {
-      triageOutcome = await triageAndRank(finalNzbResults, triageOptions);
-      triageDecisions = new Map(triageOutcome?.decisions || []);
-      triageTitleMap = buildTriageTitleMap(triageDecisions);
-      console.log(`[TRIAGE] Completed: ${triageDecisions.size} decisions, ${triageOutcome?.ranked?.length || 0} ranked results`);
-    } catch (error) {
-      console.error(`[TRIAGE] Failed: ${error.message}`);
-    }
-  }
-
-  // Use triaged results if available, otherwise use original results
-  const resultsToStream = triageOutcome?.ranked || finalNzbResults;
-
   // Filter by quality and sort into language groups using video-filename-parser
   const { sortedResults, groupInfo } = filterAndSortStreams(
-    resultsToStream,
+    finalNzbResults,
     sortMethod,
     preferredLanguage,
     qualityFilter
@@ -541,10 +423,9 @@ async function handleStreamRequest(args) {
       // Get parsed data from result (added by filterAndSortStreams)
       const parsed = result.parsed || {};
 
-      // Normalize title for history and triage lookup
+      // Normalize title for history lookup
       const normalizedTitle = normalizeReleaseTitle(result.title);
       const historySlot = normalizedTitle ? historyByTitle.get(normalizedTitle) : null;
-      const triageInfo = normalizedTitle ? triageTitleMap.get(normalizedTitle) : null;
 
       // Create stream parameters object
       const streamParams = {
@@ -600,12 +481,6 @@ async function handleStreamRequest(args) {
       // Add instant badge FIRST if applicable
       if (isInstant) {
         tags.unshift('⚡ Instant');
-      }
-
-      // Add triage tags if available
-      if (triageInfo?.decision === 'reject') {
-        const blockerText = triageInfo.blockers?.join(', ') || 'Failed triage';
-        tags.push(`❌ ${blockerText}`);
       }
 
       // Combine lines with newlines, omit empty lines
@@ -695,7 +570,5 @@ module.exports = {
   handleStreamRequest,
   ensureSpecialProviderConfigured,
   cleanSpecialSearchTitle,
-  fetchSpecialMetadata,
-  extractTriageOverrides,
-  buildTriageTitleMap
+  fetchSpecialMetadata
 };
