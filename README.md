@@ -162,6 +162,20 @@ This allows forks or containerized deployments to update upstream code without l
 - `NZBDAV_HISTORY_FETCH_LIMIT`, `NZBDAV_CACHE_TTL_MINUTES` (controls instant detection cache).
 - `NZB_TRIAGE_*` for NNTP health checks (host, port, user/pass, timeouts, candidate counts, reuse pool, etc.).
 
+### Direct Newznab indexers (optional)
+
+In addition to using an indexer manager (Prowlarr or NZBHydra), you can query one or more Newznab-compatible indexers in parallel. Configure these via environment variables or the admin dashboard:
+
+- `NEWZNAB_ENABLED` — set to `true` to enable direct Newznab queries.
+- `NEWZNAB_ENDPOINTS` — comma-separated list of base URLs, for example: `https://indexer1.example,https://indexer2.example`.
+- `NEWZNAB_API_KEYS` — comma-separated list of API keys aligned with `NEWZNAB_ENDPOINTS`.
+- `NEWZNAB_API_PATHS` — optional comma-separated list of API path prefixes per endpoint. Defaults to `/api` when omitted. Some indexers customize this path.
+- `NEWZNAB_FILTER_NZB_ONLY` — when `true` (default), only results with an NZB download URL are returned.
+
+Notes:
+- Endpoints are matched by position across the three lists. If you provide three endpoints, provide up to three API keys and API paths in the same order.
+- API paths are normalized to begin with `/` and have no trailing slash (e.g., `/api`, `/custom/api`). Full URLs are also accepted; only the path portion will be used.
+
 See `.env.example` for the complete list and defaults.
 
 ---

@@ -200,6 +200,23 @@ const INDEXER_MANAGER_CACHE_MINUTES = (() => {
 const INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
 const ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
 
+// Optional Newznab (direct) support in addition to the indexer manager
+const NEWZNAB_ENABLED = toBoolean(process.env.NEWZNAB_ENABLED, false);
+// Endpoints should be comma-separated URLs (not path-delimited) to avoid conflicts with ://
+const NEWZNAB_ENDPOINTS = parseCommaList(process.env.NEWZNAB_ENDPOINTS);
+const NEWZNAB_API_KEYS = parseCommaList(process.env.NEWZNAB_API_KEYS);
+// Optional per-indexer custom API path (default '/api'). Comma-separated, aligned by index with ENDPOINTS
+const NEWZNAB_API_PATHS = parseCommaList(process.env.NEWZNAB_API_PATHS);
+const NEWZNAB_FILTER_NZB_ONLY = toBoolean(process.env.NEWZNAB_FILTER_NZB_ONLY, true);
+const newznabConfigs = (() => {
+  if (!NEWZNAB_ENABLED || !Array.isArray(NEWZNAB_ENDPOINTS) || NEWZNAB_ENDPOINTS.length === 0) return [];
+  return NEWZNAB_ENDPOINTS.map((url, idx) => ({
+    url: stripTrailingSlashes(url),
+    apiKey: NEWZNAB_API_KEYS[idx] || '',
+    apiPath: normalizeApiPath(NEWZNAB_API_PATHS[idx] || '/api')
+  }));
+})();
+
 function decodeBase64Value(value) {
   if (!value) return '';
   try {
@@ -217,6 +234,23 @@ function stripTrailingSlashes(value) {
     result = result.slice(0, -1);
   }
   return result;
+}
+
+function normalizeApiPath(p) {
+  if (!p || typeof p !== 'string') return '/api';
+  let v = p.trim();
+  if (!v) return '/api';
+  // If a full URL accidentally provided, take just pathname
+  try {
+    if (/^https?:\/\//i.test(v)) {
+      const u = new URL(v);
+      v = u.pathname;
+    }
+  } catch (_) {}
+  if (!v.startsWith('/')) v = '/' + v;
+  // Remove trailing slashes
+  while (v.length > 1 && v.endsWith('/')) v = v.slice(0, -1);
+  return v || '/api';
 }
 
 function toFiniteNumber(value, defaultValue = undefined) {
@@ -469,6 +503,12 @@ const ADMIN_CONFIG_KEYS = [
   'INDEXER_MANAGER_STRICT_ID_MATCH',
   'INDEXER_MANAGER_INDEXERS',
   'INDEXER_MANAGER_CACHE_MINUTES',
+  // Newznab direct support
+  'NEWZNAB_ENABLED',
+  'NEWZNAB_ENDPOINTS',
+  'NEWZNAB_API_KEYS',
+  'NEWZNAB_API_PATHS',
+  'NEWZNAB_FILTER_NZB_ONLY',
   'NZB_SORT_MODE',
   'NZB_PREFERRED_LANGUAGE',
   'NZB_MAX_RESULT_SIZE_GB',
@@ -1326,6 +1366,38 @@ function executeIndexerPlan(plan) {
     return executeNzbhydraSearch(plan);
   }
   return executeProwlarrSearch(plan);
+}
+
+function normalizeNewznabItems(xmlData) {
+  // Reuse Hydra normalizer since Newznab responses match the Hydra parser reasonably well
+  try {
+    return normalizeHydraResults(xmlData);
+  } catch (_) {
+    return [];
+  }
+}
+
+async function executeNewznabSearch(plan) {
+  if (!NEWZNAB_ENABLED || newznabConfigs.length === 0) return [];
+  const tParam = mapHydraSearchType(plan.type);
+  const tasks = newznabConfigs.map(async ({ url, apiKey, apiPath }) => {
+    const params = { t: tParam, apikey: apiKey, o: 'json' };
+    if (plan.rawQuery) params.q = plan.rawQuery; else if (plan.query) params.q = plan.query;
+    try {
+      const resp = await axios.get(`${stripTrailingSlashes(url)}${apiPath}`, { params, timeout: 30000 });
+      const items = normalizeNewznabItems(resp.data);
+      return items.map((it) => ({ ...it, indexer: it.indexer || url, indexerId: it.indexerId || url }));
+    } catch (err) {
+      console.warn('[NEWZNAB] Search failed', { url, message: err?.message });
+      return [];
+    }
+  });
+  const arrays = await Promise.all(tasks);
+  const flat = arrays.flat();
+  if (NEWZNAB_FILTER_NZB_ONLY) {
+    return flat.filter((r) => typeof r.downloadUrl === 'string' && /\.(nzb)(?:$|\?)/i.test(r.downloadUrl) || r.downloadUrl);
+  }
+  return flat;
 }
 
 function getNzbdavCategory(type) {
@@ -2843,8 +2915,11 @@ async function streamHandler(req, res) {
 
       const planExecutions = searchPlans.map((plan) => {
         console.log(`${INDEXER_LOG_PREFIX} Dispatching plan`, plan);
-        return executeIndexerPlan(plan)
-          .then((data) => ({ plan, status: 'fulfilled', data }))
+        return Promise.all([
+          executeIndexerPlan(plan),
+          executeNewznabSearch(plan),
+        ])
+          .then(([mgr, nzb]) => ({ plan, status: 'fulfilled', data: [...(Array.isArray(mgr) ? mgr : []), ...(Array.isArray(nzb) ? nzb : [])] }))
           .catch((error) => ({ plan, status: 'rejected', error }));
       });
 
