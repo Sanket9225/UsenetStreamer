@@ -65,6 +65,10 @@
     const elements = configForm.querySelectorAll('input[name], select[name], textarea[name]');
     elements.forEach((element) => {
       const key = element.name;
+      if (key.startsWith('NEWZNAB_ENDPOINT_') || key.startsWith('NEWZNAB_API_KEY_') || key.startsWith('NEWZNAB_API_PATH_')) {
+        // handled below
+        return;
+      }
       const rawValue = Object.prototype.hasOwnProperty.call(values, key) ? values[key] : '';
       if (element.type === 'checkbox') {
         element.checked = parseBool(rawValue);
@@ -74,6 +78,18 @@
         element.value = rawValue ?? '';
       }
     });
+    // Populate dynamic Newznab indexers
+    const indexerRows = [];
+    let i = 1;
+    while (values[`NEWZNAB_ENDPOINT_${String(i).padStart(2, '0')}`]) {
+      indexerRows.push({
+        endpoint: values[`NEWZNAB_ENDPOINT_${String(i).padStart(2, '0')}`] || '',
+        apiKey: values[`NEWZNAB_API_KEY_${String(i).padStart(2, '0')}`] || '',
+        apiPath: values[`NEWZNAB_API_PATH_${String(i).padStart(2, '0')}`] || ''
+      });
+      i++;
+    }
+    renderNewznabIndexers(indexerRows);
   }
 
   function collectFormValues() {
@@ -82,14 +98,75 @@
     elements.forEach((element) => {
       const key = element.name;
       if (!key) return;
+      if (key.startsWith('NEWZNAB_ENDPOINT_') || key.startsWith('NEWZNAB_API_KEY_') || key.startsWith('NEWZNAB_API_PATH_')) {
+        // handled below
+        return;
+      }
       if (element.type === 'checkbox') {
         payload[key] = element.checked ? 'true' : 'false';
       } else {
         payload[key] = element.value != null ? element.value.toString() : '';
       }
     });
+    // Gather dynamic Newznab indexers
+    const rows = document.querySelectorAll('.newznab-indexer-row');
+    let i = 1;
+    rows.forEach((row) => {
+      const endpoint = row.querySelector('input[name^="NEWZNAB_ENDPOINT_"]')?.value || '';
+      const apiKey = row.querySelector('input[name^="NEWZNAB_API_KEY_"]')?.value || '';
+      const apiPath = row.querySelector('input[name^="NEWZNAB_API_PATH_"]')?.value || '';
+      if (endpoint) {
+        const idx = String(i).padStart(2, '0');
+        payload[`NEWZNAB_ENDPOINT_${idx}`] = endpoint;
+        payload[`NEWZNAB_API_KEY_${idx}`] = apiKey;
+        payload[`NEWZNAB_API_PATH_${idx}`] = apiPath;
+        i++;
+      }
+    });
     return payload;
   }
+
+  function renderNewznabIndexers(indexers) {
+    const container = document.getElementById('newznab-indexers-list');
+    if (!container) return;
+    container.innerHTML = '';
+    (indexers && indexers.length ? indexers : [{}]).forEach((row, idx) => {
+      const i = String(idx + 1).padStart(2, '0');
+      const div = document.createElement('div');
+      div.className = 'newznab-indexer-row';
+      div.innerHTML = `
+        <label>Endpoint
+          <input name="NEWZNAB_ENDPOINT_${i}" type="text" placeholder="https://indexer.example" value="${row.endpoint || ''}" />
+        </label>
+        <label>API Key
+          <input name="NEWZNAB_API_KEY_${i}" type="text" placeholder="apikey" value="${row.apiKey || ''}" />
+        </label>
+        <label>API Path
+          <input name="NEWZNAB_API_PATH_${i}" type="text" placeholder="/api" value="${row.apiPath || ''}" />
+        </label>
+        <button type="button" class="remove-indexer" title="Remove this indexer">&times;</button>
+      `;
+      div.querySelector('.remove-indexer').addEventListener('click', () => {
+        const newList = (indexers || [{}]).slice();
+        newList.splice(idx, 1);
+        renderNewznabIndexers(newList);
+      });
+      container.appendChild(div);
+    });
+  }
+
+  // Add Newznab indexer row
+  document.getElementById('addNewznabIndexer')?.addEventListener('click', () => {
+    const container = document.getElementById('newznab-indexers-list');
+    const rows = Array.from(container.querySelectorAll('.newznab-indexer-row'));
+    const indexers = rows.map((row) => ({
+      endpoint: row.querySelector('input[name^="NEWZNAB_ENDPOINT_"]')?.value || '',
+      apiKey: row.querySelector('input[name^="NEWZNAB_API_KEY_"]')?.value || '',
+      apiPath: row.querySelector('input[name^="NEWZNAB_API_PATH_"]')?.value || ''
+    }));
+    indexers.push({ endpoint: '', apiKey: '', apiPath: '' });
+    renderNewznabIndexers(indexers);
+  });
 
   function setTestStatus(type, message, isError) {
     const el = configForm.querySelector(`[data-test-status="${type}"]`);
