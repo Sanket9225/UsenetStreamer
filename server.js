@@ -206,29 +206,33 @@ const ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
 
 // Optional Newznab (direct) support in addition to the indexer manager
 const NEWZNAB_ENABLED = toBoolean(process.env.NEWZNAB_ENABLED, false);
-// Endpoints should be comma-separated URLs (not path-delimited) to avoid conflicts with ://
-const NEWZNAB_ENDPOINTS = parseCommaList(process.env.NEWZNAB_ENDPOINTS);
-const NEWZNAB_API_KEYS = parseCommaList(process.env.NEWZNAB_API_KEYS);
-// Optional per-indexer custom API path (default '/api'). Comma-separated, aligned by index with ENDPOINTS
-const NEWZNAB_API_PATHS = parseCommaList(process.env.NEWZNAB_API_PATHS);
 const NEWZNAB_FILTER_NZB_ONLY = toBoolean(process.env.NEWZNAB_FILTER_NZB_ONLY, true);
+// Parse NEWZNAB_ENDPOINT_01, NEWZNAB_API_KEY_01, etc.
+function parseNumberedNewznabConfigs(env) {
+  const configs = [];
+  for (let i = 1; i <= 20; ++i) {
+    const idx = String(i).padStart(2, '0');
+    const endpoint = env[`NEWZNAB_ENDPOINT_${idx}`];
+    if (!endpoint) continue;
+    configs.push({
+      url: stripTrailingSlashes(endpoint),
+      apiKey: env[`NEWZNAB_API_KEY_${idx}`] || '',
+      apiPath: normalizeApiPath(env[`NEWZNAB_API_PATH_${idx}`] || '/api')
+    });
+  }
+  return configs;
+}
 const newznabConfigs = (() => {
+  const configs = parseNumberedNewznabConfigs(process.env);
   console.log('[NEWZNAB] Startup config check', {
     enabled: NEWZNAB_ENABLED,
-    endpointsArray: NEWZNAB_ENDPOINTS,
-    keysArray: NEWZNAB_API_KEYS,
-    pathsArray: NEWZNAB_API_PATHS,
+    configs,
     filterNzbOnly: NEWZNAB_FILTER_NZB_ONLY,
   });
-  if (!NEWZNAB_ENABLED || !Array.isArray(NEWZNAB_ENDPOINTS) || NEWZNAB_ENDPOINTS.length === 0) {
+  if (!NEWZNAB_ENABLED || configs.length === 0) {
     console.log('[NEWZNAB] Direct Newznab support is disabled or no endpoints configured');
     return [];
   }
-  const configs = NEWZNAB_ENDPOINTS.map((url, idx) => ({
-    url: stripTrailingSlashes(url),
-    apiKey: NEWZNAB_API_KEYS[idx] || '',
-    apiPath: normalizeApiPath(NEWZNAB_API_PATHS[idx] || '/api')
-  }));
   console.log('[NEWZNAB] Configured endpoints', configs.map(c => ({ url: c.url, hasKey: !!c.apiKey, apiPath: c.apiPath })));
   return configs;
 })();

@@ -155,17 +155,22 @@
     });
   }
 
-  // Add Newznab indexer row
-  document.getElementById('addNewznabIndexer')?.addEventListener('click', () => {
-    const container = document.getElementById('newznab-indexers-list');
-    const rows = Array.from(container.querySelectorAll('.newznab-indexer-row'));
-    const indexers = rows.map((row) => ({
-      endpoint: row.querySelector('input[name^="NEWZNAB_ENDPOINT_"]')?.value || '',
-      apiKey: row.querySelector('input[name^="NEWZNAB_API_KEY_"]')?.value || '',
-      apiPath: row.querySelector('input[name^="NEWZNAB_API_PATH_"]')?.value || ''
-    }));
-    indexers.push({ endpoint: '', apiKey: '', apiPath: '' });
-    renderNewznabIndexers(indexers);
+  // Add Newznab indexer row (ensure DOM is ready)
+  window.addEventListener('DOMContentLoaded', () => {
+    const addBtn = document.getElementById('addNewznabIndexer');
+    if (addBtn) {
+      addBtn.addEventListener('click', () => {
+        const container = document.getElementById('newznab-indexers-list');
+        const rows = Array.from(container.querySelectorAll('.newznab-indexer-row'));
+        const indexers = rows.map((row) => ({
+          endpoint: row.querySelector('input[name^="NEWZNAB_ENDPOINT_"]')?.value || '',
+          apiKey: row.querySelector('input[name^="NEWZNAB_API_KEY_"]')?.value || '',
+          apiPath: row.querySelector('input[name^="NEWZNAB_API_PATH_"]')?.value || ''
+        }));
+        indexers.push({ endpoint: '', apiKey: '', apiPath: '' });
+        renderNewznabIndexers(indexers);
+      });
+    }
   });
 
   function setTestStatus(type, message, isError) {
