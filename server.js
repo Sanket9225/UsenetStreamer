@@ -1431,6 +1431,10 @@ function buildNewznabSearchParams(plan, apiKey) {
     // Reuse the same token-applier used for Hydra; it maps {ImdbId:tt123} -> imdbid=123, etc.
     const mapped = {};
     plan.tokens.forEach((token) => applyTokenToHydraParams(token, mapped));
+    // Patch: always prefix imdbid with 'tt' if present and not already
+    if (mapped.imdbid && !String(mapped.imdbid).startsWith('tt')) {
+      mapped.imdbid = 'tt' + String(mapped.imdbid);
+    }
     Object.assign(params, mapped);
   }
 
