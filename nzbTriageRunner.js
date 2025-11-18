@@ -1,5 +1,7 @@
 const axios = require('axios');
 const { triageNzbs } = require('./nzbTriage');
+const { queryHealth, writeHealth } = require('./healthClient');
+const { computeSegmentHashFromNzb } = require('./nzbHash');
 
 const DEFAULT_TIME_BUDGET_MS = 45000;
 const DEFAULT_MAX_CANDIDATES = 25;
@@ -149,6 +151,16 @@ async function triageAndRank(nzbResults, options = {}) {
   const logger = options.logger;
   const triageOptions = { ...(options.triageOptions || {}) };
   const captureNzbPayloads = Boolean(options.captureNzbPayloads);
+  const upstreamBaseUrl = typeof process.env.UPSTREAM_HEALTH_URL === 'string' ? process.env.UPSTREAM_HEALTH_URL.trim() : '';
+  const upstreamEnabled = Boolean(upstreamBaseUrl);
+  const providerHost = typeof process.env.NZB_TRIAGE_NNTP_HOST === 'string' ? process.env.NZB_TRIAGE_NNTP_HOST.trim() : '';
+  const shortCircuitOnHealthy = (process.env.UPSTREAM_HEALTH_SHORTCIRCUIT || 'true').toLowerCase() === 'true';
+  const shortCircuitOnUnhealthy = (process.env.UPSTREAM_HEALTH_SHORTCIRCUIT_UNHEALTHY || 'true').toLowerCase() === 'true';
+  const reputationTolerance = (() => {
+    const raw = Number(process.env.UPSTREAM_HEALTH_REPUTATION_TOLERANCE);
+    if (Number.isFinite(raw) && raw >= 0 && raw <= 1) return raw;
+    return 0.0; // default: ignore reputation
+  })();
 
   const builtCandidates = buildCandidates(nzbResults);
   const constrainedCandidates = allowedIndexerSet.size > 0
@@ -328,6 +340,44 @@ async function triageAndRank(nzbResults, options = {}) {
         continue;
       }
 
+      // Upstream pre-check: query-only mode. If upstream reports healthy and not stale (and reputation meets threshold), short-circuit.
+      if (upstreamEnabled && providerHost) {
+        try {
+          // Prefer rich filename (Prowlarr Title) if available; fallback to normalized title; else release.nzb
+          const richName = (candidate.title && `${candidate.title}.nzb`) || (candidate.normalizedTitle && `${candidate.normalizedTitle}.nzb`) || 'release.nzb';
+          const pre = await queryHealth({ baseUrl: upstreamBaseUrl, nzbPayload, filename: richName, provider: providerHost });
+          const repOk = pre && pre.reputation != null ? (pre.reputation >= reputationTolerance) : true;
+          if (pre && pre.known === true && pre.stale === false) {
+            if (pre.is_healthy === true && shortCircuitOnHealthy && repOk) {
+            decisionMap.set(downloadUrl, attachMetadata(downloadUrl, {
+              status: 'verified',
+              blockers: [],
+              warnings: ['upstream-healthy'],
+              archiveFindings: [],
+              nzbIndex: null,
+              fileCount: null,
+            }));
+            evaluatedCount += 1;
+            continue; // short-circuit local triage
+            }
+            if (pre.is_healthy === false && shortCircuitOnUnhealthy && repOk) {
+              decisionMap.set(downloadUrl, attachMetadata(downloadUrl, {
+                status: 'blocked',
+                blockers: ['upstream-unhealthy'],
+                warnings: [],
+                archiveFindings: [],
+                nzbIndex: null,
+                fileCount: null,
+              }));
+              evaluatedCount += 1;
+              continue; // short-circuit local triage on known-bad
+            }
+          }
+        } catch (_) {
+          // ignore upstream errors
+        }
+      }
+
       const triageTask = async () => {
         const remaining = timeBudgetMs - (Date.now() - startTs);
         if (remaining <= 0) {
@@ -348,6 +398,16 @@ async function triageAndRank(nzbResults, options = {}) {
           }
           decisionMap.set(downloadUrl, attachMetadata(downloadUrl, summarized));
           evaluatedCount += 1;
+
+          // Post-submit to upstream with resulting health (verified => healthy; blocked => unhealthy; unverified => healthy=false)
+          if (upstreamEnabled && providerHost) {
+            const isHealthy = summarized.status === 'verified';
+            const segmentHash = await computeSegmentHashFromNzb(nzbPayload).catch(() => null);
+            const richName = (candidate.title && `${candidate.title}.nzb`) || (candidate.normalizedTitle && `${candidate.normalizedTitle}.nzb`) || 'release.nzb';
+            // Lightweight write if we have a segment hash; else fall back to nzb upload
+            writeHealth({ baseUrl: upstreamBaseUrl, provider: providerHost, isHealthy, segmentHash, nzbPayload: segmentHash ? null : nzbPayload, filename: richName })
+              .catch(() => {});
+          }
         } else {
           decisionMap.set(downloadUrl, attachMetadata(downloadUrl, {
             status: 'error',
