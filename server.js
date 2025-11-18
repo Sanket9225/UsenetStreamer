@@ -213,12 +213,24 @@ const NEWZNAB_API_KEYS = parseCommaList(process.env.NEWZNAB_API_KEYS);
 const NEWZNAB_API_PATHS = parseCommaList(process.env.NEWZNAB_API_PATHS);
 const NEWZNAB_FILTER_NZB_ONLY = toBoolean(process.env.NEWZNAB_FILTER_NZB_ONLY, true);
 const newznabConfigs = (() => {
-  if (!NEWZNAB_ENABLED || !Array.isArray(NEWZNAB_ENDPOINTS) || NEWZNAB_ENDPOINTS.length === 0) return [];
-  return NEWZNAB_ENDPOINTS.map((url, idx) => ({
+  console.log('[NEWZNAB] Startup config check', {
+    enabled: NEWZNAB_ENABLED,
+    endpointsArray: NEWZNAB_ENDPOINTS,
+    keysArray: NEWZNAB_API_KEYS,
+    pathsArray: NEWZNAB_API_PATHS,
+    filterNzbOnly: NEWZNAB_FILTER_NZB_ONLY,
+  });
+  if (!NEWZNAB_ENABLED || !Array.isArray(NEWZNAB_ENDPOINTS) || NEWZNAB_ENDPOINTS.length === 0) {
+    console.log('[NEWZNAB] Direct Newznab support is disabled or no endpoints configured');
+    return [];
+  }
+  const configs = NEWZNAB_ENDPOINTS.map((url, idx) => ({
     url: stripTrailingSlashes(url),
     apiKey: NEWZNAB_API_KEYS[idx] || '',
     apiPath: normalizeApiPath(NEWZNAB_API_PATHS[idx] || '/api')
   }));
+  console.log('[NEWZNAB] Configured endpoints', configs.map(c => ({ url: c.url, hasKey: !!c.apiKey, apiPath: c.apiPath })));
+  return configs;
 })();
 
 function decodeBase64Value(value) {
