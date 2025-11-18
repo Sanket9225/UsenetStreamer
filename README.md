@@ -127,6 +127,7 @@ Visit `https://your-addon-domain/<token>/admin/` to:
 
 - Load and edit every runtime setting with validation and helpful hints.
 - Trigger connection tests for indexer manager, NZBDav, and NNTP provider.
+- Test direct Newznab endpoints (use the Newznab test type once `NEWZNAB_ENABLED` is true).
 - Copy the ready-to-use manifest URL right after saving.
 - Restart the addon safely once changes are persisted.
 

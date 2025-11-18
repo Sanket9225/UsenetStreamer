@@ -14,6 +14,7 @@ const {
   testIndexerConnection,
   testNzbdavConnection,
   testUsenetConnection,
+  testNewznabConnection,
 } = require('./connectionTests');
 const { triageAndRank } = require('./nzbTriageRunner');
 const { preWarmNntpPool } = require('./nzbTriage');
@@ -109,6 +110,9 @@ adminApiRouter.post('/test-connections', async (req, res) => {
         break;
       case 'usenet':
         message = await testUsenetConnection(values);
+        break;
+      case 'newznab':
+        message = await testNewznabConnection(values);
         break;
       default:
         res.status(400).json({ error: `Unknown test type: ${type}` });
@@ -1380,12 +1384,28 @@ function normalizeNewznabItems(xmlData) {
 async function executeNewznabSearch(plan) {
   if (!NEWZNAB_ENABLED || newznabConfigs.length === 0) return [];
   const tParam = mapHydraSearchType(plan.type);
+  console.log('[NEWZNAB] Dispatching plan', {
+    planType: plan.type,
+    query: plan.query,
+    rawQuery: plan.rawQuery,
+    endpoints: newznabConfigs.map((c) => c.url),
+  });
   const tasks = newznabConfigs.map(async ({ url, apiKey, apiPath }) => {
     const params = { t: tParam, apikey: apiKey, o: 'json' };
     if (plan.rawQuery) params.q = plan.rawQuery; else if (plan.query) params.q = plan.query;
     try {
-      const resp = await axios.get(`${stripTrailingSlashes(url)}${apiPath}`, { params, timeout: 30000 });
+      const requestUrl = `${stripTrailingSlashes(url)}${apiPath}`;
+      const resp = await axios.get(requestUrl, { params, timeout: 30000, validateStatus: () => true });
+      if (resp.status === 401 || resp.status === 403) {
+        console.warn('[NEWZNAB] Unauthorized (check API key)', { url: requestUrl });
+        return [];
+      }
+      if (resp.status >= 400) {
+        console.warn('[NEWZNAB] Non-200 status', { url: requestUrl, status: resp.status });
+        return [];
+      }
       const items = normalizeNewznabItems(resp.data);
+      console.log('[NEWZNAB] Endpoint results', { url: requestUrl, count: items.length });
       return items.map((it) => ({ ...it, indexer: it.indexer || url, indexerId: it.indexerId || url }));
     } catch (err) {
       console.warn('[NEWZNAB] Search failed', { url, message: err?.message });
@@ -1394,8 +1414,9 @@ async function executeNewznabSearch(plan) {
   });
   const arrays = await Promise.all(tasks);
   const flat = arrays.flat();
+  console.log('[NEWZNAB] Aggregated endpoint results', { total: flat.length });
   if (NEWZNAB_FILTER_NZB_ONLY) {
-    return flat.filter((r) => typeof r.downloadUrl === 'string' && /\.(nzb)(?:$|\?)/i.test(r.downloadUrl) || r.downloadUrl);
+    return flat.filter((r) => (typeof r.downloadUrl === 'string' && /\.(nzb)(?:$|\?)/i.test(r.downloadUrl)) || r.downloadUrl);
   }
   return flat;
 }

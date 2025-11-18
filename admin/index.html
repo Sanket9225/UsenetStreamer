@@ -64,6 +64,38 @@
         </section>
 
         <section class="group">
+          <h3>Direct Newznab Indexers (Optional)</h3>
+          <div class="field-grid">
+            <label class="checkbox">
+              <input name="NEWZNAB_ENABLED" type="checkbox" />
+              <span>Enable Direct Newznab Queries</span>
+              <span class="field-hint">Queries these endpoints alongside the indexer manager. Leave off if you rely solely on Prowlarr/NZBHydra.</span>
+            </label>
+            <label>Endpoints (comma separated)
+              <input name="NEWZNAB_ENDPOINTS" type="text" placeholder="https://indexer1.example,https://indexer2.example" />
+              <span class="field-hint">Base URLs without trailing slashes. Order must align with API keys and paths below.</span>
+            </label>
+            <label>API Keys (comma separated)
+              <input name="NEWZNAB_API_KEYS" type="text" placeholder="key1,key2" />
+              <span class="field-hint">Provide one key per endpoint in matching order. Leave empty entries if an endpoint needs no key.</span>
+            </label>
+            <label>API Paths (optional, comma separated)
+              <input name="NEWZNAB_API_PATHS" type="text" placeholder="/api,/custom/api" />
+              <span class="field-hint">Defaults to /api for any blank entries. Full URLs accepted; only path portion is used.</span>
+            </label>
+            <label class="checkbox">
+              <input name="NEWZNAB_FILTER_NZB_ONLY" type="checkbox" />
+              <span>Filter to NZB URLs Only</span>
+              <span class="field-hint">Keeps only results whose download links end with .nzb (recommended to reduce noise).</span>
+            </label>
+          </div>
+          <div class="inline-actions">
+            <button type="button" class="secondary" data-test="newznab">Test Connection</button>
+            <span class="status-message" data-test-status="newznab"></span>
+          </div>
+        </section>
+
+        <section class="group">
           <h3>Result Sorting &amp; Filters</h3>
           <div class="field-grid">
             <label>Sorting Mode

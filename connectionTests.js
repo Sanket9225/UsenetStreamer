@@ -83,6 +83,61 @@ async function testIndexerConnection(values) {
   throw new Error(`Unexpected response ${response.status} from NZBHydra`);
 }
 
+async function testNewznabConnection(values) {
+  const rawEndpoints = (values?.NEWZNAB_ENDPOINTS || '').trim();
+  const rawApiKeys = (values?.NEWZNAB_API_KEYS || '').trim();
+  const apiPathsRaw = (values?.NEWZNAB_API_PATHS || '').trim();
+  const enabled = String(values?.NEWZNAB_ENABLED || '').trim().toLowerCase();
+  const isEnabled = ['1','true','yes','on'].includes(enabled);
+  if (!isEnabled) {
+    throw new Error('NEWZNAB_ENABLED is not true');
+  }
+  if (!rawEndpoints) {
+    throw new Error('NEWZNAB_ENDPOINTS is required');
+  }
+  const endpoints = rawEndpoints.split(',').map((e) => e.trim()).filter(Boolean);
+  const apiKeys = rawApiKeys.split(',').map((e) => e.trim());
+  const apiPaths = apiPathsRaw ? apiPathsRaw.split(',').map((e) => e.trim()) : [];
+
+  const timeout = 8000;
+  let successes = 0;
+  const details = [];
+
+  for (let i = 0; i < endpoints.length; i += 1) {
+    const base = endpoints[i].replace(/\/+$/, '');
+    const apiKey = apiKeys[i] || '';
+    const apiPath = (() => {
+      let p = apiPaths[i] || '/api';
+      if (!p.startsWith('/')) p = `/${p}`;
+      return p.replace(/\/+$/, '');
+    })();
+    try {
+      const params = { t: 'caps', o: 'json' };
+      if (apiKey) params.apikey = apiKey;
+      const url = `${base}${apiPath}`;
+      const resp = await axios.get(url, { params, timeout, validateStatus: () => true });
+      if (resp.status === 401 || resp.status === 403) {
+        throw new Error('Unauthorized');
+      }
+      if (resp.status >= 400) {
+        throw new Error(`Status ${resp.status}`);
+      }
+      successes += 1;
+      let version = null;
+      const data = resp.data || {};
+      version = data.version || data.appVersion || data.server?.version || data['@attributes']?.version || null;
+      details.push(`${base} OK${version ? ` (v${String(version).replace(/^v/i,'')})` : ''}`);
+    } catch (err) {
+      details.push(`${base} ERR: ${err?.message || 'unknown error'}`);
+    }
+  }
+
+  if (successes === 0) {
+    throw new Error(`No Newznab endpoints reachable: ${details.join('; ')}`);
+  }
+  return `Connected to ${successes}/${endpoints.length} Newznab endpoints: ${details.join('; ')}`;
+}
+
 async function testNzbdavConnection(values) {
   const baseUrl = sanitizeBaseUrl(values?.NZBDAV_URL || values?.NZBDAV_WEBDAV_URL);
   if (!baseUrl) throw new Error('NZBDav URL is required');
@@ -234,4 +289,5 @@ module.exports = {
   testIndexerConnection,
   testNzbdavConnection,
   testUsenetConnection,
+  testNewznabConnection,
 };
