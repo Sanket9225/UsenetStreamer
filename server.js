@@ -1384,13 +1384,63 @@ function executeIndexerPlan(plan) {
   return executeProwlarrSearch(plan);
 }
 
-function normalizeNewznabItems(xmlData) {
-  // Reuse Hydra normalizer since Newznab responses match the Hydra parser reasonably well
+function normalizeNewznabItems(data) {
+  // 1) Handle plain array responses (Prowlarr-like JSON arrays)
+  if (Array.isArray(data)) {
+    const items = [];
+    for (const it of data) {
+      if (!it) continue;
+      const title = it.Title || it.title || it.Name || it.name || null;
+      const downloadUrl = it.DownloadUrl || it.downloadUrl || it.Link || it.link || null;
+      if (!downloadUrl) continue;
+      const size = Number(it.Size || it.size);
+      const publishDate = it.PublishDate || it.publishDate || it.pubDate || it.pubdate || null;
+      const idx = it.Indexer || it.indexer || it.IndexerName || it.indexerName || null;
+      const idxId = it.IndexerId || it.indexerId || idx || null;
+      const guid = it.Guid || it.guid || null;
+      items.push({
+        title: title || downloadUrl,
+        downloadUrl,
+        guid,
+        size: Number.isFinite(size) ? size : undefined,
+        indexer: idx || undefined,
+        indexerId: idxId || undefined,
+        publishDate: publishDate || undefined,
+      });
+    }
+    return items;
+  }
+
+  // 2) Fallback: reuse Hydra normalizer for Newznab RSS/JSON variants
   try {
-    return normalizeHydraResults(xmlData);
+    return normalizeHydraResults(data);
   } catch (_) {
     return [];
   }
+}
+
+function buildNewznabSearchParams(plan, apiKey) {
+  const params = {
+    apikey: apiKey || undefined,
+    t: mapHydraSearchType(plan.type),
+    o: 'json'
+  };
+
+  // Prefer identifier tokens for strict Newznab semantics
+  if (Array.isArray(plan.tokens) && plan.tokens.length > 0) {
+    // Reuse the same token-applier used for Hydra; it maps {ImdbId:tt123} -> imdbid=123, etc.
+    const mapped = {};
+    plan.tokens.forEach((token) => applyTokenToHydraParams(token, mapped));
+    Object.assign(params, mapped);
+  }
+
+  // If no tokens or we also want a text fallback for generic 'search'
+  if (!params.imdbid && !params.tmdbid && !params.tvdbid) {
+    if (plan.rawQuery) params.q = plan.rawQuery;
+    else if (plan.query) params.q = plan.query;
+  }
+
+  return params;
 }
 
 async function executeNewznabSearch(plan) {
@@ -1403,8 +1453,7 @@ async function executeNewznabSearch(plan) {
     endpoints: newznabConfigs.map((c) => c.url),
   });
   const tasks = newznabConfigs.map(async ({ url, apiKey, apiPath }) => {
-    const params = { t: tParam, apikey: apiKey, o: 'json' };
-    if (plan.rawQuery) params.q = plan.rawQuery; else if (plan.query) params.q = plan.query;
+    const params = buildNewznabSearchParams(plan, apiKey);
     try {
       const requestUrl = `${stripTrailingSlashes(url)}${apiPath}`;
       const resp = await axios.get(requestUrl, { params, timeout: 30000, validateStatus: () => true });
@@ -1417,8 +1466,8 @@ async function executeNewznabSearch(plan) {
         return [];
       }
       const items = normalizeNewznabItems(resp.data);
-      console.log('[NEWZNAB] Endpoint results', { url: requestUrl, count: items.length });
-      return items.map((it) => ({ ...it, indexer: it.indexer || url, indexerId: it.indexerId || url }));
+      console.log('[NEWZNAB] Endpoint results', { url: requestUrl, count: Array.isArray(items) ? items.length : 0 });
+      return (Array.isArray(items) ? items : []).map((it) => ({ ...it, indexer: it.indexer || url, indexerId: it.indexerId || url }));
     } catch (err) {
       console.warn('[NEWZNAB] Search failed', { url, message: err?.message });
       return [];
@@ -1428,7 +1477,14 @@ async function executeNewznabSearch(plan) {
   const flat = arrays.flat();
   console.log('[NEWZNAB] Aggregated endpoint results', { total: flat.length });
   if (NEWZNAB_FILTER_NZB_ONLY) {
-    return flat.filter((r) => (typeof r.downloadUrl === 'string' && /\.(nzb)(?:$|\?)/i.test(r.downloadUrl)) || r.downloadUrl);
+    return flat.filter((r) => {
+      const u = String(r.downloadUrl || '');
+      if (!u) return false;
+      if (/\.(nzb)(?:$|\?)/i.test(u)) return true;
+      if (/\/getnzb(?:\/|\b)/i.test(u)) return true; // common newznab path
+      if (/(^|[?&])t=getnzb(?:&|$)/i.test(u)) return true; // query param variant
+      return false;
+    });
   }
   return flat;
 }
