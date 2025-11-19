@@ -1,6 +1,9 @@
 const axios = require('axios');
-const DEBUG_NEWZNAB_TEST = String(process.env.DEBUG_NEWZNAB_TEST || '').trim().toLowerCase();
-const IS_DEBUG_NEWZNAB = ['1', 'true', 'yes', 'on'].includes(DEBUG_NEWZNAB_TEST);
+function isTruthyEnv(v) {
+  const s = String(v || '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(s);
+}
+const IS_DEBUG_NEWZNAB = isTruthyEnv(process.env.DEBUG_NEWZNAB_TEST) || isTruthyEnv(process.env.DEBUG_NEWZNAB_SEARCH);
 
 function maskKey(key) {
   if (!key) return '';
@@ -342,6 +345,110 @@ async function testNewznabConnection(values) {
   return `Connected to ${successes}/${configs.length} Newznab endpoints: ${details.join('; ')}`;
 }
 
+function countNewznabItems(data) {
+  try {
+    if (!data) return 0;
+    if (Array.isArray(data)) return data.length;
+    const channel = data.channel || data.Channel || data.rss?.channel || data.RSS?.channel || null;
+    if (channel) {
+      const item = channel.item || channel.Item || channel.items || channel.Items || null;
+      if (!item) return 0;
+      if (Array.isArray(item)) return item.length;
+      return 1;
+    }
+    if (data.items && Array.isArray(data.items)) return data.items.length;
+    return 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function extractSomeTitles(data, limit = 5) {
+  try {
+    const titles = [];
+    const pushTitle = (obj) => {
+      if (!obj) return;
+      const t = obj.title || obj.Title || obj.name || obj.Name || null;
+      if (t && typeof t === 'string') titles.push(t);
+    };
+    if (Array.isArray(data)) {
+      data.slice(0, limit).forEach(pushTitle);
+      return titles;
+    }
+    const channel = data.channel || data.Channel || data.rss?.channel || data.RSS?.channel || null;
+    if (channel) {
+      const items = channel.item || channel.Item || channel.items || channel.Items || [];
+      const arr = Array.isArray(items) ? items : [items];
+      arr.slice(0, limit).forEach(pushTitle);
+      return titles;
+    }
+    if (Array.isArray(data.items)) {
+      data.items.slice(0, limit).forEach(pushTitle);
+      return titles;
+    }
+    return titles;
+  } catch (_) {
+    return [];
+  }
+}
+
+async function testNewznabSearch(values) {
+  const enabled = String(values?.NEWZNAB_ENABLED || '').trim().toLowerCase();
+  const isEnabled = ['1','true','yes','on'].includes(enabled);
+  // We allow searches even if not globally enabled, since the test is explicit
+
+  const configs = collectNumberedNewznab(values);
+  if (configs.length === 0) {
+    throw new Error('Configure at least one direct Newznab indexer (NEWZNAB_ENDPOINT_01, API_PATH_01, API_KEY_01) to run a test search');
+  }
+
+  // Require keys for all provided endpoints for search
+  const missingKey = configs.filter((c) => !c.apiKey || String(c.apiKey).trim() === '');
+  if (missingKey.length > 0) {
+    const names = missingKey.map((c) => c.name || c.endpoint).join(', ');
+    throw new Error(`API key is required for Newznab endpoint(s): ${names}`);
+  }
+
+  const t = (values?.NEWZNAB_TEST_TYPE || 'search').toString().trim().toLowerCase() || 'search';
+  const q = (values?.NEWZNAB_TEST_QUERY || '').toString().trim();
+  if (IS_DEBUG_NEWZNAB) {
+    console.log('[NEWZNAB-TEST] starting search', { type: t, query: q, endpoints: configs.map(c => c.endpoint) });
+  }
+  const timeout = 12000;
+  let successes = 0;
+  const details = [];
+
+  for (const cfg of configs) {
+    const url = `${cfg.endpoint}${cfg.apiPath || '/api'}`.replace(/\/+$/, '');
+    const params = { t, o: 'json', apikey: cfg.apiKey };
+    if (q) params.q = q;
+    try {
+      debugNewznabStep('search', { url, params, status: undefined, headers: {}, body: null });
+      const resp = await axios.get(url, { params, timeout, validateStatus: () => true });
+      debugNewznabStep('search-resp', { url, params, status: resp.status, headers: resp.headers || {}, body: resp.data });
+      if (resp.status === 401 || resp.status === 403) {
+        throw new Error('Unauthorized');
+      }
+      if (resp.status >= 400) {
+        throw new Error(`Status ${resp.status}`);
+      }
+      const count = countNewznabItems(resp.data);
+      const titles = extractSomeTitles(resp.data, 4);
+      successes += 1;
+      const label = cfg.name || cfg.endpoint;
+      details.push(`${label}: ${count} items${titles.length ? ` — ${titles.join(' | ')}` : ''}`);
+    } catch (err) {
+      const label = cfg.name || cfg.endpoint;
+      details.push(`${label}: ERR ${err?.message || 'unknown error'}`);
+    }
+  }
+
+  if (successes === 0) {
+    throw new Error(`Search failed for all Newznab endpoints: ${details.join('; ')}`);
+  }
+  return `Search OK for ${successes}/${configs.length} endpoint(s): ${details.join('; ')}`;
+}
+
 async function testNzbdavConnection(values) {
   const baseUrl = sanitizeBaseUrl(values?.NZBDAV_URL || values?.NZBDAV_WEBDAV_URL);
   if (!baseUrl) throw new Error('NZBDav URL is required');
@@ -494,4 +601,5 @@ module.exports = {
   testNzbdavConnection,
   testUsenetConnection,
   testNewznabConnection,
+  testNewznabSearch,
 };

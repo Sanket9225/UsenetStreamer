@@ -15,6 +15,7 @@ const {
   testNzbdavConnection,
   testUsenetConnection,
   testNewznabConnection,
+  testNewznabSearch,
 } = require('./connectionTests');
 const { triageAndRank } = require('./nzbTriageRunner');
 const { preWarmNntpPool } = require('./nzbTriage');
@@ -46,6 +47,7 @@ adminApiRouter.get('/config', (req, res) => {
     values,
     manifestUrl: computeManifestUrl(),
     runtimeEnvPath: runtimeEnv.RUNTIME_ENV_FILE,
+    debugNewznabSearch: DEBUG_NEWZNAB_SEARCH,
   });
 });
 
@@ -113,6 +115,9 @@ adminApiRouter.post('/test-connections', async (req, res) => {
         break;
       case 'newznab':
         message = await testNewznabConnection(values);
+        break;
+      case 'newznab-search':
+        message = await testNewznabSearch(values);
         break;
       default:
         res.status(400).json({ error: `Unknown test type: ${type}` });
@@ -203,6 +208,14 @@ const INDEXER_MANAGER_CACHE_MINUTES = (() => {
 })();
 const INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
 const ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
+const DEBUG_NEWZNAB_SEARCH = ['1','true','yes','on'].includes(String(process.env.DEBUG_NEWZNAB_SEARCH || '').trim().toLowerCase());
+
+function maskApiKey(value) {
+  if (!value) return '';
+  const s = String(value);
+  if (s.length <= 4) return '****';
+  return `${s.slice(0,3)}***${s.slice(-2)}`;
+}
 
 // Optional Newznab (direct) support in addition to the indexer manager
 const NEWZNAB_ENABLED = toBoolean(process.env.NEWZNAB_ENABLED, false);
@@ -1479,7 +1492,17 @@ async function executeNewznabSearch(plan) {
     const params = buildNewznabSearchParams(plan, apiKey);
     try {
       const requestUrl = `${stripTrailingSlashes(url)}${apiPath}`;
+      if (DEBUG_NEWZNAB_SEARCH) {
+        const debugParams = { ...params, apikey: params.apikey ? maskApiKey(params.apikey) : undefined };
+        console.log('[NEWZNAB][SEARCH][REQ]', { url: requestUrl, params: debugParams });
+      }
       const resp = await axios.get(requestUrl, { params, timeout: 30000, validateStatus: () => true });
+      if (DEBUG_NEWZNAB_SEARCH) {
+        const ct = resp.headers?.['content-type'] || resp.headers?.['Content-Type'] || '';
+        let bodyPreview = '';
+        try { bodyPreview = JSON.stringify(resp.data).slice(0, 400); } catch (_) { bodyPreview = '(unserializable)'; }
+        console.log('[NEWZNAB][SEARCH][RESP]', { url: requestUrl, status: resp.status, contentType: ct, body: bodyPreview });
+      }
       if (resp.status === 401 || resp.status === 403) {
         console.warn('[NEWZNAB] Unauthorized (check API key)', { url: requestUrl });
         return [];

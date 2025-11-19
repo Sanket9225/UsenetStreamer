@@ -436,6 +436,11 @@
       runtimeEnvPath = data.runtimeEnvPath || null;
       const baseMessage = 'Add this manifest to Stremio once HTTPS is set.';
       manifestDescription.textContent = baseMessage;
+      const testSearchContainer = document.getElementById('newznab-test-search');
+      if (testSearchContainer) {
+        if (data.debugNewznabSearch) testSearchContainer.classList.remove('hidden');
+        else testSearchContainer.classList.add('hidden');
+      }
     } catch (error) {
       authError.textContent = error.message;
       authError.classList.remove('hidden');

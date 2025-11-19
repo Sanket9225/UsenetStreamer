@@ -95,6 +95,25 @@
             <button type="button" class="secondary" data-test="newznab">Test Connection</button>
             <span class="status-message" data-test-status="newznab"></span>
           </div>
+          <div id="newznab-test-search" class="hidden">
+            <div class="field-grid">
+              <label>Test Search Type
+                <select name="NEWZNAB_TEST_TYPE">
+                  <option value="search">General</option>
+                  <option value="movie">Movie</option>
+                  <option value="tvsearch">TV</option>
+                </select>
+              </label>
+              <label>Test Search Query
+                <input name="NEWZNAB_TEST_QUERY" type="text" placeholder="e.g. Dune 2021 1080p" />
+                <span class="field-hint">Runs a simple Newznab search against the configured endpoints and shows a summary.</span>
+              </label>
+            </div>
+            <div class="inline-actions">
+              <button type="button" class="secondary" data-test="newznab-search">Run Test Search</button>
+              <span class="status-message" data-test-status="newznab-search"></span>
+            </div>
+          </div>
         </section>
 
         <section class="group">
