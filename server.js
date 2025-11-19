@@ -67,6 +67,15 @@ adminApiRouter.post('/config', (req, res) => {
   }
 
   const updates = {};
+  // Clear all numbered Newznab keys by default; incoming values will repopulate existing ones
+  for (let i = 1; i <= 20; i += 1) {
+    const idx = String(i).padStart(2, '0');
+    updates[`NEWZNAB_ENDPOINT_${idx}`] = null;
+    updates[`NEWZNAB_API_KEY_${idx}`] = null;
+    updates[`NEWZNAB_API_PATH_${idx}`] = null;
+    updates[`NEWZNAB_NAME_${idx}`] = null;
+    updates[`NEWZNAB_INDEXER_ENABLED_${idx}`] = null;
+  }
   ADMIN_CONFIG_KEYS.forEach((key) => {
     if (Object.prototype.hasOwnProperty.call(incoming, key)) {
       const value = incoming[key];
