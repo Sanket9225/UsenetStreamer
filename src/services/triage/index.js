@@ -29,6 +29,7 @@ const DEFAULT_OPTIONS = {
 };
 
 let sharedNntpPoolRecord = null;
+let sharedNntpPoolBuildPromise = null;
 let currentMetrics = null;
 const poolStats = {
   created: 0,
@@ -43,6 +44,19 @@ function markTriageActivity() {
 function isTriageActivityFresh() {
   if (!lastTriageActivityTs) return false;
   return (Date.now() - lastTriageActivityTs) < TRIAGE_ACTIVITY_TTL_MS;
+}
+
+function isSharedPoolStale() {
+  if (!sharedNntpPoolRecord?.pool) return false;
+  if (isTriageActivityFresh()) return false;
+  const lastUsed = typeof sharedNntpPoolRecord.pool.getLastUsed === 'function'
+    ? sharedNntpPoolRecord.pool.getLastUsed()
+    : null;
+  if (Number.isFinite(lastUsed)) {
+    return (Date.now() - lastUsed) >= TRIAGE_ACTIVITY_TTL_MS;
+  }
+  // If we cannot determine last used timestamp, assume stale so we rebuild proactively.
+  return true;
 }
 
 function buildKeepAliveMessageId() {
@@ -91,6 +105,20 @@ async function closePool(pool, reason) {
   });
 }
 
+function getInFlightPoolBuild() {
+  return sharedNntpPoolBuildPromise;
+}
+
+function setInFlightPoolBuild(promise) {
+  sharedNntpPoolBuildPromise = promise;
+}
+
+function clearInFlightPoolBuild(promise) {
+  if (sharedNntpPoolBuildPromise === promise) {
+    sharedNntpPoolBuildPromise = null;
+  }
+}
+
 async function preWarmNntpPool(options = {}) {
   const config = { ...DEFAULT_OPTIONS, ...options };
   if (!config.reuseNntpPool) return;
@@ -129,6 +157,7 @@ async function preWarmNntpPool(options = {}) {
 
 async function triageNzbs(nzbStrings, options = {}) {
   const config = { ...DEFAULT_OPTIONS, ...options };
+  const sharedPoolStale = config.reuseNntpPool && isSharedPoolStale();
   markTriageActivity();
   const healthTimeoutMs = Number.isFinite(config.healthCheckTimeoutMs) && config.healthCheckTimeoutMs > 0
     ? config.healthCheckTimeoutMs
@@ -160,28 +189,49 @@ async function triageNzbs(nzbStrings, options = {}) {
     const desiredConnections = config.nntpMaxConnections ?? 1;
     const keepAliveMs = Number.isFinite(config.nntpKeepAliveMs) ? config.nntpKeepAliveMs : 0;
     const poolKey = buildPoolKey(config.nntpConfig, desiredConnections, keepAliveMs);
-    if (config.reuseNntpPool && sharedNntpPoolRecord?.key === poolKey) {
+    const canReuseSharedPool = config.reuseNntpPool
+      && !sharedPoolStale
+      && sharedNntpPoolRecord?.key === poolKey
+      && sharedNntpPoolRecord?.pool;
+
+    if (canReuseSharedPool) {
       nntpPool = sharedNntpPoolRecord.pool;
-      if (sharedNntpPoolRecord && typeof sharedNntpPoolRecord.pool?.touch === 'function') {
-        sharedNntpPoolRecord.pool.touch();
+      if (typeof nntpPool?.touch === 'function') {
+        nntpPool.touch();
       }
       recordPoolReuse(nntpPool, { reason: 'config-match' });
     } else {
+      const hadSharedPool = Boolean(sharedNntpPoolRecord?.pool);
+      if (config.reuseNntpPool && hadSharedPool && !getInFlightPoolBuild()) {
+        await closeSharedNntpPool(sharedPoolStale ? 'stale' : 'replaced');
+      }
       try {
-        const freshPool = await createNntpPool(config.nntpConfig, desiredConnections, { keepAliveMs });
-        const creationReason = sharedNntpPoolRecord?.pool ? 'refresh' : 'bootstrap';
-        nntpPool = freshPool;
         if (config.reuseNntpPool) {
-          if (sharedNntpPoolRecord?.pool) {
-            await closePool(sharedNntpPoolRecord.pool, 'replaced');
+          let buildPromise = getInFlightPoolBuild();
+          if (!buildPromise) {
+            buildPromise = (async () => {
+              const freshPool = await createNntpPool(config.nntpConfig, desiredConnections, { keepAliveMs });
+              const creationReason = sharedPoolStale
+                ? 'stale-refresh'
+                : (hadSharedPool ? 'refresh' : 'bootstrap');
+              sharedNntpPoolRecord = { key: poolKey, pool: freshPool, keepAliveMs };
+              recordPoolCreate(freshPool, { reason: creationReason });
+              return freshPool;
+            })();
+            setInFlightPoolBuild(buildPromise);
           }
-          sharedNntpPoolRecord = { key: poolKey, pool: freshPool, keepAliveMs };
-          recordPoolCreate(freshPool, { reason: creationReason });
+          nntpPool = await buildPromise;
+          clearInFlightPoolBuild(buildPromise);
         } else {
+          const freshPool = await createNntpPool(config.nntpConfig, desiredConnections, { keepAliveMs });
+          nntpPool = freshPool;
           shouldClosePool = true;
           recordPoolCreate(freshPool, { reason: 'one-shot' });
         }
       } catch (err) {
+        if (config.reuseNntpPool) {
+          clearInFlightPoolBuild(getInFlightPoolBuild());
+        }
         console.warn('[NZB TRIAGE] Failed to create NNTP pool', {
           message: err?.message,
           code: err?.code,
@@ -1357,9 +1407,9 @@ function buildPoolKey(config, connections, keepAliveMs = 0) {
   ].join('|');
 }
 
-async function closeSharedNntpPool() {
+async function closeSharedNntpPool(reason = 'manual') {
   if (sharedNntpPoolRecord?.pool) {
-    await closePool(sharedNntpPoolRecord.pool, 'manual');
+    await closePool(sharedNntpPoolRecord.pool, reason);
     sharedNntpPoolRecord = null;
   }
 }

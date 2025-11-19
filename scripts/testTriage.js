@@ -3,7 +3,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const { triageNzbs, closeSharedNntpPool } = require('./nzbTriage');
+const { triageNzbs, closeSharedNntpPool } = require('../src/services/triage');
 
 async function main() {
   const rootDir = process.cwd();

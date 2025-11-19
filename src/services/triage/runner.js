@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { triageNzbs } = require('./nzbTriage');
+const { triageNzbs } = require('./index');
 
 const DEFAULT_TIME_BUDGET_MS = 45000;
 const DEFAULT_MAX_CANDIDATES = 25;
