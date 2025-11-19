@@ -2,11 +2,18 @@
 const nzbdavStreamCache = new Map();
 
 // Parse cache configuration from environment
-const NZBDAV_CACHE_TTL_MS = (() => {
+let NZBDAV_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function reloadNzbdavCacheConfig() {
   const raw = Number(process.env.NZBDAV_CACHE_TTL_MINUTES);
-  if (Number.isFinite(raw) && raw >= 0) return raw * 60 * 1000;
-  return 24 * 60 * 60 * 1000; // Default 24 hours
-})();
+  if (Number.isFinite(raw) && raw >= 0) {
+    NZBDAV_CACHE_TTL_MS = raw * 60 * 1000;
+  } else {
+    NZBDAV_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+  }
+}
+
+reloadNzbdavCacheConfig();
 
 function cleanupNzbdavCache() {
   if (NZBDAV_CACHE_TTL_MS <= 0) return;
@@ -100,4 +107,5 @@ module.exports = {
   getOrCreateNzbdavStream,
   buildNzbdavCacheKey,
   getNzbdavCacheStats,
+  reloadNzbdavCacheConfig,
 };

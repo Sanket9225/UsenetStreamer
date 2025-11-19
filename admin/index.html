@@ -16,7 +16,7 @@
 
     <section class="card">
       <h2>Authentication</h2>
-      <p class="hint">Enter the change token (the same one embedded in your manifest). Use this only if you think the addon URL is exposed to the world.</p>
+  <p class="hint">Optional security: enter the change token (the value embedded in your manifest) only if you enabled it via configuration. Leave this blank if you never set <code>ADDON_SHARED_SECRET</code>.</p>
       <p class="warning">Treat this token like a password. If someone has both the token and the public addon URL, they can open the admin panel and view or modify your credentials.</p>
       <div class="field-row">
         <label for="tokenInput">Change Token</label>
@@ -35,31 +35,85 @@
               <select name="INDEXER_MANAGER">
                 <option value="prowlarr">Prowlarr</option>
                 <option value="nzbhydra">NZBHydra</option>
+                <option value="none" selected>Newznab Only</option>
               </select>
             </label>
-            <label>Manager URL
+            <label data-manager-field>Manager URL
               <input name="INDEXER_MANAGER_URL" type="url" placeholder="http://localhost:9696" />
             </label>
-            <label>API Key
+            <label data-manager-field>API Key
               <input name="INDEXER_MANAGER_API_KEY" type="password" autocomplete="new-password" />
             </label>
-            <label>Indexer IDs / Names
+            <label data-manager-field>Indexer IDs / Names
               <input name="INDEXER_MANAGER_INDEXERS" type="text" placeholder="-1 or sci-fi,4k" />
               <span class="field-hint">Comma-separated list of indexers this addon may query. Prowlarr: numeric IDs, with -1 meaning “all Usenet indexers”. NZBHydra: type the indexer names exactly as shown in Hydra.</span>
             </label>
-            <label>Paid Indexers (comma separated)
+            <label data-manager-field>Paid Indexers (comma separated)
               <input name="NZB_TRIAGE_PRIORITY_INDEXERS" type="text" placeholder="9,33" />
               <span class="field-hint">Subset of the above list that gets used for health checks. Must be a comma-separated subset of “Indexer IDs / Names”.</span>
             </label>
-            <label class="checkbox">
+            <label class="checkbox" data-manager-field>
               <input name="INDEXER_MANAGER_STRICT_ID_MATCH" type="checkbox" />
               <span>Strict ID Matching Only</span>
               <span class="field-hint">Faster ID-only searches; indexers that rely on text queries will be skipped.</span>
             </label>
           </div>
-          <div class="inline-actions">
+          <div class="inline-actions" data-manager-field>
             <button type="button" class="secondary" data-test="indexer">Test Connection</button>
             <span class="status-message" data-test-status="indexer"></span>
+          </div>
+        </section>
+
+        <section class="group" id="newznabGroup">
+          <h3>Direct Newznab Indexers (Optional)</h3>
+          <p class="hint">Add one or more direct Newznab endpoints. Enable them to search alongside your manager (or run manager-free), test each row, and reorder to control priority.</p>
+          <div class="newznab-preset-bar">
+            <label>Preset
+              <select id="newznabPreset"></select>
+            </label>
+            <button type="button" id="addPresetIndexer" class="secondary">Add from preset</button>
+          </div>
+          <div id="newznab-indexers-list" class="newznab-list">
+            <p class="newznab-empty-hint" data-empty-hint>No indexers added yet. Pick a preset or add one manually.</p>
+          </div>
+          <div class="newznab-actions-top">
+            <button type="button" id="addNewznabIndexer" class="secondary">Add Indexer</button>
+          </div>
+          <div class="divider"></div>
+          <div class="newznab-controls">
+            <label class="checkbox">
+              <input name="NEWZNAB_ENABLED" type="checkbox" />
+              <span>Enable Direct Newznab Queries</span>
+              <span class="field-hint">Queries these endpoints alongside (or instead of) your indexer manager.</span>
+            </label>
+            <label class="checkbox">
+              <input name="NEWZNAB_FILTER_NZB_ONLY" type="checkbox" checked />
+              <span>Filter to NZB URLs Only</span>
+              <span class="field-hint">Keeps only download links ending with .nzb or getnzb (recommended to reduce noise).</span>
+            </label>
+          </div>
+          <div class="inline-actions">
+            <button type="button" class="secondary" data-test="newznab">Test Connection</button>
+            <span class="status-message" data-test-status="newznab"></span>
+          </div>
+          <div id="newznab-test-search" class="hidden">
+            <div class="field-grid">
+              <label>Test Search Type
+                <select name="NEWZNAB_TEST_TYPE">
+                  <option value="search">General</option>
+                  <option value="movie">Movie</option>
+                  <option value="tvsearch">TV</option>
+                </select>
+              </label>
+              <label>Test Search Query
+                <input name="NEWZNAB_TEST_QUERY" type="text" placeholder="e.g. Dune 2021 1080p" />
+                <span class="field-hint">Runs a Newznab search against the configured endpoints and shows a quick summary.</span>
+              </label>
+            </div>
+            <div class="inline-actions">
+              <button type="button" class="secondary" data-test="newznab-search">Run Test Search</button>
+              <span class="status-message" data-test-status="newznab-search"></span>
+            </div>
           </div>
         </section>
 
@@ -218,13 +272,13 @@
             </label>
             <label>Change Token
               <input name="ADDON_SHARED_SECRET" type="password" autocomplete="new-password" />
-              <span class="field-hint">Use this if you believe the addon URL is exposed to the world.</span>
+              <span class="field-hint">Optional — set this only when you want the manifest, streams, and admin API protected by a shared secret.</span>
             </label>
           </div>
         </section>
 
         <div class="actions">
-          <button type="submit" class="primary">Save &amp; Restart</button>
+          <button type="submit" class="primary">Save Changes</button>
           <span id="saveStatus" class="status-message"></span>
         </div>
       </form>

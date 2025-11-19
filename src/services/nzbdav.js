@@ -12,22 +12,43 @@ const { sleep, safeStat } = require('../utils/helpers');
 const pipelineAsync = promisify(pipeline);
 
 // Configuration
-const NZBDAV_URL = (process.env.NZBDAV_URL || '').trim();
-const NZBDAV_API_KEY = (process.env.NZBDAV_API_KEY || '').trim();
-const NZBDAV_WEBDAV_URL = (process.env.NZBDAV_WEBDAV_URL || NZBDAV_URL).trim();
-const NZBDAV_WEBDAV_USER = (process.env.NZBDAV_WEBDAV_USER || '').trim();
-const NZBDAV_WEBDAV_PASS = (process.env.NZBDAV_WEBDAV_PASS || '').trim();
-const NZBDAV_WEBDAV_ROOT = '/';
-const NZBDAV_CATEGORY_MOVIES = process.env.NZBDAV_CATEGORY_MOVIES || 'Movies';
-const NZBDAV_CATEGORY_SERIES = process.env.NZBDAV_CATEGORY_SERIES || 'Tv';
-const NZBDAV_CATEGORY_DEFAULT = process.env.NZBDAV_CATEGORY_DEFAULT || 'Movies';
-const NZBDAV_CATEGORY_OVERRIDE = (process.env.NZBDAV_CATEGORY || '').trim();
-const NZBDAV_POLL_INTERVAL_MS = 2000;
-const NZBDAV_POLL_TIMEOUT_MS = 80000;
-const NZBDAV_HISTORY_FETCH_LIMIT = (() => {
+let NZBDAV_URL = (process.env.NZBDAV_URL || '').trim();
+let NZBDAV_API_KEY = (process.env.NZBDAV_API_KEY || '').trim();
+let NZBDAV_WEBDAV_URL = (process.env.NZBDAV_WEBDAV_URL || NZBDAV_URL).trim();
+let NZBDAV_WEBDAV_USER = (process.env.NZBDAV_WEBDAV_USER || '').trim();
+let NZBDAV_WEBDAV_PASS = (process.env.NZBDAV_WEBDAV_PASS || '').trim();
+let NZBDAV_WEBDAV_ROOT = '/';
+let NZBDAV_CATEGORY_MOVIES = process.env.NZBDAV_CATEGORY_MOVIES || 'Movies';
+let NZBDAV_CATEGORY_SERIES = process.env.NZBDAV_CATEGORY_SERIES || 'Tv';
+let NZBDAV_CATEGORY_DEFAULT = process.env.NZBDAV_CATEGORY_DEFAULT || 'Movies';
+let NZBDAV_CATEGORY_OVERRIDE = (process.env.NZBDAV_CATEGORY || '').trim();
+let NZBDAV_POLL_INTERVAL_MS = 2000;
+let NZBDAV_POLL_TIMEOUT_MS = 80000;
+let NZBDAV_HISTORY_FETCH_LIMIT = (() => {
   const raw = Number(process.env.NZBDAV_HISTORY_FETCH_LIMIT);
   return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 500) : 400;
 })();
+
+function reloadConfig() {
+  NZBDAV_URL = (process.env.NZBDAV_URL || '').trim();
+  NZBDAV_API_KEY = (process.env.NZBDAV_API_KEY || '').trim();
+  NZBDAV_WEBDAV_URL = (process.env.NZBDAV_WEBDAV_URL || NZBDAV_URL).trim();
+  NZBDAV_WEBDAV_USER = (process.env.NZBDAV_WEBDAV_USER || '').trim();
+  NZBDAV_WEBDAV_PASS = (process.env.NZBDAV_WEBDAV_PASS || '').trim();
+  NZBDAV_WEBDAV_ROOT = '/';
+  NZBDAV_CATEGORY_MOVIES = process.env.NZBDAV_CATEGORY_MOVIES || 'Movies';
+  NZBDAV_CATEGORY_SERIES = process.env.NZBDAV_CATEGORY_SERIES || 'Tv';
+  NZBDAV_CATEGORY_DEFAULT = process.env.NZBDAV_CATEGORY_DEFAULT || 'Movies';
+  NZBDAV_CATEGORY_OVERRIDE = (process.env.NZBDAV_CATEGORY || '').trim();
+  NZBDAV_POLL_INTERVAL_MS = 2000;
+  NZBDAV_POLL_TIMEOUT_MS = 80000;
+  NZBDAV_HISTORY_FETCH_LIMIT = (() => {
+    const raw = Number(process.env.NZBDAV_HISTORY_FETCH_LIMIT);
+    return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 500) : 400;
+  })();
+}
+
+reloadConfig();
 const NZBDAV_MAX_DIRECTORY_DEPTH = 6;
 const NZBDAV_API_TIMEOUT_MS = 80000;
 const NZBDAV_HISTORY_TIMEOUT_MS = 60000;
@@ -855,4 +876,5 @@ module.exports = {
   streamFailureVideo,
   proxyNzbdavStream,
   getWebdavClient,
+  reloadConfig,
 };

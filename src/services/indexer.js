@@ -2,26 +2,37 @@
 const axios = require('axios');
 const { getPublishMetadataFromResult, areReleasesWithinDays } = require('../utils/publishInfo');
 
-// Configuration
-const INDEXER_MANAGER = (process.env.INDEXER_MANAGER || 'prowlarr').trim().toLowerCase();
-const INDEXER_MANAGER_URL = (process.env.INDEXER_MANAGER_URL || process.env.PROWLARR_URL || '').trim();
-const INDEXER_MANAGER_API_KEY = (process.env.INDEXER_MANAGER_API_KEY || process.env.PROWLARR_API_KEY || '').trim();
-const INDEXER_MANAGER_INDEXERS = (() => {
-  const fallback = INDEXER_MANAGER === 'nzbhydra' ? '' : '-1';
-  const raw = (process.env.INDEXER_MANAGER_INDEXERS || process.env.PROWLARR_INDEXER_IDS || '').trim();
-  if (!raw) return fallback;
-  const joined = raw
-    .split(',')
-    .map((id) => id.trim())
-    .filter((id) => id.length > 0)
-    .join(',');
-  return joined || fallback;
-})();
-const INDEXER_MANAGER_CACHE_MINUTES = (() => {
-  const raw = Number(process.env.INDEXER_MANAGER_CACHE_MINUTES);
-  return Number.isFinite(raw) && raw >= 0 ? raw : 10;
-})();
-const INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
+// Configuration (runtime reloadable)
+let INDEXER_MANAGER = 'prowlarr';
+let INDEXER_MANAGER_URL = '';
+let INDEXER_MANAGER_API_KEY = '';
+let INDEXER_MANAGER_INDEXERS = '-1';
+let INDEXER_MANAGER_CACHE_MINUTES = 10;
+let INDEXER_MANAGER_BASE_URL = '';
+
+function reloadConfig() {
+  INDEXER_MANAGER = (process.env.INDEXER_MANAGER || 'prowlarr').trim().toLowerCase();
+  INDEXER_MANAGER_URL = (process.env.INDEXER_MANAGER_URL || process.env.PROWLARR_URL || '').trim();
+  INDEXER_MANAGER_API_KEY = (process.env.INDEXER_MANAGER_API_KEY || process.env.PROWLARR_API_KEY || '').trim();
+  INDEXER_MANAGER_INDEXERS = (() => {
+    const fallback = INDEXER_MANAGER === 'nzbhydra' ? '' : '-1';
+    const raw = (process.env.INDEXER_MANAGER_INDEXERS || process.env.PROWLARR_INDEXER_IDS || '').trim();
+    if (!raw) return fallback;
+    const joined = raw
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0)
+      .join(',');
+    return joined || fallback;
+  })();
+  INDEXER_MANAGER_CACHE_MINUTES = (() => {
+    const raw = Number(process.env.INDEXER_MANAGER_CACHE_MINUTES);
+    return Number.isFinite(raw) && raw >= 0 ? raw : 10;
+  })();
+  INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
+}
+
+reloadConfig();
 const PROWLARR_SEARCH_LIMIT = 1000;
 const TRIAGE_DECISION_SHARING_WINDOW_DAYS = 14;
 
@@ -29,6 +40,9 @@ const isUsingProwlarr = () => INDEXER_MANAGER === 'prowlarr';
 const isUsingNzbhydra = () => INDEXER_MANAGER === 'nzbhydra';
 
 function ensureIndexerManagerConfigured() {
+  if (INDEXER_MANAGER === 'none') {
+    return;
+  }
   if (!INDEXER_MANAGER_URL) {
     throw new Error('INDEXER_MANAGER_URL is not configured');
   }
@@ -311,6 +325,9 @@ async function executeNzbhydraSearch(plan) {
 
 // Main execution function
 function executeIndexerPlan(plan) {
+  if (INDEXER_MANAGER === 'none') {
+    return Promise.resolve([]);
+  }
   if (isUsingNzbhydra()) {
     return executeNzbhydraSearch(plan);
   }
@@ -362,4 +379,5 @@ module.exports = {
   executeNzbhydraSearch,
   buildProwlarrSearchParams,
   buildHydraSearchParams,
+  reloadConfig,
 };

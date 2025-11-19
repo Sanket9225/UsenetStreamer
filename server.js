@@ -18,6 +18,8 @@ const {
   testIndexerConnection,
   testNzbdavConnection,
   testUsenetConnection,
+  testNewznabConnection,
+  testNewznabSearch,
 } = require('./src/utils/connectionTests');
 const { triageAndRank } = require('./src/services/triage/runner');
 const { preWarmNntpPool } = require('./src/services/triage');
@@ -28,6 +30,7 @@ const {
 const { parseReleaseMetadata, LANGUAGE_FILTERS, LANGUAGE_SYNONYMS } = require('./src/services/metadata/releaseParser');
 const cache = require('./src/cache');
 const { ensureSharedSecret } = require('./src/middleware/auth');
+const newznabService = require('./src/services/newznab');
 const { toFiniteNumber, toPositiveInt, toBoolean, parseCommaList, parsePathList, normalizeSortMode, resolvePreferredLanguage, toSizeBytesFromGb, collectConfigValues, computeManifestUrl, stripTrailingSlashes, decodeBase64Value } = require('./src/utils/config');
 const { normalizeReleaseTitle, parseRequestedEpisode, isVideoFileName, fileMatchesEpisode, normalizeNzbdavPath, inferMimeType, normalizeIndexerToken, nzbMatchesIndexer, cleanSpecialSearchTitle } = require('./src/utils/parsers');
 const { sleep, annotateNzbResult, applyMaxSizeFilter, prepareSortedResults, triageStatusRank, buildTriageTitleMap, prioritizeTriageCandidates, triageDecisionsMatchStatuses, sanitizeDecisionForCache, serializeFinalNzbResults, restoreFinalNzbResults, safeStat } = require('./src/utils/helpers');
@@ -36,8 +39,10 @@ const nzbdavService = require('./src/services/nzbdav');
 const specialMetadata = require('./src/services/specialMetadata');
 
 const app = express();
-const port = Number(process.env.PORT || 7000);
+let currentPort = Number(process.env.PORT || 7000);
 const ADDON_VERSION = '1.3.1';
+let serverInstance = null;
+const SERVER_HOST = '0.0.0.0';
 
 app.use(cors());
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
@@ -55,16 +60,12 @@ adminApiRouter.get('/config', (req, res) => {
     values,
     manifestUrl: computeManifestUrl(),
     runtimeEnvPath: runtimeEnv.RUNTIME_ENV_FILE,
+    debugNewznabSearch: isNewznabDebugEnabled(),
+    newznabPresets: newznabService.getAvailableNewznabPresets(),
   });
 });
 
-function scheduleRestart() {
-  setTimeout(() => {
-    console.log('[ADMIN] Restarting service to apply configuration changes...');
-    process.exit(0);
-  }, 300);
-}
-adminApiRouter.post('/config', (req, res) => {
+adminApiRouter.post('/config', async (req, res) => {
   const payload = req.body || {};
   const incoming = payload.values;
   if (!incoming || typeof incoming !== 'object') {
@@ -73,9 +74,25 @@ adminApiRouter.post('/config', (req, res) => {
   }
 
   const updates = {};
+  const numberedKeySet = new Set(NEWZNAB_NUMBERED_KEYS);
+  NEWZNAB_NUMBERED_KEYS.forEach((key) => {
+    updates[key] = null;
+  });
+
   ADMIN_CONFIG_KEYS.forEach((key) => {
     if (Object.prototype.hasOwnProperty.call(incoming, key)) {
       const value = incoming[key];
+      if (numberedKeySet.has(key)) {
+        const trimmed = typeof value === 'string' ? value.trim() : value;
+        if (trimmed === '' || trimmed === null || trimmed === undefined) {
+          updates[key] = null;
+        } else if (typeof value === 'boolean') {
+          updates[key] = value ? 'true' : 'false';
+        } else {
+          updates[key] = String(value);
+        }
+        return;
+      }
       if (value === null || value === undefined) {
         updates[key] = '';
       } else if (typeof value === 'boolean') {
@@ -89,15 +106,23 @@ adminApiRouter.post('/config', (req, res) => {
   try {
     runtimeEnv.updateRuntimeEnv(updates);
     runtimeEnv.applyRuntimeEnv();
+    indexerService.reloadConfig();
+    nzbdavService.reloadConfig();
+    if (typeof cache.reloadNzbdavCacheConfig === 'function') {
+      cache.reloadNzbdavCacheConfig();
+    }
     cache.clearAllCaches('admin-config-save');
+    const { portChanged } = rebuildRuntimeConfig();
+    if (portChanged) {
+      await restartHttpServer();
+    } else {
+      startHttpServer();
+    }
+    res.json({ success: true, manifestUrl: computeManifestUrl(), hotReloaded: true, portChanged });
   } catch (error) {
     console.error('[ADMIN] Failed to update configuration', error);
     res.status(500).json({ error: 'Failed to persist configuration changes' });
-    return;
   }
-
-  res.json({ success: true, manifestUrl: computeManifestUrl(), restarting: true });
-  scheduleRestart();
 });
 
 adminApiRouter.post('/test-connections', async (req, res) => {
@@ -119,6 +144,12 @@ adminApiRouter.post('/test-connections', async (req, res) => {
         break;
       case 'usenet':
         message = await testUsenetConnection(values);
+        break;
+      case 'newznab':
+        message = await testNewznabConnection(values);
+        break;
+      case 'newznab-search':
+        message = await testNewznabSearch(values);
         break;
       default:
         res.status(400).json({ error: `Unknown test type: ${type}` });
@@ -150,25 +181,67 @@ app.use((req, res, next) => {
 // Additional authentication middleware is registered after admin routes are defined
 
 // Configure indexer manager (Prowlarr or NZBHydra)
-const INDEXER_MANAGER = (process.env.INDEXER_MANAGER || 'prowlarr').trim().toLowerCase();
-const INDEXER_MANAGER_URL = (process.env.INDEXER_MANAGER_URL || process.env.PROWLARR_URL || '').trim();
-const INDEXER_MANAGER_API_KEY = (process.env.INDEXER_MANAGER_API_KEY || process.env.PROWLARR_API_KEY || '').trim();
-const INDEXER_MANAGER_LABEL = INDEXER_MANAGER === 'nzbhydra' ? 'NZBHydra' : 'Prowlarr';
-const INDEXER_MANAGER_STRICT_ID_MATCH = toBoolean(process.env.INDEXER_MANAGER_STRICT_ID_MATCH || process.env.PROWLARR_STRICT_ID_MATCH, false);
-const INDEXER_MANAGER_INDEXERS = (() => {
+let INDEXER_MANAGER = (process.env.INDEXER_MANAGER || 'none').trim().toLowerCase();
+let INDEXER_MANAGER_URL = (process.env.INDEXER_MANAGER_URL || process.env.PROWLARR_URL || '').trim();
+let INDEXER_MANAGER_API_KEY = (process.env.INDEXER_MANAGER_API_KEY || process.env.PROWLARR_API_KEY || '').trim();
+let INDEXER_MANAGER_LABEL = INDEXER_MANAGER === 'nzbhydra'
+  ? 'NZBHydra'
+  : INDEXER_MANAGER === 'none'
+    ? 'Disabled'
+    : 'Prowlarr';
+let INDEXER_MANAGER_STRICT_ID_MATCH = toBoolean(process.env.INDEXER_MANAGER_STRICT_ID_MATCH || process.env.PROWLARR_STRICT_ID_MATCH, false);
+let INDEXER_MANAGER_INDEXERS = (() => {
   const raw = process.env.INDEXER_MANAGER_INDEXERS || process.env.PROWLARR_INDEXERS || '';
   if (!raw.trim()) return null;
   if (raw.trim() === '-1') return -1;
   return parseCommaList(raw);
 })();
-const INDEXER_LOG_PREFIX = `[${INDEXER_MANAGER_LABEL.toUpperCase()}]`;
-const INDEXER_MANAGER_CACHE_MINUTES = (() => {
+let INDEXER_LOG_PREFIX = `[${INDEXER_MANAGER_LABEL.toUpperCase()}]`;
+let INDEXER_MANAGER_CACHE_MINUTES = (() => {
   const raw = Number(process.env.INDEXER_MANAGER_CACHE_MINUTES || process.env.NZBHYDRA_CACHE_MINUTES);
   return Number.isFinite(raw) && raw > 0 ? raw : (INDEXER_MANAGER === 'nzbhydra' ? 10 : null);
 })();
-const INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
-const ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
+let INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
+let ADDON_BASE_URL = (process.env.ADDON_BASE_URL || '').trim();
+let ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
 const DEFAULT_MAX_RESULT_SIZE_GB = 30;
+let INDEXER_MANAGER_BACKOFF_ENABLED = toBoolean(process.env.INDEXER_MANAGER_BACKOFF_ENABLED, true);
+let INDEXER_MANAGER_BACKOFF_SECONDS = toPositiveInt(process.env.INDEXER_MANAGER_BACKOFF_SECONDS, 120);
+let indexerManagerUnavailableUntil = 0;
+
+let NEWZNAB_ENABLED = toBoolean(process.env.NEWZNAB_ENABLED, false);
+let NEWZNAB_FILTER_NZB_ONLY = toBoolean(process.env.NEWZNAB_FILTER_NZB_ONLY, true);
+let DEBUG_NEWZNAB_SEARCH = toBoolean(process.env.DEBUG_NEWZNAB_SEARCH, false);
+let DEBUG_NEWZNAB_TEST = toBoolean(process.env.DEBUG_NEWZNAB_TEST, false);
+let NEWZNAB_CONFIGS = newznabService.getEnvNewznabConfigs({ includeEmpty: false });
+let ACTIVE_NEWZNAB_CONFIGS = newznabService.filterUsableConfigs(NEWZNAB_CONFIGS, { requireEnabled: true, requireApiKey: true });
+const NEWZNAB_LOG_PREFIX = '[NEWZNAB]';
+
+function isNewznabDebugEnabled() {
+  return Boolean(DEBUG_NEWZNAB_SEARCH || DEBUG_NEWZNAB_TEST);
+}
+
+function summarizeNewznabPlan(plan) {
+  if (!plan || typeof plan !== 'object') {
+    return null;
+  }
+  return {
+    type: plan.type || null,
+    query: plan.rawQuery || plan.query || null,
+    tokens: Array.isArray(plan.tokens) ? plan.tokens.filter(Boolean) : [],
+  };
+}
+
+function logNewznabDebug(message, context = null) {
+  if (!isNewznabDebugEnabled()) {
+    return;
+  }
+  if (context && Object.keys(context).length > 0) {
+    console.log(`${NEWZNAB_LOG_PREFIX}[DEBUG] ${message}`, context);
+  } else {
+    console.log(`${NEWZNAB_LOG_PREFIX}[DEBUG] ${message}`);
+  }
+}
 
 function buildTriageNntpConfig() {
   const host = (process.env.NZB_TRIAGE_NNTP_HOST || '').trim();
@@ -182,31 +255,31 @@ function buildTriageNntpConfig() {
   };
 }
 
-const INDEXER_SORT_MODE = normalizeSortMode(process.env.NZB_SORT_MODE, 'quality_then_size');
-const INDEXER_PREFERRED_LANGUAGE = resolvePreferredLanguage(process.env.NZB_PREFERRED_LANGUAGE, '');
-const INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
+let INDEXER_SORT_MODE = normalizeSortMode(process.env.NZB_SORT_MODE, 'quality_then_size');
+let INDEXER_PREFERRED_LANGUAGE = resolvePreferredLanguage(process.env.NZB_PREFERRED_LANGUAGE, '');
+let INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
   process.env.NZB_MAX_RESULT_SIZE_GB && process.env.NZB_MAX_RESULT_SIZE_GB !== ''
     ? process.env.NZB_MAX_RESULT_SIZE_GB
     : DEFAULT_MAX_RESULT_SIZE_GB
 );
-const TRIAGE_ENABLED = toBoolean(process.env.NZB_TRIAGE_ENABLED, false);
-const TRIAGE_TIME_BUDGET_MS = toPositiveInt(process.env.NZB_TRIAGE_TIME_BUDGET_MS, 35000);
-const TRIAGE_MAX_CANDIDATES = toPositiveInt(process.env.NZB_TRIAGE_MAX_CANDIDATES, 25);
-const TRIAGE_DOWNLOAD_CONCURRENCY = toPositiveInt(process.env.NZB_TRIAGE_DOWNLOAD_CONCURRENCY, 8);
-const TRIAGE_PRIORITY_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_PRIORITY_INDEXERS);
-const TRIAGE_HEALTH_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_HEALTH_INDEXERS);
-const TRIAGE_SERIALIZED_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_SERIALIZED_INDEXERS);
-const TRIAGE_ARCHIVE_DIRS = parsePathList(process.env.NZB_TRIAGE_ARCHIVE_DIRS);
-const TRIAGE_NNTP_CONFIG = buildTriageNntpConfig();
-const TRIAGE_MAX_DECODED_BYTES = toPositiveInt(process.env.NZB_TRIAGE_MAX_DECODED_BYTES, 32 * 1024);
-const TRIAGE_NNTP_MAX_CONNECTIONS = toPositiveInt(process.env.NZB_TRIAGE_MAX_CONNECTIONS, 60);
-const TRIAGE_MAX_PARALLEL_NZBS = toPositiveInt(process.env.NZB_TRIAGE_MAX_PARALLEL_NZBS, 16);
-const TRIAGE_STAT_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_STAT_SAMPLE_COUNT, 2);
-const TRIAGE_ARCHIVE_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_ARCHIVE_SAMPLE_COUNT, 1);
-const TRIAGE_REUSE_POOL = toBoolean(process.env.NZB_TRIAGE_REUSE_POOL, true);
-const TRIAGE_NNTP_KEEP_ALIVE_MS = toPositiveInt(process.env.NZB_TRIAGE_NNTP_KEEP_ALIVE_MS, 0);
+let TRIAGE_ENABLED = toBoolean(process.env.NZB_TRIAGE_ENABLED, false);
+let TRIAGE_TIME_BUDGET_MS = toPositiveInt(process.env.NZB_TRIAGE_TIME_BUDGET_MS, 35000);
+let TRIAGE_MAX_CANDIDATES = toPositiveInt(process.env.NZB_TRIAGE_MAX_CANDIDATES, 25);
+let TRIAGE_DOWNLOAD_CONCURRENCY = toPositiveInt(process.env.NZB_TRIAGE_DOWNLOAD_CONCURRENCY, 8);
+let TRIAGE_PRIORITY_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_PRIORITY_INDEXERS);
+let TRIAGE_HEALTH_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_HEALTH_INDEXERS);
+let TRIAGE_SERIALIZED_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_SERIALIZED_INDEXERS);
+let TRIAGE_ARCHIVE_DIRS = parsePathList(process.env.NZB_TRIAGE_ARCHIVE_DIRS);
+let TRIAGE_NNTP_CONFIG = buildTriageNntpConfig();
+let TRIAGE_MAX_DECODED_BYTES = toPositiveInt(process.env.NZB_TRIAGE_MAX_DECODED_BYTES, 32 * 1024);
+let TRIAGE_NNTP_MAX_CONNECTIONS = toPositiveInt(process.env.NZB_TRIAGE_MAX_CONNECTIONS, 60);
+let TRIAGE_MAX_PARALLEL_NZBS = toPositiveInt(process.env.NZB_TRIAGE_MAX_PARALLEL_NZBS, 16);
+let TRIAGE_STAT_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_STAT_SAMPLE_COUNT, 2);
+let TRIAGE_ARCHIVE_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_ARCHIVE_SAMPLE_COUNT, 1);
+let TRIAGE_REUSE_POOL = toBoolean(process.env.NZB_TRIAGE_REUSE_POOL, true);
+let TRIAGE_NNTP_KEEP_ALIVE_MS = toPositiveInt(process.env.NZB_TRIAGE_NNTP_KEEP_ALIVE_MS, 0);
 
-const TRIAGE_BASE_OPTIONS = {
+let TRIAGE_BASE_OPTIONS = {
   archiveDirs: TRIAGE_ARCHIVE_DIRS,
   maxDecodedBytes: TRIAGE_MAX_DECODED_BYTES,
   nntpMaxConnections: TRIAGE_NNTP_MAX_CONNECTIONS,
@@ -218,7 +291,13 @@ const TRIAGE_BASE_OPTIONS = {
   healthCheckTimeoutMs: TRIAGE_TIME_BUDGET_MS,
 };
 
-if (TRIAGE_REUSE_POOL && TRIAGE_NNTP_CONFIG) {
+const MAX_NEWZNAB_INDEXERS = newznabService.MAX_NEWZNAB_INDEXERS;
+const NEWZNAB_NUMBERED_KEYS = newznabService.NEWZNAB_NUMBERED_KEYS;
+
+function maybePrewarmSharedNntpPool() {
+  if (!TRIAGE_REUSE_POOL || !TRIAGE_NNTP_CONFIG) {
+    return;
+  }
   preWarmNntpPool({
     nntpConfig: { ...TRIAGE_NNTP_CONFIG },
     nntpMaxConnections: TRIAGE_NNTP_MAX_CONNECTIONS,
@@ -232,6 +311,103 @@ if (TRIAGE_REUSE_POOL && TRIAGE_NNTP_CONFIG) {
       console.warn('[NZB TRIAGE] Unable to pre-warm NNTP pool', err?.message || err);
     });
 }
+
+function rebuildRuntimeConfig({ log = true } = {}) {
+  const previousPort = currentPort;
+  currentPort = Number(process.env.PORT || 7000);
+  const previousBaseUrl = ADDON_BASE_URL;
+  const previousSharedSecret = ADDON_SHARED_SECRET;
+
+  ADDON_BASE_URL = (process.env.ADDON_BASE_URL || '').trim();
+  ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
+
+  INDEXER_MANAGER = (process.env.INDEXER_MANAGER || 'none').trim().toLowerCase();
+  INDEXER_MANAGER_URL = (process.env.INDEXER_MANAGER_URL || process.env.PROWLARR_URL || '').trim();
+  INDEXER_MANAGER_API_KEY = (process.env.INDEXER_MANAGER_API_KEY || process.env.PROWLARR_API_KEY || '').trim();
+  INDEXER_MANAGER_LABEL = INDEXER_MANAGER === 'nzbhydra'
+    ? 'NZBHydra'
+    : INDEXER_MANAGER === 'none'
+      ? 'Disabled'
+      : 'Prowlarr';
+  INDEXER_MANAGER_STRICT_ID_MATCH = toBoolean(process.env.INDEXER_MANAGER_STRICT_ID_MATCH || process.env.PROWLARR_STRICT_ID_MATCH, false);
+  INDEXER_MANAGER_INDEXERS = (() => {
+    const raw = process.env.INDEXER_MANAGER_INDEXERS || process.env.PROWLARR_INDEXERS || '';
+    if (!raw.trim()) return null;
+    if (raw.trim() === '-1') return -1;
+    return parseCommaList(raw);
+  })();
+  INDEXER_LOG_PREFIX = `[${INDEXER_MANAGER_LABEL.toUpperCase()}]`;
+  INDEXER_MANAGER_CACHE_MINUTES = (() => {
+    const raw = Number(process.env.INDEXER_MANAGER_CACHE_MINUTES || process.env.NZBHYDRA_CACHE_MINUTES);
+    return Number.isFinite(raw) && raw > 0 ? raw : (INDEXER_MANAGER === 'nzbhydra' ? 10 : null);
+  })();
+  INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
+  INDEXER_MANAGER_BACKOFF_ENABLED = toBoolean(process.env.INDEXER_MANAGER_BACKOFF_ENABLED, true);
+  INDEXER_MANAGER_BACKOFF_SECONDS = toPositiveInt(process.env.INDEXER_MANAGER_BACKOFF_SECONDS, 120);
+  indexerManagerUnavailableUntil = 0;
+
+  NEWZNAB_ENABLED = toBoolean(process.env.NEWZNAB_ENABLED, false);
+  NEWZNAB_FILTER_NZB_ONLY = toBoolean(process.env.NEWZNAB_FILTER_NZB_ONLY, true);
+  DEBUG_NEWZNAB_SEARCH = toBoolean(process.env.DEBUG_NEWZNAB_SEARCH, false);
+  DEBUG_NEWZNAB_TEST = toBoolean(process.env.DEBUG_NEWZNAB_TEST, false);
+  NEWZNAB_CONFIGS = newznabService.getEnvNewznabConfigs({ includeEmpty: false });
+  ACTIVE_NEWZNAB_CONFIGS = newznabService.filterUsableConfigs(NEWZNAB_CONFIGS, { requireEnabled: true, requireApiKey: true });
+
+  INDEXER_SORT_MODE = normalizeSortMode(process.env.NZB_SORT_MODE, 'quality_then_size');
+  INDEXER_PREFERRED_LANGUAGE = resolvePreferredLanguage(process.env.NZB_PREFERRED_LANGUAGE, '');
+  INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
+    process.env.NZB_MAX_RESULT_SIZE_GB && process.env.NZB_MAX_RESULT_SIZE_GB !== ''
+      ? process.env.NZB_MAX_RESULT_SIZE_GB
+      : DEFAULT_MAX_RESULT_SIZE_GB
+  );
+
+  TRIAGE_ENABLED = toBoolean(process.env.NZB_TRIAGE_ENABLED, false);
+  TRIAGE_TIME_BUDGET_MS = toPositiveInt(process.env.NZB_TRIAGE_TIME_BUDGET_MS, 35000);
+  TRIAGE_MAX_CANDIDATES = toPositiveInt(process.env.NZB_TRIAGE_MAX_CANDIDATES, 25);
+  TRIAGE_DOWNLOAD_CONCURRENCY = toPositiveInt(process.env.NZB_TRIAGE_DOWNLOAD_CONCURRENCY, 8);
+  TRIAGE_PRIORITY_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_PRIORITY_INDEXERS);
+  TRIAGE_HEALTH_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_HEALTH_INDEXERS);
+  TRIAGE_SERIALIZED_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_SERIALIZED_INDEXERS);
+  TRIAGE_ARCHIVE_DIRS = parsePathList(process.env.NZB_TRIAGE_ARCHIVE_DIRS);
+  TRIAGE_NNTP_CONFIG = buildTriageNntpConfig();
+  TRIAGE_MAX_DECODED_BYTES = toPositiveInt(process.env.NZB_TRIAGE_MAX_DECODED_BYTES, 32 * 1024);
+  TRIAGE_NNTP_MAX_CONNECTIONS = toPositiveInt(process.env.NZB_TRIAGE_MAX_CONNECTIONS, 60);
+  TRIAGE_MAX_PARALLEL_NZBS = toPositiveInt(process.env.NZB_TRIAGE_MAX_PARALLEL_NZBS, 16);
+  TRIAGE_STAT_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_STAT_SAMPLE_COUNT, 2);
+  TRIAGE_ARCHIVE_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_ARCHIVE_SAMPLE_COUNT, 1);
+  TRIAGE_REUSE_POOL = toBoolean(process.env.NZB_TRIAGE_REUSE_POOL, true);
+  TRIAGE_NNTP_KEEP_ALIVE_MS = toPositiveInt(process.env.NZB_TRIAGE_NNTP_KEEP_ALIVE_MS, 0);
+  TRIAGE_BASE_OPTIONS = {
+    archiveDirs: TRIAGE_ARCHIVE_DIRS,
+    maxDecodedBytes: TRIAGE_MAX_DECODED_BYTES,
+    nntpMaxConnections: TRIAGE_NNTP_MAX_CONNECTIONS,
+    maxParallelNzbs: TRIAGE_MAX_PARALLEL_NZBS,
+    statSampleCount: TRIAGE_STAT_SAMPLE_COUNT,
+    archiveSampleCount: TRIAGE_ARCHIVE_SAMPLE_COUNT,
+    reuseNntpPool: TRIAGE_REUSE_POOL,
+    nntpKeepAliveMs: TRIAGE_NNTP_KEEP_ALIVE_MS,
+    healthCheckTimeoutMs: TRIAGE_TIME_BUDGET_MS,
+  };
+
+  maybePrewarmSharedNntpPool();
+
+  const portChanged = previousPort !== undefined && previousPort !== currentPort;
+  if (log) {
+    console.log('[CONFIG] Runtime configuration refreshed', {
+      port: currentPort,
+      portChanged,
+      baseUrlChanged: previousBaseUrl !== undefined && previousBaseUrl !== ADDON_BASE_URL,
+      sharedSecretChanged: previousSharedSecret !== undefined && previousSharedSecret !== ADDON_SHARED_SECRET,
+      indexerManager: INDEXER_MANAGER,
+      newznabEnabled: NEWZNAB_ENABLED,
+      triageEnabled: TRIAGE_ENABLED,
+    });
+  }
+
+  return { portChanged };
+}
+
+rebuildRuntimeConfig({ log: false });
 
 const ADMIN_CONFIG_KEYS = [
   'PORT',
@@ -279,6 +455,8 @@ const ADMIN_CONFIG_KEYS = [
   'NZB_TRIAGE_NNTP_KEEP_ALIVE_MS',
 ];
 
+ADMIN_CONFIG_KEYS.push('NEWZNAB_ENABLED', 'NEWZNAB_FILTER_NZB_ONLY', ...NEWZNAB_NUMBERED_KEYS);
+
 function extractTriageOverrides(query) {
   if (!query || typeof query !== 'object') return {};
   const sizeCandidate = query.maxSizeGb ?? query.max_size_gb ?? query.triageSizeGb ?? query.triage_size_gb ?? query.preferredSizeGb;
@@ -302,8 +480,72 @@ function extractTriageOverrides(query) {
   };
 }
 
+function executeManagerPlanWithBackoff(plan) {
+  if (INDEXER_MANAGER === 'none') {
+    return Promise.resolve({ results: [] });
+  }
+  if (INDEXER_MANAGER_BACKOFF_ENABLED && indexerManagerUnavailableUntil > Date.now()) {
+    const remaining = Math.ceil((indexerManagerUnavailableUntil - Date.now()) / 1000);
+    console.warn(`${INDEXER_LOG_PREFIX} Skipping manager search during backoff (${remaining}s remaining)`);
+    return Promise.resolve({ results: [], errors: [`manager backoff (${remaining}s remaining)`] });
+  }
+  return indexerService.executeIndexerPlan(plan)
+    .then((data) => ({ results: Array.isArray(data) ? data : [] }))
+    .catch((error) => {
+      if (INDEXER_MANAGER_BACKOFF_ENABLED) {
+        indexerManagerUnavailableUntil = Date.now() + (INDEXER_MANAGER_BACKOFF_SECONDS * 1000);
+        console.warn(`${INDEXER_LOG_PREFIX} Manager search failed; backing off for ${INDEXER_MANAGER_BACKOFF_SECONDS}s`, error?.message || error);
+      }
+      throw error;
+    });
+}
+
+function executeNewznabPlan(plan) {
+  const debugEnabled = isNewznabDebugEnabled();
+  const planSummary = summarizeNewznabPlan(plan);
+  if (!NEWZNAB_ENABLED || ACTIVE_NEWZNAB_CONFIGS.length === 0) {
+    logNewznabDebug('Skipping search plan because direct Newznab is disabled or no configs are available', {
+      enabled: NEWZNAB_ENABLED,
+      activeConfigs: ACTIVE_NEWZNAB_CONFIGS.length,
+      plan: planSummary,
+    });
+    return Promise.resolve({ results: [], errors: [], endpoints: [] });
+  }
+
+  if (debugEnabled) {
+    logNewznabDebug('Dispatching search plan', {
+      plan: planSummary,
+      indexers: ACTIVE_NEWZNAB_CONFIGS.map((config) => ({
+        id: config.id,
+        name: config.displayName || config.endpoint,
+        endpoint: config.endpoint,
+      })),
+      filterNzbOnly: NEWZNAB_FILTER_NZB_ONLY,
+    });
+  }
+
+  return newznabService.searchNewznabIndexers(plan, ACTIVE_NEWZNAB_CONFIGS, {
+    filterNzbOnly: NEWZNAB_FILTER_NZB_ONLY,
+    debug: debugEnabled,
+    label: NEWZNAB_LOG_PREFIX,
+  }).then((result) => {
+    logNewznabDebug('Search plan completed', {
+      plan: planSummary,
+      totalResults: Array.isArray(result?.results) ? result.results.length : 0,
+      endpoints: result?.endpoints || [],
+      errors: result?.errors || [],
+    });
+    return result;
+  }).catch((error) => {
+    logNewznabDebug('Search plan failed', {
+      plan: planSummary,
+      error: error?.message || error,
+    });
+    throw error;
+  });
+}
+
 // Configure NZBDav
-const ADDON_BASE_URL = (process.env.ADDON_BASE_URL || '').trim();
 const NZBDAV_URL = (process.env.NZBDAV_URL || '').trim();
 const NZBDAV_API_KEY = (process.env.NZBDAV_API_KEY || '').trim();
 const NZBDAV_CATEGORY_MOVIES = process.env.NZBDAV_CATEGORY_MOVIES || 'Movies';
@@ -427,12 +669,9 @@ function manifestHandler(req, res) {
   });
 }
 
-if (ADDON_SHARED_SECRET) {
-  app.get('/:token/manifest.json', manifestHandler);
-} else {
-  app.get('/manifest.json', manifestHandler);
-  app.get('/:token/manifest.json', manifestHandler);
-}
+['/manifest.json', '/:token/manifest.json'].forEach((route) => {
+  app.get(route, manifestHandler);
+});
 
 async function streamHandler(req, res) {
   const { type, id } = req.params;
@@ -487,7 +726,9 @@ async function streamHandler(req, res) {
 
   try {
     ensureAddonConfigured();
-    indexerService.ensureIndexerManagerConfigured();
+    if (INDEXER_MANAGER !== 'none') {
+      indexerService.ensureIndexerManagerConfigured();
+    }
     nzbdavService.ensureNzbdavConfigured();
 
     const requestedEpisode = parseRequestedEpisode(type, id, req.query || {});
@@ -850,9 +1091,50 @@ async function streamHandler(req, res) {
 
       const planExecutions = searchPlans.map((plan) => {
         console.log(`${INDEXER_LOG_PREFIX} Dispatching plan`, plan);
-        return indexerService.executeIndexerPlan(plan)
-          .then((data) => ({ plan, status: 'fulfilled', data }))
-          .catch((error) => ({ plan, status: 'rejected', error }));
+        return Promise.allSettled([
+          executeManagerPlanWithBackoff(plan),
+          executeNewznabPlan(plan),
+        ]).then((settled) => {
+          const managerSet = settled[0];
+          const newznabSet = settled[1];
+          const managerResults = managerSet?.status === 'fulfilled'
+            ? (Array.isArray(managerSet.value?.results) ? managerSet.value.results : (Array.isArray(managerSet.value) ? managerSet.value : []))
+            : [];
+          const newznabResults = newznabSet?.status === 'fulfilled'
+            ? (Array.isArray(newznabSet.value?.results) ? newznabSet.value.results : (Array.isArray(newznabSet.value) ? newznabSet.value : []))
+            : [];
+          const combinedResults = [...managerResults, ...newznabResults];
+          const errors = [];
+          if (managerSet?.status === 'rejected') {
+            errors.push(`manager: ${managerSet.reason?.message || managerSet.reason}`);
+          } else if (Array.isArray(managerSet?.value?.errors) && managerSet.value.errors.length) {
+            managerSet.value.errors.forEach((err) => errors.push(`manager: ${err}`));
+          }
+          if (newznabSet?.status === 'rejected') {
+            errors.push(`newznab: ${newznabSet.reason?.message || newznabSet.reason}`);
+          } else if (Array.isArray(newznabSet?.value?.errors) && newznabSet.value.errors.length) {
+            newznabSet.value.errors.forEach((err) => errors.push(`newznab: ${err}`));
+          }
+          if (combinedResults.length === 0 && errors.length > 0) {
+            return {
+              plan,
+              status: 'rejected',
+              error: new Error(errors.join('; ')),
+              errors,
+              mgrCount: managerResults.length,
+              newznabCount: newznabResults.length,
+            };
+          }
+          return {
+            plan,
+            status: 'fulfilled',
+            data: combinedResults,
+            errors,
+            mgrCount: managerResults.length,
+            newznabCount: newznabResults.length,
+            newznabEndpoints: Array.isArray(newznabSet?.value?.endpoints) ? newznabSet.value.endpoints : [],
+          };
+        });
       });
 
       const planResultsSettled = await Promise.all(planExecutions);
@@ -861,7 +1143,7 @@ async function streamHandler(req, res) {
         const { plan } = result;
         if (result.status === 'rejected') {
           console.error(`${INDEXER_LOG_PREFIX} ❌ Search plan failed`, {
-            message: result.error.message,
+            message: result.error?.message || result.errors?.join('; ') || result.error,
             type: plan.type,
             query: plan.query
           });
@@ -871,13 +1153,17 @@ async function streamHandler(req, res) {
             total: 0,
             filtered: 0,
             uniqueAdded: 0,
-            error: result.error.message
+            error: result.error?.message || result.errors?.join('; ') || 'Unknown failure'
           });
           continue;
         }
 
         const planResults = Array.isArray(result.data) ? result.data : [];
-  console.log(`${INDEXER_LOG_PREFIX} ✅ ${plan.type} returned ${planResults.length} total results for query "${plan.query}"`);
+        console.log(`${INDEXER_LOG_PREFIX} ✅ ${plan.type} returned ${planResults.length} total results for query "${plan.query}"`, {
+          managerCount: result.mgrCount || 0,
+          newznabCount: result.newznabCount || 0,
+          errors: result.errors && result.errors.length ? result.errors : undefined,
+        });
 
         const filteredResults = planResults.filter((item) => {
           if (!item || typeof item !== 'object') {
@@ -910,9 +1196,15 @@ async function streamHandler(req, res) {
           query: plan.query,
           total: planResults.length,
           filtered: filteredResults.length,
-          uniqueAdded: addedCount
+          uniqueAdded: addedCount,
+          managerCount: result.mgrCount || 0,
+          newznabCount: result.newznabCount || 0,
+          errors: result.errors && result.errors.length ? result.errors : undefined,
         });
         console.log(`${INDEXER_LOG_PREFIX} ✅ Plan summary`, planSummaries[planSummaries.length - 1]);
+        if (result.newznabEndpoints && result.newznabEndpoints.length) {
+          console.log(`${NEWZNAB_LOG_PREFIX} Endpoint results`, result.newznabEndpoints);
+        }
       }
 
       const aggregationCount = usingStrictIdMatching ? aggregatedResults.length : resultsByKey.size;
@@ -1366,12 +1658,9 @@ async function streamHandler(req, res) {
   }
 }
 
-if (ADDON_SHARED_SECRET) {
-  app.get('/:token/stream/:type/:id.json', streamHandler);
-} else {
-  app.get('/stream/:type/:id.json', streamHandler);
-  app.get('/:token/stream/:type/:id.json', streamHandler);
-}
+['/:token/stream/:type/:id.json', '/stream/:type/:id.json'].forEach((route) => {
+  app.get(route, streamHandler);
+});
 
 async function handleNzbdavStream(req, res) {
   const { downloadUrl, type = 'movie', id = '', title = 'NZB Stream' } = req.query;
@@ -1436,17 +1725,40 @@ async function handleNzbdavStream(req, res) {
   }
 }
 
-if (ADDON_SHARED_SECRET) {
-  app.get('/:token/nzb/stream', handleNzbdavStream);
-  app.head('/:token/nzb/stream', handleNzbdavStream);
-} else {
-  app.get('/:token/nzb/stream', handleNzbdavStream);
-  app.head('/:token/nzb/stream', handleNzbdavStream);
-  app.get('/nzb/stream', handleNzbdavStream);
-  app.head('/nzb/stream', handleNzbdavStream);
+['/:token/nzb/stream', '/nzb/stream'].forEach((route) => {
+  app.get(route, handleNzbdavStream);
+  app.head(route, handleNzbdavStream);
+});
+
+function startHttpServer() {
+  if (serverInstance) {
+    return serverInstance;
+  }
+  serverInstance = app.listen(currentPort, SERVER_HOST, () => {
+    console.log(`Addon running at http://${SERVER_HOST}:${currentPort}`);
+  });
+  serverInstance.on('close', () => {
+    serverInstance = null;
+  });
+  return serverInstance;
 }
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Addon running at http://0.0.0.0:${port}`);
-});
+async function restartHttpServer() {
+  if (!serverInstance) {
+    startHttpServer();
+    return;
+  }
+  await new Promise((resolve, reject) => {
+    serverInstance.close((err) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+  startHttpServer();
+}
+
+startHttpServer();
 

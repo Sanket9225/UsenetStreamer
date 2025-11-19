@@ -234,6 +234,64 @@ select:focus {
   font-weight: 600;
 }
 
+.field-grid label.wide-field {
+  grid-column: span 2;
+}
+
+.field-label-with-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.input-with-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.input-with-toggle input {
+  flex: 1;
+}
+
+.mask-toggle {
+  border: 1px solid rgba(94, 114, 130, 0.6);
+  border-radius: 6px;
+  background: transparent;
+  color: #e0e7ef;
+  font-weight: 600;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.mask-toggle:hover {
+  border-color: #40c4ff;
+  color: #40c4ff;
+}
+
+.api-key-link-wrapper {
+  font-weight: 400;
+  font-size: 0.85rem;
+  display: none;
+}
+
+.api-key-link {
+  font-size: 0.85rem;
+  color: #40c4ff;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.api-key-link:hover {
+  text-decoration: underline;
+}
+
+.api-key-link-wrapper:not(.hidden) {
+  display: inline-flex;
+}
+
 .field-hint {
   font-weight: 400;
   font-size: 0.85rem;
@@ -269,6 +327,135 @@ select:focus {
 
 .status-message.error {
   color: #ff6b6b;
+}
+
+.divider {
+  width: 100%;
+  height: 1px;
+  background: rgba(94, 114, 130, 0.4);
+  margin: 1rem 0;
+}
+
+.newznab-preset-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.newznab-preset-bar select {
+  min-width: 240px;
+}
+
+.newznab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.newznab-empty-hint {
+  margin: 0;
+  padding: 1rem;
+  border: 1px dashed rgba(94, 114, 130, 0.35);
+  border-radius: 10px;
+  text-align: center;
+  color: #9caec0;
+}
+
+.newznab-row {
+  border: 1px solid rgba(64, 84, 104, 0.7);
+  border-radius: 12px;
+  padding: 1rem;
+  background: rgba(14, 22, 30, 0.95);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.newznab-row .row-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.newznab-row .row-title {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.row-label {
+  font-weight: 600;
+}
+
+.row-handle {
+  font-size: 1.2rem;
+  line-height: 1;
+  color: #6f8096;
+  cursor: grab;
+  user-select: none;
+}
+
+.row-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+button.ghost {
+  background: transparent;
+  border: 1px dashed rgba(94, 114, 130, 0.6);
+  border-radius: 8px;
+  color: #cdd5e0;
+  padding: 0.45rem 0.85rem;
+  cursor: pointer;
+  font-weight: 600;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+button.ghost:hover {
+  border-color: #40c4ff;
+  color: #40c4ff;
+}
+
+button.ghost.danger {
+  border-color: rgba(255, 107, 107, 0.5);
+  color: #ff8a7a;
+}
+
+button.ghost.danger:hover {
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+}
+
+.newznab-row .field-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.newznab-row .row-inline {
+  justify-content: flex-start;
+}
+
+.newznab-row .row-status {
+  min-height: 1.2rem;
+}
+
+.newznab-actions-top {
+  margin-top: 0.25rem;
+}
+
+.newznab-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+#newznabGroup .divider {
+  margin: 1rem 0 0.5rem;
 }
 
 .support-note {

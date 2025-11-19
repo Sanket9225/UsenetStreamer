@@ -1,4 +1,10 @@
 const axios = require('axios');
+const {
+  getNewznabConfigsFromValues,
+  filterUsableConfigs,
+  searchNewznabIndexers,
+  validateNewznabSearch,
+} = require('../services/newznab');
 
 let NNTPClientCtor = null;
 try {
@@ -18,6 +24,17 @@ function parseBoolean(value) {
   if (value === null || value === undefined) return false;
   const normalized = String(value).trim().toLowerCase();
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+const NEWZNAB_DEBUG_ENABLED = parseBoolean(process.env.DEBUG_NEWZNAB_TEST) || parseBoolean(process.env.DEBUG_NEWZNAB_SEARCH);
+
+function logNewznabDebug(message, context = null) {
+  if (!NEWZNAB_DEBUG_ENABLED) return;
+  if (context && Object.keys(context).length > 0) {
+    console.log(`[NEWZNAB][TEST][DEBUG] ${message}`, context);
+  } else {
+    console.log(`[NEWZNAB][TEST][DEBUG] ${message}`);
+  }
 }
 
 function formatVersionLabel(prefix, version) {
@@ -230,8 +247,79 @@ async function testUsenetConnection(values) {
   });
 }
 
+async function testNewznabConnection(values) {
+  const configs = filterUsableConfigs(
+    getNewznabConfigsFromValues(values, { includeEmpty: true }),
+    { requireEnabled: true, requireApiKey: true }
+  );
+  if (!configs.length) {
+    throw new Error('At least one enabled Newznab indexer with an API key is required');
+  }
+  const results = [];
+  for (const config of configs) {
+    const message = await validateNewznabSearch(config, {
+      debug: NEWZNAB_DEBUG_ENABLED,
+      label: `[NEWZNAB][${config.displayName || config.id}]`,
+      query: values?.NEWZNAB_TEST_QUERY || 'usenetstreamer',
+    });
+    results.push(`${config.displayName || 'Newznab'}: ${message}`);
+  }
+  return results.join('; ');
+}
+
+async function testNewznabSearch(values) {
+  const configs = filterUsableConfigs(
+    getNewznabConfigsFromValues(values, { includeEmpty: true }),
+    { requireEnabled: true, requireApiKey: true }
+  );
+  if (!configs.length) {
+    throw new Error('Configure at least one enabled Newznab indexer (endpoint + API key) before running a test search');
+  }
+  const type = String(values?.NEWZNAB_TEST_TYPE || 'search').trim().toLowerCase() || 'search';
+  const query = (values?.NEWZNAB_TEST_QUERY || '').trim();
+  if (!query) {
+    throw new Error('Provide a query before running a Newznab test search');
+  }
+  const plan = {
+    type,
+    query,
+    rawQuery: query,
+    tokens: [],
+  };
+  logNewznabDebug('Running admin Newznab test search', {
+    plan,
+    indexers: configs.map((config) => ({ id: config.id, name: config.displayName, endpoint: config.endpoint })),
+  });
+  const result = await searchNewznabIndexers(plan, configs, {
+    filterNzbOnly: true,
+    debug: NEWZNAB_DEBUG_ENABLED,
+    label: '[NEWZNAB][TEST]',
+  });
+  logNewznabDebug('Admin Newznab test search completed', {
+    totalResults: result?.results?.length || 0,
+    endpoints: result?.endpoints || [],
+    errors: result?.errors || [],
+  });
+  const total = result.results.length;
+  const summaries = result.endpoints
+    .map((endpoint) => `${endpoint.name}: ${endpoint.count}`)
+    .join(', ');
+  const sampleTitles = result.results
+    .map((item) => item?.title)
+    .filter(Boolean)
+    .slice(0, 3);
+  const baseMessage = total > 0
+    ? `Found ${total} NZB${total === 1 ? '' : 's'} across ${result.endpoints.length} endpoint${result.endpoints.length === 1 ? '' : 's'}`
+    : `No NZBs found for "${query}"`;
+  const sampleMessage = sampleTitles.length ? ` Sample titles: ${sampleTitles.join(' | ')}` : '';
+  const errorMessage = result.errors?.length ? ` Errors: ${result.errors.join('; ')}` : '';
+  return `${baseMessage}${summaries ? ` (${summaries})` : ''}.${sampleMessage}${errorMessage}`.trim();
+}
+
 module.exports = {
   testIndexerConnection,
   testNzbdavConnection,
   testUsenetConnection,
+  testNewznabConnection,
+  testNewznabSearch,
 };
