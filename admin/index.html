@@ -35,7 +35,12 @@
               <select name="INDEXER_MANAGER">
                 <option value="prowlarr">Prowlarr</option>
                 <option value="nzbhydra">NZBHydra</option>
+                <option value="none" selected>Newznab Only</option>
               </select>
+            </label>
+            <label class="checkbox">
+              <input id="skipManagerToggle" type="checkbox" />
+              <span>Skip manager entirely (use only Direct Newznab)</span>
             </label>
             <label>Manager URL
               <input name="INDEXER_MANAGER_URL" type="url" placeholder="http://localhost:9696" />
@@ -63,7 +68,7 @@
           </div>
         </section>
 
-        <section class="group">
+        <section class="group" id="newznabGroup">
           <h3>Direct Newznab Indexers (Optional)</h3>
           <p class="hint">Add one or more indexers below. Use the preset dropdown to quickly add known indexers, give each a friendly name, and test them individually. You can reorder to control priority.</p>
           <div class="newznab-preset-bar">

@@ -209,6 +209,10 @@ const INDEXER_MANAGER_CACHE_MINUTES = (() => {
 })();
 const INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
 const ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
+// Optional: temporarily skip manager calls after failures (backoff)
+const INDEXER_MANAGER_BACKOFF_ENABLED = toBoolean(process.env.INDEXER_MANAGER_BACKOFF_ENABLED, true);
+const INDEXER_MANAGER_BACKOFF_SECONDS = toPositiveInt(process.env.INDEXER_MANAGER_BACKOFF_SECONDS, 120);
+let indexerManagerUnavailableUntil = 0;
 const DEBUG_NEWZNAB_SEARCH = ['1','true','yes','on'].includes(String(process.env.DEBUG_NEWZNAB_SEARCH || '').trim().toLowerCase());
 
 function maskApiKey(value) {
@@ -1054,6 +1058,7 @@ function ensureNzbdavConfigured() {
 }
 
 function ensureIndexerManagerConfigured() {
+  if (INDEXER_MANAGER === 'none') return; // manager disabled
   if (!INDEXER_MANAGER_URL) {
     throw new Error('INDEXER_MANAGER_URL is not configured');
   }
@@ -1411,10 +1416,29 @@ async function executeNzbhydraSearch(plan) {
 }
 
 function executeIndexerPlan(plan) {
+  if (INDEXER_MANAGER === 'none') {
+    return Promise.resolve([]);
+  }
   if (isUsingNzbhydra()) {
     return executeNzbhydraSearch(plan);
   }
   return executeProwlarrSearch(plan);
+}
+
+function executeManagerPlanWithBackoff(plan) {
+  if (INDEXER_MANAGER === 'none') return Promise.resolve([]);
+  if (INDEXER_MANAGER_BACKOFF_ENABLED && Date.now() < indexerManagerUnavailableUntil) {
+    const remaining = Math.ceil((indexerManagerUnavailableUntil - Date.now()) / 1000);
+    console.warn(`[${INDEXER_MANAGER_LABEL}] Skipping manager call due to backoff (${remaining}s remaining)`);
+    return Promise.resolve([]);
+  }
+  return executeIndexerPlan(plan).catch((err) => {
+    if (INDEXER_MANAGER_BACKOFF_ENABLED) {
+      indexerManagerUnavailableUntil = Date.now() + (INDEXER_MANAGER_BACKOFF_SECONDS * 1000);
+      console.warn(`[${INDEXER_MANAGER_LABEL}] Marking manager unavailable for ${INDEXER_MANAGER_BACKOFF_SECONDS}s`, err?.message || err);
+    }
+    throw err;
+  });
 }
 
 function normalizeNewznabItems(data) {
@@ -3061,12 +3085,23 @@ async function streamHandler(req, res) {
 
       const planExecutions = searchPlans.map((plan) => {
         console.log(`${INDEXER_LOG_PREFIX} Dispatching plan`, plan);
-        return Promise.all([
-          executeIndexerPlan(plan),
+        return Promise.allSettled([
+          executeManagerPlanWithBackoff(plan),
           executeNewznabSearch(plan),
-        ])
-          .then(([mgr, nzb]) => ({ plan, status: 'fulfilled', data: [...(Array.isArray(mgr) ? mgr : []), ...(Array.isArray(nzb) ? nzb : [])] }))
-          .catch((error) => ({ plan, status: 'rejected', error }));
+        ]).then((settled) => {
+          const mgrSet = settled[0];
+          const nzbSet = settled[1];
+          const mgr = mgrSet && mgrSet.status === 'fulfilled' ? (Array.isArray(mgrSet.value) ? mgrSet.value : []) : [];
+          const nzb = nzbSet && nzbSet.status === 'fulfilled' ? (Array.isArray(nzbSet.value) ? nzbSet.value : []) : [];
+          const data = [...mgr, ...nzb];
+          const errors = [];
+          if (mgrSet && mgrSet.status === 'rejected') errors.push(`manager: ${mgrSet.reason?.message || mgrSet.reason}`);
+          if (nzbSet && nzbSet.status === 'rejected') errors.push(`newznab: ${nzbSet.reason?.message || nzbSet.reason}`);
+          if (data.length > 0 || errors.length === 0) {
+            return { plan, status: 'fulfilled', data, errors, mgrCount: mgr.length, nzbCount: nzb.length };
+          }
+          return { plan, status: 'rejected', error: new Error(errors.join('; ')) };
+        });
       });
 
       const planResultsSettled = await Promise.all(planExecutions);
@@ -3091,7 +3126,13 @@ async function streamHandler(req, res) {
         }
 
         const planResults = Array.isArray(result.data) ? result.data : [];
-  console.log(`${INDEXER_LOG_PREFIX} ✅ ${plan.type} returned ${planResults.length} total results for query "${plan.query}"`);
+        const mgrCount = Number.isFinite(result.mgrCount) ? result.mgrCount : null;
+        const nzbCount = Number.isFinite(result.nzbCount) ? result.nzbCount : null;
+        console.log(`${INDEXER_LOG_PREFIX} ✅ ${plan.type} returned ${planResults.length} total results for query "${plan.query}"`, {
+          managerCount: mgrCount,
+          newznabCount: nzbCount,
+          errors: result.errors && result.errors.length ? result.errors : undefined,
+        });
 
         const filteredResults = planResults.filter((item) => {
           if (!item || typeof item !== 'object') {

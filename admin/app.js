@@ -558,6 +558,40 @@
     }
   }
 
+  function syncManagerFieldsVisibility() {
+    const managerSelect = configForm.querySelector('select[name="INDEXER_MANAGER"]');
+    const chosenManager = (managerSelect?.value || '').toLowerCase();
+    const grid = managerSelect?.closest('.field-grid');
+    if (!grid) return;
+    const labels = Array.from(grid.querySelectorAll('label'));
+    labels.forEach((label) => {
+      const containsManagerType = !!label.querySelector('select[name="INDEXER_MANAGER"]');
+      if (containsManagerType) return; // never hide the manager type selector
+      if (chosenManager === 'none') label.classList.add('hidden');
+      else label.classList.remove('hidden');
+    });
+    // Hide the Test Connection actions for manager when type is 'none'
+    const group = grid.closest('.group');
+    const managerActions = group?.querySelector('button[data-test="indexer"]')?.closest('.inline-actions');
+    if (managerActions) {
+      if (chosenManager === 'none') managerActions.classList.add('hidden');
+      else managerActions.classList.remove('hidden');
+    }
+  }
+
+  // Keep UI toggle (Skip manager) in sync with Manager Type selection
+  let lastNonNoneManager = null;
+  function syncSkipManagerToggle() {
+    const managerSelect = configForm.querySelector('select[name="INDEXER_MANAGER"]');
+    const skipToggle = document.getElementById('skipManagerToggle');
+    if (!managerSelect || !skipToggle) return;
+    const value = (managerSelect.value || '').toLowerCase();
+    skipToggle.checked = value === 'none';
+    if (value !== 'none') {
+      lastNonNoneManager = value;
+    }
+  }
+
   async function saveConfiguration(event) {
     event.preventDefault();
     saveStatus.textContent = '';
@@ -622,6 +656,28 @@
   if (sortingModeSelect) {
     sortingModeSelect.addEventListener('change', syncSortingControls);
   }
+  const managerSelect = configForm.querySelector('select[name="INDEXER_MANAGER"]');
+  if (managerSelect) {
+    managerSelect.addEventListener('change', () => {
+      syncManagerFieldsVisibility();
+      syncSkipManagerToggle();
+    });
+  }
+  const skipToggle = document.getElementById('skipManagerToggle');
+  if (skipToggle) {
+    skipToggle.addEventListener('change', () => {
+      const managerSelectEl = configForm.querySelector('select[name="INDEXER_MANAGER"]');
+      if (!managerSelectEl) return;
+      if (skipToggle.checked) {
+        managerSelectEl.value = 'none';
+      } else {
+        managerSelectEl.value = lastNonNoneManager || 'prowlarr';
+      }
+      // Trigger dependent syncs
+      syncManagerFieldsVisibility();
+      syncSkipManagerToggle();
+    });
+  }
 
   const pathToken = extractTokenFromPath();
   if (pathToken) {
@@ -636,4 +692,6 @@
   }
   syncHealthControls();
   syncSortingControls();
+  syncManagerFieldsVisibility();
+  syncSkipManagerToggle();
 })();
