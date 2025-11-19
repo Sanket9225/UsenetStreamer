@@ -300,6 +300,17 @@ select:focus {
   gap: 0.5rem;
 }
 
+/* Make API key input grow to use available space */
+.input-inline .api-key-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Make API path input compact */
+.api-path-input {
+  max-width: 260px;
+}
+
 .input-inline .toggle-secret {
   white-space: nowrap;
   font-size: 0.8rem;

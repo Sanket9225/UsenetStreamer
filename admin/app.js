@@ -169,11 +169,11 @@
             <input name="NEWZNAB_ENDPOINT_${i}" type="url" placeholder="https://indexer.example" value="${row.endpoint || ''}" />
           </label>
           <label>API Path
-            <input name="NEWZNAB_API_PATH_${i}" type="text" placeholder="/api" value="${row.apiPath || ''}" />
+            <input class="api-path-input" name="NEWZNAB_API_PATH_${i}" type="text" placeholder="/api" value="${row.apiPath || '/api'}" />
           </label>
           <label>API Key
             <div class="input-inline">
-              <input name="NEWZNAB_API_KEY_${i}" type="password" placeholder="apikey" value="${row.apiKey || ''}" />
+              <input class="api-key-input" name="NEWZNAB_API_KEY_${i}" type="password" placeholder="apikey" value="${row.apiKey || ''}" />
               <button type="button" class="tiny-btn toggle-secret" data-target="NEWZNAB_API_KEY_${i}">Show</button>
             </div>
           </label>
@@ -310,7 +310,7 @@
           enabled: !!row.querySelector('input[name^="NEWZNAB_INDEXER_ENABLED_"]')?.checked,
           expanded: !row.querySelector('.row-details')?.classList.contains('collapsed'),
         }));
-        indexers.push({ endpoint: '', apiKey: '', apiPath: '', name: '', enabled: true, expanded: true });
+        indexers.push({ endpoint: '', apiKey: '', apiPath: '/api', name: '', enabled: true, expanded: true });
         renderNewznabIndexers(indexers);
       });
     }
@@ -337,7 +337,7 @@
         if (preset && preset.id !== 'custom') {
           indexers.push({ endpoint: preset.endpoint || '', apiKey: '', apiPath: preset.apiPath || '/api', name: preset.name || preset.label || '', enabled: true, expanded: true });
         } else {
-          indexers.push({ endpoint: '', apiKey: '', apiPath: '', name: '', enabled: true, expanded: true });
+          indexers.push({ endpoint: '', apiKey: '', apiPath: '/api', name: '', enabled: true, expanded: true });
         }
         renderNewznabIndexers(indexers);
       });

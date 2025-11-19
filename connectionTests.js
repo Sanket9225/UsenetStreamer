@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { parseStringPromise: parseXmlString } = require('xml2js');
 function isTruthyEnv(v) {
   const s = String(v || '').trim().toLowerCase();
   return ['1', 'true', 'yes', 'on'].includes(s);
@@ -249,7 +250,7 @@ async function testNewznabConnection(values) {
     const apiPath = cfg.apiPath || '/api';
     try {
       // 1) Connectivity check via caps (may be public on some indexers)
-      const capsParams = { t: 'caps', o: 'json' };
+  const capsParams = { t: 'caps' };
       if (apiKey) capsParams.apikey = apiKey;
       const url = `${base}${apiPath}`;
       const capsResp = await axios.get(url, { params: capsParams, timeout, validateStatus: () => true });
@@ -269,7 +270,7 @@ async function testNewznabConnection(values) {
       // 2) If an API key is provided, verify a key-gated endpoint.
       if (apiKey) {
         // A) Try an authenticated search which many providers protect
-        const searchParams = { t: 'search', q: 'authcheck', limit: 1, o: 'json', apikey: apiKey };
+  const searchParams = { t: 'search', q: 'authcheck', limit: 1, apikey: apiKey };
         const searchResp = await axios.get(url, { params: searchParams, timeout, validateStatus: () => true });
         debugNewznabStep('search-auth', { url, params: searchParams, status: searchResp.status, headers: searchResp.headers || {}, body: searchResp.data });
         const ctSearch = String(searchResp.headers?.['content-type'] || '').toLowerCase();
@@ -297,7 +298,7 @@ async function testNewznabConnection(values) {
         }
 
         // B) Fallback to a getnzb call with fake id to catch providers that guard only downloads
-        const authParams = { t: 'getnzb', id: 'invalid-id-for-auth-check', o: 'json', apikey: apiKey };
+  const authParams = { t: 'getnzb', id: 'invalid-id-for-auth-check', apikey: apiKey };
         const authResp = await axios.get(url, { params: authParams, timeout, validateStatus: () => true });
         debugNewznabStep('getnzb-api', { url, params: authParams, status: authResp.status, headers: authResp.headers || {}, body: authResp.data });
         const authLooksUnauthorized =
@@ -420,7 +421,7 @@ async function testNewznabSearch(values) {
 
   for (const cfg of configs) {
     const url = `${cfg.endpoint}${cfg.apiPath || '/api'}`.replace(/\/+$/, '');
-    const params = { t, o: 'json', apikey: cfg.apiKey };
+    const params = { t, apikey: cfg.apiKey };
     if (q) params.q = q;
     try {
       debugNewznabStep('search', { url, params, status: undefined, headers: {}, body: null });
@@ -432,8 +433,16 @@ async function testNewznabSearch(values) {
       if (resp.status >= 400) {
         throw new Error(`Status ${resp.status}`);
       }
-      const count = countNewznabItems(resp.data);
-      const titles = extractSomeTitles(resp.data, 4);
+      let parsed = resp.data;
+      if (typeof parsed === 'string' && parsed.trim().startsWith('<')) {
+        try {
+          parsed = await parseXmlString(parsed, { explicitArray: false, explicitRoot: true, attrkey: '@attributes' });
+        } catch (_) {
+          throw new Error('XML parse error');
+        }
+      }
+      const count = countNewznabItems(parsed);
+      const titles = extractSomeTitles(parsed, 4);
       successes += 1;
       const label = cfg.name || cfg.endpoint;
       details.push(`${label}: ${count} items${titles.length ? ` — ${titles.join(' | ')}` : ''}`);

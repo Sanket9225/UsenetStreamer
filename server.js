@@ -17,6 +17,7 @@ const {
   testNewznabConnection,
   testNewznabSearch,
 } = require('./connectionTests');
+const { parseStringPromise: parseXmlString } = require('xml2js');
 const { triageAndRank } = require('./nzbTriageRunner');
 const { preWarmNntpPool } = require('./nzbTriage');
 const {
@@ -1455,7 +1456,7 @@ function buildNewznabSearchParams(plan, apiKey) {
   const params = {
     apikey: apiKey || undefined,
     t: mapHydraSearchType(plan.type),
-    o: 'json'
+    // Request default XML (omit 'o=json') to maximize compatibility
   };
 
   // Prefer identifier tokens for strict Newznab semantics
@@ -1511,7 +1512,16 @@ async function executeNewznabSearch(plan) {
         console.warn('[NEWZNAB] Non-200 status', { url: requestUrl, status: resp.status });
         return [];
       }
-      const items = normalizeNewznabItems(resp.data);
+      let parsed = resp.data;
+      if (typeof parsed === 'string' && parsed.trim().startsWith('<')) {
+        try {
+          parsed = await parseXmlString(parsed, { explicitArray: false, explicitRoot: true, attrkey: '@attributes' });
+        } catch (e) {
+          console.warn('[NEWZNAB] Failed to parse XML response', { url: requestUrl, message: e?.message });
+          return [];
+        }
+      }
+      const items = normalizeNewznabItems(parsed);
       console.log('[NEWZNAB] Endpoint results', { url: requestUrl, count: Array.isArray(items) ? items.length : 0 });
       const label = name || url;
       return (Array.isArray(items) ? items : []).map((it) => ({ ...it, indexer: it.indexer || label, indexerId: it.indexerId || label }));
@@ -3651,7 +3661,43 @@ if (ADDON_SHARED_SECRET) {
   app.head('/nzb/stream', handleNzbdavStream);
 }
 
-app.listen(port, '0.0.0.0', () => {
+const server = app.listen(port, '0.0.0.0', () => {
   console.log(`Addon running at http://0.0.0.0:${port}`);
+});
+
+// Graceful shutdown and better crash diagnostics in production
+process.on('SIGTERM', () => {
+  console.log('[LIFECYCLE] Received SIGTERM — shutting down gracefully');
+  try {
+    server.close(() => {
+      console.log('[LIFECYCLE] HTTP server closed');
+      process.exit(0);
+    });
+    // Fallback exit in case close hangs
+    setTimeout(() => process.exit(0), 5000).unref();
+  } catch (err) {
+    console.warn('[LIFECYCLE] Error during graceful shutdown', err?.message || err);
+    process.exit(0);
+  }
+});
+
+process.on('SIGINT', () => {
+  console.log('[LIFECYCLE] Received SIGINT — shutting down');
+  try {
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 5000).unref();
+  } catch (_) {
+    process.exit(0);
+  }
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception:', err && (err.stack || err.message || err));
+  // Keep process alive to allow orchestrator to decide; avoid tight crash loops
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled promise rejection:', reason);
+  // Keep process alive to allow orchestrator to decide
 });
 
