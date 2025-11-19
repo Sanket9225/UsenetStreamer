@@ -214,13 +214,16 @@ function parseNumberedNewznabConfigs(env) {
     const idx = String(i).padStart(2, '0');
     const endpoint = env[`NEWZNAB_ENDPOINT_${idx}`];
     if (!endpoint) continue;
+    const enabled = toBoolean(env[`NEWZNAB_INDEXER_ENABLED_${idx}`], true);
     configs.push({
       url: stripTrailingSlashes(endpoint),
       apiKey: env[`NEWZNAB_API_KEY_${idx}`] || '',
-      apiPath: normalizeApiPath(env[`NEWZNAB_API_PATH_${idx}`] || '/api')
+      apiPath: normalizeApiPath(env[`NEWZNAB_API_PATH_${idx}`] || '/api'),
+      name: (env[`NEWZNAB_NAME_${idx}`] || '').trim() || null,
+      enabled,
     });
   }
-  return configs;
+  return configs.filter((c) => c.enabled !== false);
 }
 const newznabConfigs = (() => {
   const configs = parseNumberedNewznabConfigs(process.env);
@@ -233,7 +236,7 @@ const newznabConfigs = (() => {
     console.log('[NEWZNAB] Direct Newznab support is disabled or no endpoints configured');
     return [];
   }
-  console.log('[NEWZNAB] Configured endpoints', configs.map(c => ({ url: c.url, hasKey: !!c.apiKey, apiPath: c.apiPath })));
+  console.log('[NEWZNAB] Configured endpoints', configs.map(c => ({ url: c.url, hasKey: !!c.apiKey, apiPath: c.apiPath, name: c.name || undefined })));
   return configs;
 })();
 
@@ -513,6 +516,19 @@ if (TRIAGE_REUSE_POOL && TRIAGE_NNTP_CONFIG) {
     });
 }
 
+const NEWZNAB_NUMBERED_KEYS = (() => {
+  const list = [];
+  for (let i = 1; i <= 20; i += 1) {
+    const idx = String(i).padStart(2, '0');
+    list.push(`NEWZNAB_ENDPOINT_${idx}`);
+    list.push(`NEWZNAB_API_KEY_${idx}`);
+    list.push(`NEWZNAB_API_PATH_${idx}`);
+    list.push(`NEWZNAB_NAME_${idx}`);
+    list.push(`NEWZNAB_INDEXER_ENABLED_${idx}`);
+  }
+  return list;
+})();
+
 const ADMIN_CONFIG_KEYS = [
   'PORT',
   'ADDON_BASE_URL',
@@ -525,9 +541,8 @@ const ADMIN_CONFIG_KEYS = [
   'INDEXER_MANAGER_CACHE_MINUTES',
   // Newznab direct support
   'NEWZNAB_ENABLED',
-  'NEWZNAB_ENDPOINTS',
-  'NEWZNAB_API_KEYS',
-  'NEWZNAB_API_PATHS',
+  // Numbered per-indexer fields only
+  ...NEWZNAB_NUMBERED_KEYS,
   'NEWZNAB_FILTER_NZB_ONLY',
   'NZB_SORT_MODE',
   'NZB_PREFERRED_LANGUAGE',
@@ -1460,7 +1475,7 @@ async function executeNewznabSearch(plan) {
     rawQuery: plan.rawQuery,
     endpoints: newznabConfigs.map((c) => c.url),
   });
-  const tasks = newznabConfigs.map(async ({ url, apiKey, apiPath }) => {
+  const tasks = newznabConfigs.map(async ({ url, apiKey, apiPath, name }) => {
     const params = buildNewznabSearchParams(plan, apiKey);
     try {
       const requestUrl = `${stripTrailingSlashes(url)}${apiPath}`;
@@ -1475,7 +1490,8 @@ async function executeNewznabSearch(plan) {
       }
       const items = normalizeNewznabItems(resp.data);
       console.log('[NEWZNAB] Endpoint results', { url: requestUrl, count: Array.isArray(items) ? items.length : 0 });
-      return (Array.isArray(items) ? items : []).map((it) => ({ ...it, indexer: it.indexer || url, indexerId: it.indexerId || url }));
+      const label = name || url;
+      return (Array.isArray(items) ? items : []).map((it) => ({ ...it, indexer: it.indexer || label, indexerId: it.indexerId || label }));
     } catch (err) {
       console.warn('[NEWZNAB] Search failed', { url, message: err?.message });
       return [];

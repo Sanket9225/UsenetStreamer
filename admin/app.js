@@ -65,7 +65,7 @@
     const elements = configForm.querySelectorAll('input[name], select[name], textarea[name]');
     elements.forEach((element) => {
       const key = element.name;
-      if (key.startsWith('NEWZNAB_ENDPOINT_') || key.startsWith('NEWZNAB_API_KEY_') || key.startsWith('NEWZNAB_API_PATH_')) {
+      if (key.startsWith('NEWZNAB_ENDPOINT_') || key.startsWith('NEWZNAB_API_KEY_') || key.startsWith('NEWZNAB_API_PATH_') || key.startsWith('NEWZNAB_NAME_')) {
         // handled below
         return;
       }
@@ -85,7 +85,9 @@
       indexerRows.push({
         endpoint: values[`NEWZNAB_ENDPOINT_${String(i).padStart(2, '0')}`] || '',
         apiKey: values[`NEWZNAB_API_KEY_${String(i).padStart(2, '0')}`] || '',
-        apiPath: values[`NEWZNAB_API_PATH_${String(i).padStart(2, '0')}`] || ''
+        apiPath: values[`NEWZNAB_API_PATH_${String(i).padStart(2, '0')}`] || '',
+        name: values[`NEWZNAB_NAME_${String(i).padStart(2, '0')}`] || '',
+        enabled: parseBool(values[`NEWZNAB_INDEXER_ENABLED_${String(i).padStart(2, '0')}`] ?? 'true')
       });
       i++;
     }
@@ -98,7 +100,7 @@
     elements.forEach((element) => {
       const key = element.name;
       if (!key) return;
-      if (key.startsWith('NEWZNAB_ENDPOINT_') || key.startsWith('NEWZNAB_API_KEY_') || key.startsWith('NEWZNAB_API_PATH_')) {
+      if (key.startsWith('NEWZNAB_ENDPOINT_') || key.startsWith('NEWZNAB_API_KEY_') || key.startsWith('NEWZNAB_API_PATH_') || key.startsWith('NEWZNAB_NAME_')) {
         // handled below
         return;
       }
@@ -115,40 +117,176 @@
       const endpoint = row.querySelector('input[name^="NEWZNAB_ENDPOINT_"]')?.value || '';
       const apiKey = row.querySelector('input[name^="NEWZNAB_API_KEY_"]')?.value || '';
       const apiPath = row.querySelector('input[name^="NEWZNAB_API_PATH_"]')?.value || '';
+      const name = row.querySelector('input[name^="NEWZNAB_NAME_"]')?.value || '';
+      const enabled = !!row.querySelector('input[name^="NEWZNAB_INDEXER_ENABLED_"]')?.checked;
       if (endpoint) {
         const idx = String(i).padStart(2, '0');
         payload[`NEWZNAB_ENDPOINT_${idx}`] = endpoint;
         payload[`NEWZNAB_API_KEY_${idx}`] = apiKey;
         payload[`NEWZNAB_API_PATH_${idx}`] = apiPath;
+        payload[`NEWZNAB_NAME_${idx}`] = name;
+        payload[`NEWZNAB_INDEXER_ENABLED_${idx}`] = enabled ? 'true' : 'false';
         i++;
       }
     });
     return payload;
   }
 
+  const KNOWN_NEWZNAB_INDEXERS = [
+    { id: 'custom', label: 'Custom', endpoint: '', apiPath: '', name: '' },
+    { id: 'althub', label: 'AltHUB', endpoint: 'https://api.althub.co.za', apiPath: '/api', name: 'AltHUB' },
+    { id: 'nzbgeek', label: 'NZBGeek', endpoint: 'https://api.nzbgeek.info', apiPath: '/api', name: 'NZBGeek' },
+    { id: 'drunkenslug', label: 'DrunkenSlug', endpoint: 'https://api.drunkenslug.com', apiPath: '/api', name: 'DrunkenSlug' },
+    { id: 'nzbplanet', label: 'NZBPlanet', endpoint: 'https://api.nzbplanet.net', apiPath: '/api', name: 'NZBPlanet' },
+    { id: 'dognzb', label: 'DOGnzb', endpoint: 'https://api.dognzb.cr', apiPath: '/api', name: 'DOGnzb' },
+    { id: 'usenet_crawler', label: 'Usenet-Crawler', endpoint: 'https://www.usenet-crawler.com', apiPath: '/api', name: 'Usenet-Crawler' },
+    { id: 'nzb_su', label: 'NZB.su', endpoint: 'https://nzb.su', apiPath: '/api', name: 'NZB.su' },
+    { id: 'oznzb', label: 'OZnzb', endpoint: 'https://api.oznzb.com', apiPath: '/api', name: 'OZnzb' },
+    { id: 'nzbfinder', label: 'NZBFinder', endpoint: 'https://api.nzbfinder.ws', apiPath: '/api', name: 'NZBFinder' },
+  ];
+
   function renderNewznabIndexers(indexers) {
     const container = document.getElementById('newznab-indexers-list');
     if (!container) return;
     container.innerHTML = '';
-    (indexers && indexers.length ? indexers : [{}]).forEach((row, idx) => {
+    (indexers && indexers.length ? indexers : []).forEach((row, idx) => {
       const i = String(idx + 1).padStart(2, '0');
       const div = document.createElement('div');
       div.className = 'newznab-indexer-row';
+  const expanded = row.expanded !== false; // default expanded unless explicitly collapsed
       div.innerHTML = `
-        <label>Endpoint
-          <input name="NEWZNAB_ENDPOINT_${i}" type="text" placeholder="https://indexer.example" value="${row.endpoint || ''}" />
-        </label>
-        <label>API Key
-          <input name="NEWZNAB_API_KEY_${i}" type="text" placeholder="apikey" value="${row.apiKey || ''}" />
-        </label>
-        <label>API Path
-          <input name="NEWZNAB_API_PATH_${i}" type="text" placeholder="/api" value="${row.apiPath || ''}" />
-        </label>
-        <button type="button" class="remove-indexer" title="Remove this indexer">&times;</button>
+        <div class="row-header">
+          <span class="index-badge">#${i}</span>
+          <button type="button" class="tiny-btn toggle-details" aria-expanded="${expanded ? 'true' : 'false'}">${expanded ? 'Hide details' : 'Show details'}</button>
+        </div>
+        <div class="row-details ${expanded ? '' : 'collapsed'}">
+          <div class="row-grid">
+          <label class="checkbox"><input name="NEWZNAB_INDEXER_ENABLED_${i}" type="checkbox" ${row.enabled !== false ? 'checked' : ''}/> <span>Enabled</span></label>
+          <label>Name
+            <input name="NEWZNAB_NAME_${i}" type="text" placeholder="AltHUB" value="${row.name || ''}" />
+          </label>
+          <label>Endpoint
+            <input name="NEWZNAB_ENDPOINT_${i}" type="url" placeholder="https://indexer.example" value="${row.endpoint || ''}" />
+          </label>
+          <label>API Path
+            <input name="NEWZNAB_API_PATH_${i}" type="text" placeholder="/api" value="${row.apiPath || ''}" />
+          </label>
+          <label>API Key
+            <div class="input-inline">
+              <input name="NEWZNAB_API_KEY_${i}" type="password" placeholder="apikey" value="${row.apiKey || ''}" />
+              <button type="button" class="tiny-btn toggle-secret" data-target="NEWZNAB_API_KEY_${i}">Show</button>
+            </div>
+          </label>
+            <div class="row-actions">
+              <button type="button" class="tiny-btn test-indexer">Test</button>
+              <span class="status-inline" data-status="row"></span>
+              <button type="button" class="tiny-btn move-up" title="Move up">▲</button>
+              <button type="button" class="tiny-btn move-down" title="Move down">▼</button>
+              <button type="button" class="tiny-btn remove-indexer" title="Remove">Remove</button>
+            </div>
+          </div>
+        </div>
       `;
       div.querySelector('.remove-indexer').addEventListener('click', () => {
-        const newList = (indexers || [{}]).slice();
+        const newList = (indexers || []).slice();
         newList.splice(idx, 1);
+        renderNewznabIndexers(newList);
+      });
+      // Toggle row details expand/collapse
+      const toggleBtn = div.querySelector('.toggle-details');
+      const detailsEl = div.querySelector('.row-details');
+      toggleBtn?.addEventListener('click', () => {
+        const isCollapsed = detailsEl.classList.toggle('collapsed');
+        toggleBtn.setAttribute('aria-expanded', String(!isCollapsed));
+        toggleBtn.textContent = isCollapsed ? 'Show details' : 'Hide details';
+      });
+      // No per-row preset anymore; preset is managed at the top bar
+      // Toggle API key visibility
+      div.querySelector('.toggle-secret')?.addEventListener('click', (ev) => {
+        const btn = ev.currentTarget;
+        const target = div.querySelector(`input[name="${btn.dataset.target}"]`);
+        if (!target) return;
+        const nextType = target.type === 'password' ? 'text' : 'password';
+        target.type = nextType;
+        btn.textContent = nextType === 'password' ? 'Show' : 'Hide';
+      });
+      // Normalize inputs
+      const endpointEl = div.querySelector(`input[name="NEWZNAB_ENDPOINT_${i}"]`);
+      const pathEl = div.querySelector(`input[name="NEWZNAB_API_PATH_${i}"]`);
+      endpointEl?.addEventListener('blur', () => {
+        if (!endpointEl.value) return;
+        endpointEl.value = endpointEl.value.replace(/\/+$/, '');
+      });
+      pathEl?.addEventListener('blur', () => {
+        let v = (pathEl.value || '').trim();
+        if (!v) v = '/api';
+        if (!v.startsWith('/')) v = `/${v}`;
+        v = v.replace(/\/+$/, '');
+        pathEl.value = v || '/api';
+      });
+      // Row-level test button
+      div.querySelector('.test-indexer')?.addEventListener('click', async () => {
+        const statusEl = div.querySelector('[data-status="row"]');
+        const nameVal = div.querySelector(`input[name="NEWZNAB_NAME_${i}"]`)?.value || '';
+        const epVal = endpointEl?.value || '';
+        const pathVal = pathEl?.value || '/api';
+        const keyVal = div.querySelector(`input[name="NEWZNAB_API_KEY_${i}"]`)?.value || '';
+        if (!epVal) {
+          statusEl.textContent = 'Endpoint is required';
+          statusEl.classList.remove('success');
+          statusEl.classList.add('error');
+          return;
+        }
+        if (!keyVal) {
+          statusEl.textContent = 'API key is required';
+          statusEl.classList.remove('success');
+          statusEl.classList.add('error');
+          return;
+        }
+        statusEl.textContent = 'Testing...';
+        statusEl.classList.remove('error', 'success');
+        try {
+          const testValues = {
+            NEWZNAB_ENABLED: 'true',
+            NEWZNAB_NAME_01: nameVal,
+            NEWZNAB_ENDPOINT_01: epVal,
+            NEWZNAB_API_PATH_01: pathVal,
+            NEWZNAB_API_KEY_01: keyVal,
+          };
+          const result = await apiRequest('/admin/api/test-connections', {
+            method: 'POST',
+            body: JSON.stringify({ type: 'newznab', values: testValues }),
+          });
+          if (result?.status === 'ok') {
+            statusEl.textContent = result.message || 'OK';
+            statusEl.classList.remove('error');
+            statusEl.classList.add('success');
+          } else {
+            statusEl.textContent = result?.message || 'Failed';
+            statusEl.classList.remove('success');
+            statusEl.classList.add('error');
+          }
+        } catch (err) {
+          statusEl.textContent = err?.message || 'Request failed';
+          statusEl.classList.remove('success');
+          statusEl.classList.add('error');
+        }
+      });
+      // Reordering
+      div.querySelector('.move-up')?.addEventListener('click', () => {
+        if (idx === 0) return;
+        const newList = (indexers || []).slice();
+        const tmp = newList[idx - 1];
+        newList[idx - 1] = newList[idx];
+        newList[idx] = tmp;
+        renderNewznabIndexers(newList);
+      });
+      div.querySelector('.move-down')?.addEventListener('click', () => {
+        const newList = (indexers || []).slice();
+        if (idx >= newList.length - 1) return;
+        const tmp = newList[idx + 1];
+        newList[idx + 1] = newList[idx];
+        newList[idx] = tmp;
         renderNewznabIndexers(newList);
       });
       container.appendChild(div);
@@ -158,6 +296,8 @@
   // Add Newznab indexer row (ensure DOM is ready)
   window.addEventListener('DOMContentLoaded', () => {
     const addBtn = document.getElementById('addNewznabIndexer');
+    const presetSelect = document.getElementById('newznabPreset');
+    const addPresetBtn = document.getElementById('addPresetIndexer');
     if (addBtn) {
       addBtn.addEventListener('click', () => {
         const container = document.getElementById('newznab-indexers-list');
@@ -165,9 +305,40 @@
         const indexers = rows.map((row) => ({
           endpoint: row.querySelector('input[name^="NEWZNAB_ENDPOINT_"]')?.value || '',
           apiKey: row.querySelector('input[name^="NEWZNAB_API_KEY_"]')?.value || '',
-          apiPath: row.querySelector('input[name^="NEWZNAB_API_PATH_"]')?.value || ''
+          apiPath: row.querySelector('input[name^="NEWZNAB_API_PATH_"]')?.value || '',
+          name: row.querySelector('input[name^="NEWZNAB_NAME_"]')?.value || '',
+          enabled: !!row.querySelector('input[name^="NEWZNAB_INDEXER_ENABLED_"]')?.checked,
+          expanded: !row.querySelector('.row-details')?.classList.contains('collapsed'),
         }));
-        indexers.push({ endpoint: '', apiKey: '', apiPath: '' });
+        indexers.push({ endpoint: '', apiKey: '', apiPath: '', name: '', enabled: true, expanded: true });
+        renderNewznabIndexers(indexers);
+      });
+    }
+    // Populate preset dropdown
+    if (presetSelect) {
+      presetSelect.innerHTML = KNOWN_NEWZNAB_INDEXERS.map(p => `<option value="${p.id}">${p.label}</option>`).join('');
+    }
+    // Add from preset handler
+    if (addPresetBtn) {
+      addPresetBtn.addEventListener('click', () => {
+        if (!presetSelect) return;
+        const id = presetSelect.value;
+        const preset = KNOWN_NEWZNAB_INDEXERS.find(p => p.id === id) || KNOWN_NEWZNAB_INDEXERS[0];
+        const container = document.getElementById('newznab-indexers-list');
+        const rows = Array.from(container.querySelectorAll('.newznab-indexer-row'));
+        const indexers = rows.map((row) => ({
+          endpoint: row.querySelector('input[name^="NEWZNAB_ENDPOINT_"]')?.value || '',
+          apiKey: row.querySelector('input[name^="NEWZNAB_API_KEY_"]')?.value || '',
+          apiPath: row.querySelector('input[name^="NEWZNAB_API_PATH_"]')?.value || '',
+          name: row.querySelector('input[name^="NEWZNAB_NAME_"]')?.value || '',
+          enabled: !!row.querySelector('input[name^="NEWZNAB_INDEXER_ENABLED_"]')?.checked,
+          expanded: !row.querySelector('.row-details')?.classList.contains('collapsed'),
+        }));
+        if (preset && preset.id !== 'custom') {
+          indexers.push({ endpoint: preset.endpoint || '', apiKey: '', apiPath: preset.apiPath || '/api', name: preset.name || preset.label || '', enabled: true, expanded: true });
+        } else {
+          indexers.push({ endpoint: '', apiKey: '', apiPath: '', name: '', enabled: true, expanded: true });
+        }
         renderNewznabIndexers(indexers);
       });
     }
@@ -190,6 +361,19 @@
     button.textContent = 'Testing...';
     try {
       const values = collectFormValues();
+      // Enforce API key presence only if global NEWZNAB_ENABLED is true
+      const enabledGlobal = configForm.querySelector('input[name="NEWZNAB_ENABLED"]')?.checked;
+      if (enabledGlobal) {
+        const rows = Array.from(document.querySelectorAll('.newznab-indexer-row'));
+        for (const row of rows) {
+          const enabled = !!row.querySelector('input[name^="NEWZNAB_INDEXER_ENABLED_"]')?.checked;
+          const ep = row.querySelector('input[name^="NEWZNAB_ENDPOINT_"]')?.value?.trim();
+          const key = row.querySelector('input[name^="NEWZNAB_API_KEY_"]')?.value?.trim();
+          if (enabled && ep && !key) {
+            throw new Error('API key is required for all enabled Newznab indexers when Direct Newznab Queries are enabled');
+          }
+        }
+      }
       const result = await apiRequest('/admin/api/test-connections', {
         method: 'POST',
         body: JSON.stringify({ type, values }),

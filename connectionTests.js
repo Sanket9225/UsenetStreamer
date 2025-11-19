@@ -1,4 +1,109 @@
 const axios = require('axios');
+const DEBUG_NEWZNAB_TEST = String(process.env.DEBUG_NEWZNAB_TEST || '').trim().toLowerCase();
+const IS_DEBUG_NEWZNAB = ['1', 'true', 'yes', 'on'].includes(DEBUG_NEWZNAB_TEST);
+
+function maskKey(key) {
+  if (!key) return '';
+  const s = String(key);
+  if (s.length <= 4) return '****';
+  return `${s.slice(0, 3)}***${s.slice(-2)}`;
+}
+
+function safeParams(params) {
+  if (!params || typeof params !== 'object') return params;
+  const clone = { ...params };
+  if (clone.apikey) clone.apikey = maskKey(clone.apikey);
+  if (clone['api_key']) clone['api_key'] = maskKey(clone['api_key']);
+  return clone;
+}
+
+function summarizeBody(data, maxLen = 500) {
+  try {
+    if (data == null) return '(no body)';
+    if (typeof data === 'string') {
+      const s = data.replace(/\s+/g, ' ').trim();
+      return s.length > maxLen ? s.slice(0, maxLen) + '…' : s;
+    }
+    const json = JSON.stringify(data);
+    return json.length > maxLen ? json.slice(0, maxLen) + '…' : json;
+  } catch (_) {
+    return '(unserializable body)';
+  }
+}
+
+function debugNewznabStep(step, { url, params, status, headers, body, note }) {
+  if (!IS_DEBUG_NEWZNAB) return;
+  const ct = (headers && (headers['content-type'] || headers['Content-Type'])) || '';
+  console.log('[NEWZNAB-TEST]', step, {
+    url,
+    params: safeParams(params),
+    status,
+    contentType: ct,
+    body: summarizeBody(body, 400),
+    note: note || undefined,
+  });
+}
+
+function looksLikeAuthErrorPayload(data) {
+  if (!data) return false;
+  // If payload is a string (HTML, text, or stringified JSON), look for keywords
+  if (typeof data === 'string') {
+    const s = data.toLowerCase();
+    return s.includes('apikey') || s.includes('api key') || s.includes('unauthor') || s.includes('forbidden');
+  }
+  // If payload is an object, check common fields
+  const fieldsToCheck = [];
+  if (typeof data.error !== 'undefined') fieldsToCheck.push(data.error);
+  if (typeof data.Error !== 'undefined') fieldsToCheck.push(data.Error);
+  if (typeof data.message !== 'undefined') fieldsToCheck.push(data.message);
+  if (typeof data.description !== 'undefined') fieldsToCheck.push(data.description);
+  const attr = data['@attributes'] || data.attributes || null;
+  if (attr && typeof attr.message !== 'undefined') fieldsToCheck.push(attr.message);
+  for (const f of fieldsToCheck) {
+    if (!f) continue;
+    if (typeof f === 'string') {
+      const s = f.toLowerCase();
+      if (s.includes('apikey') || s.includes('api key') || s.includes('unauthor') || s.includes('forbidden')) return true;
+    } else if (typeof f === 'object') {
+      if (looksLikeAuthErrorPayload(f)) return true;
+    }
+  }
+  return false;
+}
+
+function accountStatusIndicatesInvalid(data) {
+  // Checks for provider-specific account status markers indicating invalid or unauthorized
+  try {
+    if (!data) return false;
+    // String payload: look for status:"invalid" or explicit messages
+    if (typeof data === 'string') {
+      const s = data.toLowerCase();
+      if (s.includes('status') && s.includes('invalid')) return true;
+      if (s.includes('invalid api key') || s.includes('incorrect api key')) return true;
+      if (s.includes('invalid account') || s.includes('account invalid')) return true;
+      return false;
+    }
+    // JSON-like: look for channel.account['@attributes'].status or similar
+    const getAttr = (obj, key) => (obj && (obj[key] || obj["@" + key] || obj["@" + key.charAt(0).toUpperCase() + key.slice(1)]));
+    const channel = data.channel || data.Channel || null;
+    const account = (channel && (channel.account || channel.Account)) || data.account || data.Account || null;
+    const attrs = (account && (account['@attributes'] || account.attributes || account.$)) || null;
+    const status = (attrs && (attrs.status || attrs.Status)) || account?.status || account?.Status || null;
+    if (status && typeof status === 'string') {
+      const st = status.toLowerCase();
+      if (st.includes('invalid') || st.includes('expired') || st.includes('disabled') || st.includes('banned')) return true;
+    }
+    // Fallback: stringify a small portion and check again
+    try {
+      const snippet = JSON.stringify(data).toLowerCase();
+      if (snippet.includes('account') && snippet.includes('status') && snippet.includes('invalid')) return true;
+    } catch (_) {}
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
 
 let NNTPClientCtor = null;
 try {
@@ -83,59 +188,158 @@ async function testIndexerConnection(values) {
   throw new Error(`Unexpected response ${response.status} from NZBHydra`);
 }
 
+function collectNumberedNewznab(values) {
+  const list = [];
+  for (let i = 1; i <= 20; i += 1) {
+    const idx = String(i).padStart(2, '0');
+    const endpoint = (values?.[`NEWZNAB_ENDPOINT_${idx}`] || '').trim();
+    if (!endpoint) continue;
+    const apiKey = (values?.[`NEWZNAB_API_KEY_${idx}`] || '').trim();
+    let apiPath = (values?.[`NEWZNAB_API_PATH_${idx}`] || '/api').trim();
+    if (!apiPath.startsWith('/')) apiPath = `/${apiPath}`;
+    apiPath = apiPath.replace(/\/+$/, '');
+    const name = (values?.[`NEWZNAB_NAME_${idx}`] || '').trim();
+    const enabled = parseBoolean(values?.[`NEWZNAB_INDEXER_ENABLED_${idx}`] ?? 'true');
+    if (enabled === false) continue;
+    list.push({ endpoint: endpoint.replace(/\/+$/, ''), apiKey, apiPath, name });
+  }
+  return list;
+}
+
 async function testNewznabConnection(values) {
-  const rawEndpoints = (values?.NEWZNAB_ENDPOINTS || '').trim();
-  const rawApiKeys = (values?.NEWZNAB_API_KEYS || '').trim();
-  const apiPathsRaw = (values?.NEWZNAB_API_PATHS || '').trim();
   const enabled = String(values?.NEWZNAB_ENABLED || '').trim().toLowerCase();
   const isEnabled = ['1','true','yes','on'].includes(enabled);
   if (!isEnabled) {
     throw new Error('NEWZNAB_ENABLED is not true');
   }
-  if (!rawEndpoints) {
-    throw new Error('NEWZNAB_ENDPOINTS is required');
+
+  const configs = collectNumberedNewznab(values);
+
+  if (configs.length === 0) {
+    throw new Error('Configure at least one direct Newznab indexer (NEWZNAB_ENDPOINT_01, API_PATH_01, API_KEY_01 if needed)');
   }
-  const endpoints = rawEndpoints.split(',').map((e) => e.trim()).filter(Boolean);
-  const apiKeys = rawApiKeys.split(',').map((e) => e.trim());
-  const apiPaths = apiPathsRaw ? apiPathsRaw.split(',').map((e) => e.trim()) : [];
+
+  if (IS_DEBUG_NEWZNAB) {
+    console.log('[NEWZNAB-TEST] configs', configs.map((c) => ({
+      name: c.name || null,
+      endpoint: c.endpoint,
+      apiPath: c.apiPath,
+      hasApiKey: !!(c.apiKey && String(c.apiKey).trim()),
+      apiKeyMasked: maskKey(c.apiKey || ''),
+    })));
+  }
+
+  // Enforce API key presence for all configured endpoints
+  const missingKey = configs.filter((c) => !c.apiKey || String(c.apiKey).trim() === '');
+  if (missingKey.length > 0) {
+    const names = missingKey.map((c) => c.name || c.endpoint).join(', ');
+    throw new Error(`API key is required for Newznab endpoint(s): ${names}`);
+  }
 
   const timeout = 8000;
   let successes = 0;
   const details = [];
 
-  for (let i = 0; i < endpoints.length; i += 1) {
-    const base = endpoints[i].replace(/\/+$/, '');
-    const apiKey = apiKeys[i] || '';
-    const apiPath = (() => {
-      let p = apiPaths[i] || '/api';
-      if (!p.startsWith('/')) p = `/${p}`;
-      return p.replace(/\/+$/, '');
-    })();
+  for (const cfg of configs) {
+    const base = cfg.endpoint;
+    const apiKey = cfg.apiKey || '';
+    const apiPath = cfg.apiPath || '/api';
     try {
-      const params = { t: 'caps', o: 'json' };
-      if (apiKey) params.apikey = apiKey;
+      // 1) Connectivity check via caps (may be public on some indexers)
+      const capsParams = { t: 'caps', o: 'json' };
+      if (apiKey) capsParams.apikey = apiKey;
       const url = `${base}${apiPath}`;
-      const resp = await axios.get(url, { params, timeout, validateStatus: () => true });
-      if (resp.status === 401 || resp.status === 403) {
+      const capsResp = await axios.get(url, { params: capsParams, timeout, validateStatus: () => true });
+      debugNewznabStep('caps', { url, params: capsParams, status: capsResp.status, headers: capsResp.headers || {}, body: capsResp.data });
+      if (capsResp.status === 401 || capsResp.status === 403) {
+        debugNewznabStep('caps-unauthorized', { url, params: capsParams, status: capsResp.status, headers: capsResp.headers || {}, body: capsResp.data, note: 'caps returned unauthorized' });
         throw new Error('Unauthorized');
       }
-      if (resp.status >= 400) {
-        throw new Error(`Status ${resp.status}`);
+      if (capsResp.status >= 400) {
+        debugNewznabStep('caps-error', { url, params: capsParams, status: capsResp.status, headers: capsResp.headers || {}, body: capsResp.data, note: 'caps returned error status' });
+        throw new Error(`Status ${capsResp.status}`);
       }
-      successes += 1;
       let version = null;
-      const data = resp.data || {};
-      version = data.version || data.appVersion || data.server?.version || data['@attributes']?.version || null;
-      details.push(`${base} OK${version ? ` (v${String(version).replace(/^v/i,'')})` : ''}`);
+      const capsData = capsResp.data || {};
+      version = capsData.version || capsData.appVersion || capsData.server?.version || capsData['@attributes']?.version || null;
+
+      // 2) If an API key is provided, verify a key-gated endpoint.
+      if (apiKey) {
+        // A) Try an authenticated search which many providers protect
+        const searchParams = { t: 'search', q: 'authcheck', limit: 1, o: 'json', apikey: apiKey };
+        const searchResp = await axios.get(url, { params: searchParams, timeout, validateStatus: () => true });
+        debugNewznabStep('search-auth', { url, params: searchParams, status: searchResp.status, headers: searchResp.headers || {}, body: searchResp.data });
+        const ctSearch = String(searchResp.headers?.['content-type'] || '').toLowerCase();
+        const searchLooksUnauthorized =
+          searchResp.status === 401 ||
+          searchResp.status === 403 ||
+          looksLikeAuthErrorPayload(searchResp.data) ||
+          (typeof searchResp.data === 'string' && searchResp.data.toLowerCase().includes('<html') && (searchResp.data.toLowerCase().includes('login') || searchResp.data.toLowerCase().includes('unauthor')));
+
+        if (searchLooksUnauthorized) {
+          debugNewznabStep('search-auth-fail', { url, params: searchParams, status: searchResp.status, headers: searchResp.headers || {}, body: searchResp.data, note: 'authenticated search indicates unauthorized' });
+          throw new Error('Unauthorized: API key invalid');
+        }
+
+        // NZBGeek and some providers return JSON with channel.account status set to Invalid
+        if (accountStatusIndicatesInvalid(searchResp.data)) {
+          debugNewznabStep('search-auth-fail', { url, params: searchParams, status: searchResp.status, headers: searchResp.headers || {}, body: searchResp.data, note: 'account status indicates invalid' });
+          throw new Error('Unauthorized: API key invalid');
+        }
+
+        // If content-type is clearly not JSON/XML/RSS, treat as failure when key is present
+        if (!(ctSearch.includes('json') || ctSearch.includes('xml') || ctSearch.includes('rss') || ctSearch.includes('atom'))) {
+          debugNewznabStep('search-auth-fail', { url, params: searchParams, status: searchResp.status, headers: searchResp.headers || {}, body: searchResp.data, note: 'unexpected content-type for authenticated request' });
+          throw new Error('Unauthorized: unexpected response for authenticated request');
+        }
+
+        // B) Fallback to a getnzb call with fake id to catch providers that guard only downloads
+        const authParams = { t: 'getnzb', id: 'invalid-id-for-auth-check', o: 'json', apikey: apiKey };
+        const authResp = await axios.get(url, { params: authParams, timeout, validateStatus: () => true });
+        debugNewznabStep('getnzb-api', { url, params: authParams, status: authResp.status, headers: authResp.headers || {}, body: authResp.data });
+        const authLooksUnauthorized =
+          authResp.status === 401 ||
+          authResp.status === 403 ||
+          looksLikeAuthErrorPayload(authResp.data) ||
+          (typeof authResp.data === 'string' && authResp.data.toLowerCase().includes('<html') && (authResp.data.toLowerCase().includes('login') || authResp.data.toLowerCase().includes('unauthor')));
+        if (authLooksUnauthorized) {
+          debugNewznabStep('getnzb-api-fail', { url, params: authParams, status: authResp.status, headers: authResp.headers || {}, body: authResp.data, note: 'getnzb via /api indicates unauthorized' });
+          throw new Error('Unauthorized: API key invalid');
+        }
+
+        if (accountStatusIndicatesInvalid(authResp.data)) {
+          debugNewznabStep('getnzb-api-fail', { url, params: authParams, status: authResp.status, headers: authResp.headers || {}, body: authResp.data, note: 'account status indicates invalid' });
+          throw new Error('Unauthorized: API key invalid');
+        }
+
+        // C) Some providers expose a /getnzb path outside /api; probe that too
+        const directGetUrl = `${base.replace(/\/+$/, '')}/getnzb`;
+        const directResp = await axios.get(directGetUrl, { params: { id: 'invalid-id-for-auth-check', apikey: apiKey }, timeout, validateStatus: () => true });
+        debugNewznabStep('getnzb-direct', { url: directGetUrl, params: { id: 'invalid-id-for-auth-check', apikey: apiKey }, status: directResp.status, headers: directResp.headers || {}, body: directResp.data });
+        const directLooksUnauthorized =
+          directResp.status === 401 ||
+          directResp.status === 403 ||
+          looksLikeAuthErrorPayload(directResp.data) ||
+          (typeof directResp.data === 'string' && directResp.data.toLowerCase().includes('<html') && (directResp.data.toLowerCase().includes('login') || directResp.data.toLowerCase().includes('unauthor')));
+        if (directLooksUnauthorized) {
+          debugNewznabStep('getnzb-direct-fail', { url: directGetUrl, params: { id: 'invalid-id-for-auth-check', apikey: apiKey }, status: directResp.status, headers: directResp.headers || {}, body: directResp.data, note: 'getnzb direct indicates unauthorized' });
+          throw new Error('Unauthorized: API key invalid');
+        }
+      }
+
+      successes += 1;
+      const label = cfg.name || base;
+      details.push(`${label} OK${version ? ` (v${String(version).replace(/^v/i,'')})` : ''}`);
     } catch (err) {
-      details.push(`${base} ERR: ${err?.message || 'unknown error'}`);
+      const label = cfg.name || base;
+      details.push(`${label} ERR: ${err?.message || 'unknown error'}`);
     }
   }
 
   if (successes === 0) {
     throw new Error(`No Newznab endpoints reachable: ${details.join('; ')}`);
   }
-  return `Connected to ${successes}/${endpoints.length} Newznab endpoints: ${details.join('; ')}`;
+  return `Connected to ${successes}/${configs.length} Newznab endpoints: ${details.join('; ')}`;
 }
 
 async function testNzbdavConnection(values) {

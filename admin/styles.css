@@ -240,6 +240,71 @@ select:focus {
   color: #9caec0;
 }
 
+/* Newznab indexers UI improvements */
+.newznab-indexer-row {
+  border: 1px solid rgba(94, 114, 130, 0.35);
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: rgba(12, 19, 28, 0.85);
+  margin-bottom: 0.65rem;
+}
+
+.row-grid {
+  display: grid;
+  grid-template-columns: 1fr; /* stack vertically for readability/mobile */
+  gap: 0.75rem; /* a bit more breathing room between fields */
+  align-items: stretch;
+}
+
+.row-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.row-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.row-details {
+  display: block;
+}
+
+.row-details.collapsed {
+  display: none;
+}
+
+.tiny-btn {
+  background: transparent;
+  border: 1px solid rgba(94, 114, 130, 0.55);
+  color: #e0e7ef;
+  border-radius: 6px;
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.tiny-btn:hover { border-color: #40c4ff; color: #40c4ff; }
+
+.status-inline { font-size: 0.85rem; min-height: 1rem; }
+.status-inline.success { color: #6fde8d; }
+.status-inline.error { color: #ff6b6b; }
+
+.input-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.input-inline .toggle-secret {
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+
 
 .checkbox {
   flex-direction: row !important;
@@ -284,6 +349,56 @@ select:focus {
 
 .support-note a:hover {
   text-decoration: underline;
+}
+
+/* Full-width list container for Newznab rows */
+.newznab-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.newznab-actions-top {
+  margin-top: 0.4rem;
+  margin-bottom: 0.2rem;
+}
+
+.divider {
+  height: 1px;
+  width: 100%;
+  background: rgba(94, 114, 130, 0.35);
+  margin: 0.8rem 0 0.4rem;
+  border-radius: 1px;
+}
+
+.newznab-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.newznab-preset-bar {
+  display: flex;
+  align-items: end;
+  gap: 0.6rem;
+  margin: 0.4rem 0 0.6rem;
+}
+
+.row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.35rem;
+}
+
+.index-badge {
+  display: inline-block;
+  font-size: 0.8rem;
+  color: #9caec0;
+  background: rgba(94,114,130,0.2);
+  border: 1px solid rgba(94,114,130,0.35);
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
 }
 
 @media (max-width: 720px) {

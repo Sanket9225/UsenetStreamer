@@ -65,16 +65,26 @@
 
         <section class="group">
           <h3>Direct Newznab Indexers (Optional)</h3>
-          <div class="field-grid">
+          <p class="hint">Add one or more indexers below. Use the preset dropdown to quickly add known indexers, give each a friendly name, and test them individually. You can reorder to control priority.</p>
+          <div class="newznab-preset-bar">
+            <label>Preset
+              <select id="newznabPreset"></select>
+            </label>
+            <button type="button" id="addPresetIndexer" class="secondary">Add from preset</button>
+          </div>
+          <div id="newznab-indexers-list" class="newznab-list">
+            <!-- Dynamic rows will be inserted here -->
+          </div>
+          <div class="newznab-actions-top">
+            <button type="button" id="addNewznabIndexer" class="secondary">Add Indexer</button>
+          </div>
+          <div class="divider"></div>
+          <div class="newznab-controls">
             <label class="checkbox">
               <input name="NEWZNAB_ENABLED" type="checkbox" />
               <span>Enable Direct Newznab Queries</span>
               <span class="field-hint">Queries these endpoints alongside the indexer manager. Leave off if you rely solely on Prowlarr/NZBHydra.</span>
             </label>
-            <div id="newznab-indexers-list">
-              <!-- Dynamic rows will be inserted here -->
-            </div>
-            <button type="button" id="addNewznabIndexer" class="secondary">Add Indexer</button>
             <label class="checkbox">
               <input name="NEWZNAB_FILTER_NZB_ONLY" type="checkbox" />
               <span>Filter to NZB URLs Only</span>
