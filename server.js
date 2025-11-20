@@ -171,6 +171,10 @@ app.use('/:token/admin', (req, res, next) => {
   });
 });
 
+app.get('/', (req, res) => {
+  res.redirect('/admin');
+});
+
 app.use((req, res, next) => {
   if (req.path.startsWith('/assets/')) return next();
   if (req.path.startsWith('/admin') && !req.path.startsWith('/admin/api')) return next();
