@@ -41,6 +41,7 @@ const specialMetadata = require('./src/services/specialMetadata');
 const app = express();
 let currentPort = Number(process.env.PORT || 7000);
 const ADDON_VERSION = '1.3.1';
+const DEFAULT_ADDON_NAME = 'UsenetStreamer';
 let serverInstance = null;
 const SERVER_HOST = '0.0.0.0';
 
@@ -208,6 +209,7 @@ let INDEXER_MANAGER_CACHE_MINUTES = (() => {
 let INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
 let ADDON_BASE_URL = (process.env.ADDON_BASE_URL || '').trim();
 let ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
+let ADDON_NAME = (process.env.ADDON_NAME || DEFAULT_ADDON_NAME).trim() || DEFAULT_ADDON_NAME;
 const DEFAULT_MAX_RESULT_SIZE_GB = 30;
 let INDEXER_MANAGER_BACKOFF_ENABLED = toBoolean(process.env.INDEXER_MANAGER_BACKOFF_ENABLED, true);
 let INDEXER_MANAGER_BACKOFF_SECONDS = toPositiveInt(process.env.INDEXER_MANAGER_BACKOFF_SECONDS, 120);
@@ -324,6 +326,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
 
   ADDON_BASE_URL = (process.env.ADDON_BASE_URL || '').trim();
   ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
+  ADDON_NAME = (process.env.ADDON_NAME || DEFAULT_ADDON_NAME).trim() || DEFAULT_ADDON_NAME;
 
   INDEXER_MANAGER = (process.env.INDEXER_MANAGER || 'none').trim().toLowerCase();
   INDEXER_MANAGER_URL = (process.env.INDEXER_MANAGER_URL || process.env.PROWLARR_URL || '').trim();
@@ -402,6 +405,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
       portChanged,
       baseUrlChanged: previousBaseUrl !== undefined && previousBaseUrl !== ADDON_BASE_URL,
       sharedSecretChanged: previousSharedSecret !== undefined && previousSharedSecret !== ADDON_SHARED_SECRET,
+  addonName: ADDON_NAME,
       indexerManager: INDEXER_MANAGER,
       newznabEnabled: NEWZNAB_ENABLED,
       triageEnabled: TRIAGE_ENABLED,
@@ -416,6 +420,7 @@ rebuildRuntimeConfig({ log: false });
 const ADMIN_CONFIG_KEYS = [
   'PORT',
   'ADDON_BASE_URL',
+  'ADDON_NAME',
   'ADDON_SHARED_SECRET',
   'INDEXER_MANAGER',
   'INDEXER_MANAGER_URL',
@@ -663,7 +668,7 @@ function manifestHandler(req, res) {
   res.json({
     id: 'com.usenet.streamer',
     version: ADDON_VERSION,
-    name: 'UsenetStreamer',
+    name: ADDON_NAME,
     description: 'Usenet-powered instant streams for Stremio via Prowlarr/NZBHydra and NZBDav',
     logo: `${ADDON_BASE_URL.replace(/\/$/, '')}/assets/icon.png`,
     resources: ['stream'],
@@ -1543,7 +1548,7 @@ async function streamHandler(req, res) {
         if (quality) tags.push(quality);
         if (languageLabel) tags.push(`🌐 ${languageLabel}`);
         if (sizeString) tags.push(sizeString);
-        const name = 'UsenetStreamer';
+  const name = ADDON_NAME || DEFAULT_ADDON_NAME;
         const behaviorHints = {
           notWebReady: true,
           externalPlayer: {

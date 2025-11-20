@@ -10,7 +10,10 @@
   const saveStatus = document.getElementById('saveStatus');
   const copyManifestButton = document.getElementById('copyManifest');
   const copyManifestStatus = document.getElementById('copyManifestStatus');
+  const stremioWebButton = document.getElementById('installStremioWeb');
+  const stremioAppButton = document.getElementById('installStremioApp');
 
+  let currentManifestUrl = '';
   let copyStatusTimer = null;
 
   let runtimeEnvPath = null;
@@ -585,15 +588,19 @@
 
   function updateManifestLink(url) {
     if (!url) {
+      currentManifestUrl = '';
       manifestLink.textContent = 'Not configured';
       manifestLink.removeAttribute('href');
       setCopyButtonState(false);
+      setInstallButtonsState(false);
       if (copyManifestStatus) copyManifestStatus.textContent = '';
       return;
     }
+    currentManifestUrl = url;
     manifestLink.textContent = url;
     manifestLink.href = url;
     setCopyButtonState(true);
+    setInstallButtonsState(true);
     if (copyManifestStatus) copyManifestStatus.textContent = '';
   }
 
@@ -605,7 +612,16 @@
         clearTimeout(copyStatusTimer);
         copyStatusTimer = null;
       }
-      copyManifestStatus.textContent = '';
+      if (copyManifestStatus) copyManifestStatus.textContent = '';
+    }
+  }
+
+  function setInstallButtonsState(enabled) {
+    if (stremioWebButton) {
+      stremioWebButton.disabled = !enabled;
+    }
+    if (stremioAppButton) {
+      stremioAppButton.disabled = !enabled;
     }
   }
 
@@ -641,6 +657,28 @@
       copyManifestStatus.textContent = '';
       copyStatusTimer = null;
     }, 2500);
+  }
+
+  function getStremioProtocolUrl(url) {
+    if (!url) return '';
+    if (url.startsWith('stremio://')) return url;
+    if (/^https?:\/\//i.test(url)) {
+      return url.replace(/^https?:\/\//i, 'stremio://');
+    }
+    return `stremio://${url.replace(/^stremio:\/\//i, '')}`;
+  }
+
+  function openStremioWebInstall() {
+    if (!currentManifestUrl) return;
+    const encoded = encodeURIComponent(currentManifestUrl);
+    const url = `https://web.stremio.com/#/addons?addon=${encoded}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function openStremioAppInstall() {
+    if (!currentManifestUrl) return;
+    const deeplink = getStremioProtocolUrl(currentManifestUrl);
+    window.open(deeplink, '_blank');
   }
 
   const healthToggle = configForm.querySelector('input[name="NZB_TRIAGE_ENABLED"]');
@@ -765,6 +803,12 @@
 
   if (copyManifestButton) {
     copyManifestButton.addEventListener('click', copyManifestUrl);
+  }
+  if (stremioWebButton) {
+    stremioWebButton.addEventListener('click', openStremioWebInstall);
+  }
+  if (stremioAppButton) {
+    stremioAppButton.addEventListener('click', openStremioAppInstall);
   }
 
   if (healthToggle) {
