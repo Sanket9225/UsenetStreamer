@@ -5,7 +5,6 @@
   const authError = document.getElementById('authError');
   const configSection = document.getElementById('configSection');
   const configForm = document.getElementById('configForm');
-  const manifestLink = document.getElementById('manifestLink');
   const manifestDescription = document.getElementById('manifestDescription');
   const saveStatus = document.getElementById('saveStatus');
   const copyManifestButton = document.getElementById('copyManifest');
@@ -573,10 +572,10 @@
       syncManagerControls();
       syncNewznabControls();
       configSection.classList.remove('hidden');
-      updateManifestLink(data.manifestUrl || '');
+  updateManifestLink(data.manifestUrl || '');
       runtimeEnvPath = data.runtimeEnvPath || null;
-      const baseMessage = 'Add this manifest to Stremio once HTTPS is set.';
-      manifestDescription.textContent = baseMessage;
+  const baseMessage = 'Use the install buttons once HTTPS and your shared token are set.';
+  manifestDescription.textContent = baseMessage;
     } catch (error) {
       authError.textContent = error.message;
       authError.classList.remove('hidden');
@@ -587,21 +586,13 @@
   }
 
   function updateManifestLink(url) {
-    if (!url) {
-      currentManifestUrl = '';
-      manifestLink.textContent = 'Not configured';
-      manifestLink.removeAttribute('href');
-      setCopyButtonState(false);
-      setInstallButtonsState(false);
-      if (copyManifestStatus) copyManifestStatus.textContent = '';
-      return;
+    currentManifestUrl = url || '';
+    const hasUrl = Boolean(currentManifestUrl);
+    setCopyButtonState(hasUrl);
+    setInstallButtonsState(hasUrl);
+    if (copyManifestStatus) {
+      copyManifestStatus.textContent = '';
     }
-    currentManifestUrl = url;
-    manifestLink.textContent = url;
-    manifestLink.href = url;
-    setCopyButtonState(true);
-    setInstallButtonsState(true);
-    if (copyManifestStatus) copyManifestStatus.textContent = '';
   }
 
   function setCopyButtonState(enabled) {
@@ -626,8 +617,8 @@
   }
 
   async function copyManifestUrl() {
-    if (!manifestLink || !manifestLink.href || copyManifestButton.disabled) return;
-    const url = manifestLink.href;
+    if (!currentManifestUrl || copyManifestButton.disabled) return;
+    const url = currentManifestUrl;
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(url);
@@ -672,13 +663,19 @@
     if (!currentManifestUrl) return;
     const encoded = encodeURIComponent(currentManifestUrl);
     const url = `https://web.stremio.com/#/addons?addon=${encoded}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!newWindow) {
+      window.location.href = url;
+    }
   }
 
   function openStremioAppInstall() {
     if (!currentManifestUrl) return;
     const deeplink = getStremioProtocolUrl(currentManifestUrl);
-    window.open(deeplink, '_blank');
+    const newWindow = window.open(deeplink, '_blank');
+    if (!newWindow) {
+      window.location.href = deeplink;
+    }
   }
 
   const healthToggle = configForm.querySelector('input[name="NZB_TRIAGE_ENABLED"]');
@@ -772,7 +769,7 @@
         method: 'POST',
         body: JSON.stringify({ values }),
       });
-      const manifestUrl = result?.manifestUrl || manifestLink?.href || '';
+  const manifestUrl = result?.manifestUrl || currentManifestUrl || '';
       if (manifestUrl) updateManifestLink(manifestUrl);
       const portChanged = Boolean(result?.portChanged);
       const manifestNote = manifestUrl ? `Manifest URL: ${manifestUrl}. ` : '';

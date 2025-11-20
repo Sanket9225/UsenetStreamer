@@ -163,14 +163,6 @@ select:focus {
   word-break: break-all;
 }
 
-.manifest-info a {
-  color: #40c4ff;
-}
-
-.manifest-info a:hover {
-  text-decoration: underline;
-}
-
 .manifest-actions {
   display: flex;
   flex-direction: column;
