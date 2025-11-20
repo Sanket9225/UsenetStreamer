@@ -27,7 +27,6 @@
   const newznabPresetSelect = document.getElementById('newznabPreset');
   const addPresetButton = document.getElementById('addPresetIndexer');
   const addNewznabButton = document.getElementById('addNewznabIndexer');
-  const newznabEnabledCheckbox = configForm.querySelector('input[name="NEWZNAB_ENABLED"]');
   const newznabTestSearchBlock = document.getElementById('newznab-test-search');
   const newznabTestButton = configForm.querySelector('button[data-test="newznab"]');
 
@@ -113,6 +112,7 @@
         payload[key] = element.value != null ? element.value.toString() : '';
       }
     });
+    payload.NEWZNAB_ENABLED = hasEnabledNewznabRows() ? 'true' : 'false';
     return payload;
   }
 
@@ -123,6 +123,13 @@
   function getNewznabRows() {
     if (!newznabList) return [];
     return Array.from(newznabList.querySelectorAll('.newznab-row'));
+  }
+
+  function hasEnabledNewznabRows() {
+    return getNewznabRows().some((row) => {
+      const toggle = row.querySelector('[data-field="INDEXER_ENABLED"]');
+      return Boolean(toggle?.checked);
+    });
   }
 
   function assignRowFieldNames(row, ordinal) {
@@ -736,24 +743,16 @@
   function syncNewznabControls() {
     const rows = getNewznabRows();
     const hasRows = rows.length > 0;
+    const hasEnabledRows = hasEnabledNewznabRows();
     if (newznabList) {
       const hint = newznabList.querySelector('[data-empty-hint]');
       if (hint) hint.classList.toggle('hidden', hasRows);
     }
-    if (newznabEnabledCheckbox) {
-      if (!hasRows) {
-        newznabEnabledCheckbox.checked = false;
-        newznabEnabledCheckbox.disabled = true;
-      } else {
-        newznabEnabledCheckbox.disabled = false;
-      }
-    }
     if (newznabTestButton) {
-      newznabTestButton.disabled = !hasRows;
+      newznabTestButton.disabled = !hasEnabledRows;
     }
     if (newznabTestSearchBlock) {
-      const isEnabled = Boolean(newznabEnabledCheckbox?.checked);
-      const allowTest = hasRows && (allowNewznabTestSearch || isEnabled);
+      const allowTest = hasRows && (allowNewznabTestSearch || hasEnabledRows);
       newznabTestSearchBlock.classList.toggle('hidden', !allowTest);
     }
   }
@@ -831,10 +830,6 @@
 
   if (addPresetButton) {
     addPresetButton.addEventListener('click', handleAddPresetIndexer);
-  }
-
-  if (newznabEnabledCheckbox) {
-    newznabEnabledCheckbox.addEventListener('change', syncNewznabControls);
   }
 
   if (managerSelect) {
