@@ -11,6 +11,11 @@
   const copyManifestStatus = document.getElementById('copyManifestStatus');
   const stremioWebButton = document.getElementById('installStremioWeb');
   const stremioAppButton = document.getElementById('installStremioApp');
+  const healthPaidWarning = document.getElementById('healthPaidWarning');
+  const saveButton = configForm.querySelector('button[type="submit"]');
+  const sourceGuardNotice = document.getElementById('sourceGuardNotice');
+  const qualityHiddenInput = configForm.querySelector('input[name="NZB_ALLOWED_RESOLUTIONS"]');
+  const qualityCheckboxes = Array.from(configForm.querySelectorAll('[data-quality-option]'));
 
   let currentManifestUrl = '';
   let copyStatusTimer = null;
@@ -20,7 +25,7 @@
   let newznabPresets = [];
 
   const MAX_NEWZNAB_INDEXERS = 20;
-  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED'];
+  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID'];
 
   const managerSelect = configForm.querySelector('select[name="INDEXER_MANAGER"]');
   const newznabList = document.getElementById('newznab-indexers-list');
@@ -29,6 +34,7 @@
   const addNewznabButton = document.getElementById('addNewznabIndexer');
   const newznabTestSearchBlock = document.getElementById('newznab-test-search');
   const newznabTestButton = configForm.querySelector('button[data-test="newznab"]');
+  let saveInProgress = false;
 
   function getStoredToken() {
     return localStorage.getItem(storageKey) || '';
@@ -62,10 +68,13 @@
   }
 
   function markSaving(isSaving) {
-    const submitButton = configForm.querySelector('button[type="submit"]');
-    if (submitButton) {
-      submitButton.disabled = isSaving;
-      submitButton.textContent = isSaving ? 'Saving...' : 'Save Changes';
+    saveInProgress = isSaving;
+    if (!saveButton) return;
+    saveButton.textContent = isSaving ? 'Saving...' : 'Save Changes';
+    if (isSaving) {
+      saveButton.disabled = true;
+    } else {
+      syncSaveGuard();
     }
   }
 
@@ -130,6 +139,92 @@
       const toggle = row.querySelector('[data-field="INDEXER_ENABLED"]');
       return Boolean(toggle?.checked);
     });
+  }
+
+  function hasPaidNewznabRows() {
+    return getNewznabRows().some((row) => {
+      const paidToggle = row.querySelector('[data-field="PAID"]');
+      return Boolean(paidToggle?.checked);
+    });
+  }
+
+  function hasPaidManagerIndexers() {
+    const fields = ['NZB_TRIAGE_PRIORITY_INDEXERS', 'NZB_TRIAGE_HEALTH_INDEXERS'];
+    return fields.some((name) => {
+      const input = configForm.querySelector(`[name="${name}"]`);
+      return Boolean(input && input.value && input.value.trim().length > 0);
+    });
+  }
+
+  function hasAnyPaidSource() {
+    return hasPaidManagerIndexers() || hasPaidNewznabRows();
+  }
+
+  function updateHealthPaidWarning() {
+    if (!healthPaidWarning) return;
+    const shouldShow = Boolean(healthToggle?.checked) && !hasAnyPaidSource();
+    healthPaidWarning.classList.toggle('hidden', !shouldShow);
+  }
+
+  function normalizeQualityToken(value) {
+    if (value === undefined || value === null) return null;
+    const token = String(value).trim().toLowerCase();
+    return token || null;
+  }
+
+  function syncQualityHiddenInput() {
+    if (!qualityHiddenInput || qualityCheckboxes.length === 0) return;
+    const selected = qualityCheckboxes
+      .filter((checkbox) => checkbox.checked)
+      .map((checkbox) => checkbox.value);
+    qualityHiddenInput.value = selected.join(',');
+  }
+
+  function applyQualitySelectionsFromHidden() {
+    if (!qualityHiddenInput || qualityCheckboxes.length === 0) return;
+    const stored = (qualityHiddenInput.value || '').trim();
+    if (!stored) {
+      qualityCheckboxes.forEach((checkbox) => {
+        checkbox.checked = true;
+      });
+      syncQualityHiddenInput();
+      return;
+    }
+    const tokens = stored
+      .split(',')
+      .map((value) => normalizeQualityToken(value))
+      .filter(Boolean);
+    const allowed = new Set(tokens);
+    if (allowed.size === 0) {
+      qualityCheckboxes.forEach((checkbox) => {
+        checkbox.checked = true;
+      });
+    } else {
+      qualityCheckboxes.forEach((checkbox) => {
+        checkbox.checked = allowed.has(checkbox.value.toLowerCase());
+      });
+    }
+    syncQualityHiddenInput();
+  }
+
+  function hasManagerConfigured() {
+    if (!managerSelect) return false;
+    const value = (managerSelect.value || 'none').toLowerCase();
+    return value !== 'none';
+  }
+
+  function hasActiveIndexerSource() {
+    return hasManagerConfigured() || hasEnabledNewznabRows();
+  }
+
+  function syncSaveGuard() {
+    const hasSource = hasActiveIndexerSource();
+    if (sourceGuardNotice) {
+      sourceGuardNotice.classList.toggle('hidden', hasSource);
+    }
+    if (saveButton && !saveInProgress) {
+      saveButton.disabled = !hasSource;
+    }
   }
 
   function assignRowFieldNames(row, ordinal) {
@@ -243,6 +338,10 @@
             <input type="checkbox" data-field="INDEXER_ENABLED" checked />
             <span>Enabled</span>
           </label>
+          <label class="checkbox">
+            <input type="checkbox" data-field="PAID" />
+            <span>Paid / Health-ready</span>
+          </label>
         </div>
         <div class="row-controls">
           <button type="button" class="ghost" data-row-action="move-up">Move Up</button>
@@ -284,6 +383,7 @@
   const removeButton = row.querySelector('[data-row-action="remove"]');
   const testButton = row.querySelector('[data-row-action="test"]');
   const enabledToggle = row.querySelector('[data-field="INDEXER_ENABLED"]');
+  const paidToggle = row.querySelector('[data-field="PAID"]');
   const apiKeyInput = row.querySelector('[data-field="API_KEY"]');
   const apiKeyToggle = row.querySelector('[data-role="api-key-toggle"]');
   const endpointInput = row.querySelector('[data-field="ENDPOINT"]');
@@ -292,6 +392,7 @@
     if (moveDownButton) moveDownButton.addEventListener('click', () => moveNewznabRow(row, 1));
     if (removeButton) removeButton.addEventListener('click', () => removeNewznabRow(row));
     if (enabledToggle) enabledToggle.addEventListener('change', () => syncNewznabControls());
+    if (paidToggle) paidToggle.addEventListener('change', () => updateHealthPaidWarning());
     if (testButton) testButton.addEventListener('click', () => runNewznabRowTest(row));
     if (apiKeyToggle && apiKeyInput) {
       apiKeyToggle.addEventListener('click', () => {
@@ -573,6 +674,7 @@
       allowNewznabTestSearch = Boolean(data?.debugNewznabSearch);
       setupNewznabRowsFromValues(values);
       populateForm(values);
+      applyQualitySelectionsFromHidden();
       refreshNewznabFieldNames();
       syncHealthControls();
       syncSortingControls();
@@ -721,6 +823,7 @@
   function syncHealthControls() {
     updateHealthFieldRequirements();
     enforceConnectionLimit();
+    updateHealthPaidWarning();
   }
 
   function syncSortingControls() {
@@ -735,9 +838,10 @@
 
   function syncManagerControls() {
     if (!managerSelect) return;
-    const managerValue = managerSelect.value || 'prowlarr';
+    const managerValue = managerSelect.value || 'none';
     const managerFields = configForm.querySelectorAll('[data-manager-field]');
     managerFields.forEach((field) => field.classList.toggle('hidden', managerValue === 'none'));
+    syncSaveGuard();
   }
 
   function syncNewznabControls() {
@@ -755,6 +859,8 @@
       const allowTest = hasRows && (allowNewznabTestSearch || hasEnabledRows);
       newznabTestSearchBlock.classList.toggle('hidden', !allowTest);
     }
+    syncSaveGuard();
+    updateHealthPaidWarning();
   }
 
   async function saveConfiguration(event) {
@@ -822,6 +928,19 @@
     sortingModeSelect.addEventListener('change', syncSortingControls);
   }
 
+  const managerPaidInputs = configForm.querySelectorAll('[name="NZB_TRIAGE_PRIORITY_INDEXERS"], [name="NZB_TRIAGE_HEALTH_INDEXERS"]');
+  managerPaidInputs.forEach((input) => {
+    input.addEventListener('input', updateHealthPaidWarning);
+  });
+
+  if (qualityCheckboxes.length > 0) {
+    qualityCheckboxes.forEach((checkbox) => {
+      checkbox.addEventListener('change', () => {
+        syncQualityHiddenInput();
+      });
+    });
+  }
+
   if (addNewznabButton) {
     addNewznabButton.addEventListener('click', () => {
       addNewznabRow();
@@ -833,7 +952,9 @@
   }
 
   if (managerSelect) {
-    managerSelect.addEventListener('change', syncManagerControls);
+    managerSelect.addEventListener('change', () => {
+      syncManagerControls();
+    });
   }
 
   const pathToken = extractTokenFromPath();
@@ -851,4 +972,6 @@
   syncSortingControls();
   syncManagerControls();
   syncNewznabControls();
+  applyQualitySelectionsFromHidden();
+  syncSaveGuard();
 })();

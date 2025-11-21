@@ -18,10 +18,6 @@ const SPECIAL_ID_PREFIX = decodeBase64Value(OBFUSCATED_SPECIAL_ID_PREFIX) || Str
 const specialCatalogPrefixes = new Set(['pt', SPECIAL_ID_PREFIX]);
 
 const EXTERNAL_SPECIAL_PROVIDER_URL = (() => {
-  const configured = (process.env.EXTERNAL_SPECIAL_ADDON_URL || process.env.EXTERNAL_ADDON_URL || '').trim();
-  if (configured) {
-    return stripTrailingSlashes(configured);
-  }
   const decoded = decodeBase64Value(OBFUSCATED_SPECIAL_PROVIDER_URL);
   return decoded ? stripTrailingSlashes(decoded) : '';
 })();

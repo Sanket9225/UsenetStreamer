@@ -111,6 +111,7 @@ const LANGUAGE_PATTERNS = Object.fromEntries(
 );
 
 const RESOLUTION_PREFERENCES = [
+  '4320p',
   '2160p',
   '1440p',
   '1080p',

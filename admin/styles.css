@@ -91,6 +91,8 @@ select {
   border-radius: 8px;
   padding: 0.55rem 0.75rem;
   color: inherit;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 input:focus,
@@ -288,6 +290,32 @@ select:focus {
   color: #9caec0;
 }
 
+.quality-filter {
+  margin-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.quality-filter-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.quality-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.5rem;
+}
+
+.quality-checkbox-grid .checkbox {
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(94, 114, 130, 0.4);
+  background: rgba(18, 27, 38, 0.9);
+}
+
 
 .checkbox {
   flex-direction: row !important;
@@ -477,5 +505,52 @@ button.ghost.danger:hover {
   .primary {
     width: 100%;
     text-align: center;
+  }
+
+  .newznab-preset-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .newznab-preset-bar select,
+  .newznab-preset-bar button,
+  .newznab-preset-bar .secondary {
+    width: 100%;
+  }
+
+  .newznab-row {
+    padding: 0.85rem;
+  }
+
+  .newznab-row .row-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .row-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .newznab-row .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #newznab-test-search .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #newznab-test-search .actions {
+    align-items: stretch;
+  }
+
+  #newznab-test-search .actions .secondary,
+  .newznab-controls .secondary,
+  .newznab-controls button {
+    width: 100%;
+  }
+
+  .newznab-controls {
+    align-items: stretch;
   }
 }
