@@ -59,7 +59,7 @@ const STREAM_HIGH_WATER_MARK = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 4 * 1024 * 1024;
 })();
 const FAILURE_VIDEO_PATH = path.resolve(__dirname, '../../assets', 'failure_video.mp4');
-const ADDON_VERSION = '1.3.1';
+const ADDON_VERSION = '1.4.0';
 
 function ensureNzbdavConfigured() {
   if (!NZBDAV_URL) {

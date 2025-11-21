@@ -3,7 +3,7 @@ const { parseStringPromise: parseXmlString } = require('xml2js');
 const { stripTrailingSlashes } = require('../utils/config');
 
 const MAX_NEWZNAB_INDEXERS = 20;
-const NEWZNAB_FIELD_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED'];
+const NEWZNAB_FIELD_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID'];
 const NEWZNAB_NUMBERED_KEYS = [];
 for (let i = 1; i <= MAX_NEWZNAB_INDEXERS; i += 1) {
   const idx = String(i).padStart(2, '0');
@@ -268,6 +268,8 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
   const name = toTrimmedString(source[`NEWZNAB_NAME_${key}`]);
   const enabledRaw = source[`NEWZNAB_INDEXER_ENABLED_${key}`];
   const enabled = parseBoolean(enabledRaw, true);
+  const paidRaw = source[`NEWZNAB_PAID_${key}`];
+  const isPaid = parseBoolean(paidRaw, false);
 
   const hasAnyValue = endpoint || apiKey || apiPathRaw || name || enabledRaw !== undefined;
   if (!hasAnyValue && !includeEmpty) {
@@ -287,6 +289,7 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
     name,
     displayName,
     enabled,
+    isPaid,
     slug,
     dedupeKey: slug || `indexer-${key}`,
     baseUrl: normalizedEndpoint ? `${normalizedEndpoint}${apiPath}` : '',
@@ -496,6 +499,16 @@ async function fetchIndexerResults(config, plan, options) {
   const requestUrl = config.baseUrl || `${config.endpoint}${config.apiPath}`;
   const safeParams = { ...params, apikey: maskApiKey(params.apikey) };
   const logPrefix = options.label || '[NEWZNAB]';
+  if (options.logEndpoints) {
+    const tokenSummary = Array.isArray(plan?.tokens) && plan.tokens.length > 0 ? plan.tokens.join(' ') : null;
+    console.log(`${logPrefix}[ENDPOINT]`, {
+      indexer: config.displayName || config.endpoint,
+      planType: plan?.type,
+      query: plan?.query,
+      tokens: tokenSummary,
+      url: requestUrl,
+    });
+  }
   if (options.debug) {
     console.log(`${logPrefix}[SEARCH][REQ]`, { url: requestUrl, params: safeParams });
   }
@@ -545,7 +558,8 @@ async function searchNewznabIndexers(plan, configs, options = {}) {
     filterNzbOnly: true,
     debug: false,
     timeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
-  label: '[NEWZNAB]',
+    label: '[NEWZNAB]',
+    logEndpoints: false,
   };
   const settings = { ...defaults, ...options };
   const eligible = filterUsableConfigs(configs, { requireEnabled: true, requireApiKey: true });

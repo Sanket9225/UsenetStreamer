@@ -24,9 +24,9 @@ function normalizeReleaseTitle(title) {
 
 function parseRequestedEpisode(type, id, query = {}) {
   if (type !== 'series') return null;
-  
-  const videoId = String(id || '').split(':')[0];
-  const parts = videoId.split(':');
+
+  const rawId = String(id || '');
+  const parts = rawId.split(':');
   const season = parts[1] ? Number(parts[1]) : null;
   const episode = parts[2] ? Number(parts[2]) : null;
 
@@ -109,14 +109,66 @@ function nzbMatchesIndexer(result, tokenSet) {
 
 function cleanSpecialSearchTitle(rawTitle) {
   if (!rawTitle) return '';
-  let cleaned = rawTitle
-    .replace(/\([^)]*\)/g, '')
-    .replace(/\[[^\]]*\]/g, '')
-    .replace(/[:\-–—]/g, ' ')
-    .replace(/[^a-z0-9\s]/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned;
+  const noiseTokens = new Set([
+    'mb', 'gb', 'kb', 'tb', 'xxx', 'hevc', 'x265', 'x264', 'h265', 'h264',
+    'hdr', 'dv', 'uhd', 'web', 'webdl', 'web-dl', 'webrip', 'bluray', 'bdrip',
+    'remux', 'prt', 'aac', 'ddp', 'ddp5', 'ddp5.1', 'ddp51', 'atmos', 'dts'
+  ]);
+  const removeEverywherePatterns = [
+    /^\d+(mb|gb|kb|tb)$/i,
+    /^[0-9]{3,4}p$/i,
+    /^s\d{2}e\d{2}$/i,
+    /^\d+x\d+$/,
+    /^x?26[45]$/i,
+    /^h26[45]$/i
+  ];
+
+  const normalizeChunk = (value) =>
+    value
+      .replace(/[\[\](){}]/g, ' ')
+      .replace(/[._]/g, ' ')
+      .replace(/[:\-–—]/g, ' ')
+      .replace(/[^a-z0-9\s]/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const normalized = normalizeChunk(rawTitle);
+  if (!normalized) return '';
+
+  const tokens = normalized.split(' ');
+  const filteredTokens = [];
+  let contentStarted = false;
+
+  const isRemovableToken = (token, phase) => {
+    const lower = token.toLowerCase();
+    if (!lower) return true;
+    if (noiseTokens.has(lower)) return true;
+    if (/^\d+$/.test(lower)) return true;
+    if (removeEverywherePatterns.some((pattern) => pattern.test(lower))) return true;
+    if (phase === 'prefix') {
+      if (/^\d{1,3}mb$/i.test(lower)) return true;
+      if (/^\d{1,4}$/.test(lower)) return true;
+    }
+    return false;
+  };
+
+  for (const token of tokens) {
+    if (!token) continue;
+    if (!contentStarted && isRemovableToken(token, 'prefix')) {
+      continue;
+    }
+    contentStarted = true;
+    if (isRemovableToken(token, 'anywhere')) {
+      continue;
+    }
+    filteredTokens.push(token);
+  }
+
+  if (filteredTokens.length === 0) {
+    filteredTokens.push(tokens[tokens.length - 1]);
+  }
+
+  return normalizeChunk(filteredTokens.join(' '));
 }
 
 function stripTrailingSlashes(url) {

@@ -25,6 +25,30 @@ function applyMaxSizeFilter(results, maxSizeBytes) {
   });
 }
 
+function filterByAllowedResolutions(results, allowedResolutions) {
+  if (!Array.isArray(results) || !allowedResolutions || allowedResolutions.length === 0) {
+    return results;
+  }
+  const normalizedTokens = allowedResolutions
+    .map((value) => (value === undefined || value === null ? null : String(value).trim().toLowerCase()))
+    .filter((token) => token && token.length > 0);
+  if (normalizedTokens.length === 0) {
+    return results;
+  }
+  const allowUnknown = normalizedTokens.includes('unknown');
+  const allowedSet = new Set(normalizedTokens.filter((token) => token !== 'unknown'));
+  return results.filter((result) => {
+    const resolutionToken = result?.resolution ? String(result.resolution).trim().toLowerCase() : null;
+    if (!resolutionToken || resolutionToken === 'unknown') {
+      return allowUnknown;
+    }
+    if (allowedSet.size === 0) {
+      return false;
+    }
+    return allowedSet.has(resolutionToken);
+  });
+}
+
 function resultMatchesPreferredLanguage(result, preferredLanguage) {
   if (!preferredLanguage || !result) return false;
   const normalized = preferredLanguage.toLowerCase();
@@ -69,8 +93,10 @@ function sortAnnotatedResults(results, sortMode, preferredLanguage) {
 }
 
 function prepareSortedResults(results, options = {}) {
-  const { maxSizeBytes, sortMode, preferredLanguage } = options;
-  let working = applyMaxSizeFilter(results, maxSizeBytes);
+  const { maxSizeBytes, sortMode, preferredLanguage, allowedResolutions } = options;
+  let working = Array.isArray(results) ? results.slice() : [];
+  working = filterByAllowedResolutions(working, allowedResolutions);
+  working = applyMaxSizeFilter(working, maxSizeBytes);
   working = sortAnnotatedResults(working, sortMode, preferredLanguage);
   return working;
 }
@@ -198,6 +224,7 @@ module.exports = {
   sleep,
   annotateNzbResult,
   applyMaxSizeFilter,
+  filterByAllowedResolutions,
   resultMatchesPreferredLanguage,
   compareQualityThenSize,
   sortAnnotatedResults,

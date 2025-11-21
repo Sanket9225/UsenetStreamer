@@ -35,7 +35,7 @@
               <select name="INDEXER_MANAGER">
                 <option value="prowlarr">Prowlarr</option>
                 <option value="nzbhydra">NZBHydra</option>
-                <option value="none" selected>Newznab Only</option>
+                <option value="none" selected>Newznab Only (Recommended)</option>
               </select>
             </label>
             <label data-manager-field>Manager URL
@@ -52,10 +52,10 @@
               <input name="NZB_TRIAGE_PRIORITY_INDEXERS" type="text" placeholder="9,33" />
               <span class="field-hint">Subset of the above list that gets used for health checks. Must be a comma-separated subset of “Indexer IDs / Names”.</span>
             </label>
-            <label class="checkbox" data-manager-field>
+            <label class="checkbox">
               <input name="INDEXER_MANAGER_STRICT_ID_MATCH" type="checkbox" />
               <span>Strict ID Matching Only</span>
-              <span class="field-hint">Faster ID-only searches; indexers that rely on text queries will be skipped.</span>
+              <span class="field-hint">Applies to both manager and direct Newznab searches. ID-only mode skips text queries.</span>
             </label>
           </div>
           <div class="inline-actions" data-manager-field>
@@ -181,6 +181,59 @@
               <span class="field-hint">Defaults to 30 GB. Set 0 for no cap; larger releases are skipped before health checks.</span>
             </label>
           </div>
+          <div class="quality-filter">
+            <div class="quality-filter-header">
+              <span>Quality Filters</span>
+              <span class="field-hint">Uncheck resolutions you do not want to display. Filtering happens before NZB health checks.</span>
+            </div>
+            <div class="quality-checkbox-grid">
+              <label class="checkbox">
+                <input type="checkbox" data-quality-option value="4320p" checked />
+                <span>4320p / 8K</span>
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" data-quality-option value="2160p" checked />
+                <span>2160p / 4K / UHD</span>
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" data-quality-option value="1440p" checked />
+                <span>1440p</span>
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" data-quality-option value="1080p" checked />
+                <span>1080p</span>
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" data-quality-option value="720p" checked />
+                <span>720p</span>
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" data-quality-option value="576p" checked />
+                <span>576p</span>
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" data-quality-option value="540p" checked />
+                <span>540p</span>
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" data-quality-option value="480p" checked />
+                <span>480p / SD</span>
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" data-quality-option value="360p" checked />
+                <span>360p</span>
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" data-quality-option value="240p" checked />
+                <span>240p</span>
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" data-quality-option value="unknown" checked />
+                <span>Unknown / Not Tagged</span>
+              </label>
+            </div>
+            <input type="hidden" name="NZB_ALLOWED_RESOLUTIONS" value="" />
+          </div>
         </section>
 
         <section class="group">
@@ -224,6 +277,7 @@
               <input name="NZB_TRIAGE_ENABLED" type="checkbox" />
               <span>Enable NZB Health Checks</span>
             </label>
+            <p class="warning hidden" id="healthPaidWarning">Mark at least one indexer as paid (manager list or direct Newznab) before running health checks.</p>
             <label>Usenet Provider Host
               <input name="NZB_TRIAGE_NNTP_HOST" type="text" placeholder="news.easynews.com" data-health-required="true" />
             </label>
@@ -279,6 +333,9 @@
         <div class="actions">
           <button type="submit" class="primary">Save Changes</button>
           <span id="saveStatus" class="status-message"></span>
+          <p id="sourceGuardNotice" class="warning hidden">
+            Select a manager or enable at least one direct Newznab indexer before saving.
+          </p>
         </div>
       </form>
 

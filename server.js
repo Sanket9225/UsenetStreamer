@@ -33,14 +33,14 @@ const { ensureSharedSecret } = require('./src/middleware/auth');
 const newznabService = require('./src/services/newznab');
 const { toFiniteNumber, toPositiveInt, toBoolean, parseCommaList, parsePathList, normalizeSortMode, resolvePreferredLanguage, toSizeBytesFromGb, collectConfigValues, computeManifestUrl, stripTrailingSlashes, decodeBase64Value } = require('./src/utils/config');
 const { normalizeReleaseTitle, parseRequestedEpisode, isVideoFileName, fileMatchesEpisode, normalizeNzbdavPath, inferMimeType, normalizeIndexerToken, nzbMatchesIndexer, cleanSpecialSearchTitle } = require('./src/utils/parsers');
-const { sleep, annotateNzbResult, applyMaxSizeFilter, prepareSortedResults, triageStatusRank, buildTriageTitleMap, prioritizeTriageCandidates, triageDecisionsMatchStatuses, sanitizeDecisionForCache, serializeFinalNzbResults, restoreFinalNzbResults, safeStat } = require('./src/utils/helpers');
+const { sleep, annotateNzbResult, applyMaxSizeFilter, prepareSortedResults, resultMatchesPreferredLanguage, triageStatusRank, buildTriageTitleMap, prioritizeTriageCandidates, triageDecisionsMatchStatuses, sanitizeDecisionForCache, serializeFinalNzbResults, restoreFinalNzbResults, safeStat } = require('./src/utils/helpers');
 const indexerService = require('./src/services/indexer');
 const nzbdavService = require('./src/services/nzbdav');
 const specialMetadata = require('./src/services/specialMetadata');
 
 const app = express();
 let currentPort = Number(process.env.PORT || 7000);
-const ADDON_VERSION = '1.3.1';
+const ADDON_VERSION = '1.4.0';
 const DEFAULT_ADDON_NAME = 'UsenetStreamer';
 let serverInstance = null;
 const SERVER_HOST = '0.0.0.0';
@@ -219,9 +219,17 @@ let NEWZNAB_ENABLED = toBoolean(process.env.NEWZNAB_ENABLED, false);
 let NEWZNAB_FILTER_NZB_ONLY = toBoolean(process.env.NEWZNAB_FILTER_NZB_ONLY, true);
 let DEBUG_NEWZNAB_SEARCH = toBoolean(process.env.DEBUG_NEWZNAB_SEARCH, false);
 let DEBUG_NEWZNAB_TEST = toBoolean(process.env.DEBUG_NEWZNAB_TEST, false);
+let DEBUG_NEWZNAB_ENDPOINTS = toBoolean(process.env.DEBUG_NEWZNAB_ENDPOINTS, false);
 let NEWZNAB_CONFIGS = newznabService.getEnvNewznabConfigs({ includeEmpty: false });
 let ACTIVE_NEWZNAB_CONFIGS = newznabService.filterUsableConfigs(NEWZNAB_CONFIGS, { requireEnabled: true, requireApiKey: true });
 const NEWZNAB_LOG_PREFIX = '[NEWZNAB]';
+
+function getPaidDirectIndexerTokens(configs = ACTIVE_NEWZNAB_CONFIGS) {
+  return configs
+    .filter((config) => config && config.isPaid)
+    .map((config) => normalizeIndexerToken(config.slug || config.dedupeKey || config.displayName || config.id))
+    .filter(Boolean);
+}
 
 function buildSearchLogPrefix({ manager = INDEXER_MANAGER, managerLabel = INDEXER_MANAGER_LABEL, newznabEnabled = NEWZNAB_ENABLED } = {}) {
   const managerSegment = manager === 'none'
@@ -234,7 +242,11 @@ function buildSearchLogPrefix({ manager = INDEXER_MANAGER, managerLabel = INDEXE
 INDEXER_LOG_PREFIX = buildSearchLogPrefix();
 
 function isNewznabDebugEnabled() {
-  return Boolean(DEBUG_NEWZNAB_SEARCH || DEBUG_NEWZNAB_TEST);
+  return Boolean(DEBUG_NEWZNAB_SEARCH || DEBUG_NEWZNAB_TEST || DEBUG_NEWZNAB_ENDPOINTS);
+}
+
+function isNewznabEndpointLoggingEnabled() {
+  return Boolean(DEBUG_NEWZNAB_ENDPOINTS);
 }
 
 function summarizeNewznabPlan(plan) {
@@ -259,6 +271,20 @@ function logNewznabDebug(message, context = null) {
   }
 }
 
+function normalizeResolutionToken(value) {
+  if (value === undefined || value === null) return null;
+  const token = String(value).trim().toLowerCase();
+  return token || null;
+}
+
+function parseAllowedResolutionList(rawValue) {
+  const entries = parseCommaList(rawValue);
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+  return entries
+    .map((entry) => normalizeResolutionToken(entry))
+    .filter(Boolean);
+}
+
 function buildTriageNntpConfig() {
   const host = (process.env.NZB_TRIAGE_NNTP_HOST || '').trim();
   if (!host) return null;
@@ -278,6 +304,7 @@ let INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
     ? process.env.NZB_MAX_RESULT_SIZE_GB
     : DEFAULT_MAX_RESULT_SIZE_GB
 );
+let ALLOWED_RESOLUTIONS = parseAllowedResolutionList(process.env.NZB_ALLOWED_RESOLUTIONS);
 let TRIAGE_ENABLED = toBoolean(process.env.NZB_TRIAGE_ENABLED, false);
 let TRIAGE_TIME_BUDGET_MS = toPositiveInt(process.env.NZB_TRIAGE_TIME_BUDGET_MS, 35000);
 let TRIAGE_MAX_CANDIDATES = toPositiveInt(process.env.NZB_TRIAGE_MAX_CANDIDATES, 25);
@@ -366,6 +393,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   NEWZNAB_FILTER_NZB_ONLY = toBoolean(process.env.NEWZNAB_FILTER_NZB_ONLY, true);
   DEBUG_NEWZNAB_SEARCH = toBoolean(process.env.DEBUG_NEWZNAB_SEARCH, false);
   DEBUG_NEWZNAB_TEST = toBoolean(process.env.DEBUG_NEWZNAB_TEST, false);
+  DEBUG_NEWZNAB_ENDPOINTS = toBoolean(process.env.DEBUG_NEWZNAB_ENDPOINTS, false);
   NEWZNAB_CONFIGS = newznabService.getEnvNewznabConfigs({ includeEmpty: false });
   ACTIVE_NEWZNAB_CONFIGS = newznabService.filterUsableConfigs(NEWZNAB_CONFIGS, { requireEnabled: true, requireApiKey: true });
   INDEXER_LOG_PREFIX = buildSearchLogPrefix({
@@ -381,6 +409,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
       ? process.env.NZB_MAX_RESULT_SIZE_GB
       : DEFAULT_MAX_RESULT_SIZE_GB
   );
+  ALLOWED_RESOLUTIONS = parseAllowedResolutionList(process.env.NZB_ALLOWED_RESOLUTIONS);
 
   TRIAGE_ENABLED = toBoolean(process.env.NZB_TRIAGE_ENABLED, false);
   TRIAGE_TIME_BUDGET_MS = toPositiveInt(process.env.NZB_TRIAGE_TIME_BUDGET_MS, 35000);
@@ -419,10 +448,11 @@ function rebuildRuntimeConfig({ log = true } = {}) {
       portChanged,
       baseUrlChanged: previousBaseUrl !== undefined && previousBaseUrl !== ADDON_BASE_URL,
       sharedSecretChanged: previousSharedSecret !== undefined && previousSharedSecret !== ADDON_SHARED_SECRET,
-  addonName: ADDON_NAME,
+      addonName: ADDON_NAME,
       indexerManager: INDEXER_MANAGER,
       newznabEnabled: NEWZNAB_ENABLED,
       triageEnabled: TRIAGE_ENABLED,
+      allowedResolutions: ALLOWED_RESOLUTIONS,
     });
   }
 
@@ -445,6 +475,7 @@ const ADMIN_CONFIG_KEYS = [
   'NZB_SORT_MODE',
   'NZB_PREFERRED_LANGUAGE',
   'NZB_MAX_RESULT_SIZE_GB',
+  'NZB_ALLOWED_RESOLUTIONS',
   'NZBDAV_URL',
   'NZBDAV_API_KEY',
   'NZBDAV_WEBDAV_URL',
@@ -525,6 +556,7 @@ function executeManagerPlanWithBackoff(plan) {
 
 function executeNewznabPlan(plan) {
   const debugEnabled = isNewznabDebugEnabled();
+  const endpointLogEnabled = isNewznabEndpointLoggingEnabled();
   const planSummary = summarizeNewznabPlan(plan);
   if (!NEWZNAB_ENABLED || ACTIVE_NEWZNAB_CONFIGS.length === 0) {
     logNewznabDebug('Skipping search plan because direct Newznab is disabled or no configs are available', {
@@ -550,6 +582,7 @@ function executeNewznabPlan(plan) {
   return newznabService.searchNewznabIndexers(plan, ACTIVE_NEWZNAB_CONFIGS, {
     filterNzbOnly: NEWZNAB_FILTER_NZB_ONLY,
     debug: debugEnabled,
+    logEndpoints: endpointLogEnabled,
     label: NEWZNAB_LOG_PREFIX,
   }).then((result) => {
     logNewznabDebug('Search plan completed', {
@@ -841,13 +874,13 @@ async function streamHandler(req, res) {
     if (incomingTvdbId) {
       metaSources.push({ ids: { tvdb: incomingTvdbId }, tvdb_id: incomingTvdbId });
     }
-    let specialMetadata = null;
+    let specialMetadataResult = null;
     if (isSpecialRequest) {
       try {
-        specialMetadata = await specialMetadata.fetchSpecialMetadata(baseIdentifier);
-        if (specialMetadata?.title) {
-          metaSources.push({ title: specialMetadata.title, name: specialMetadata.title });
-          console.log('[SPECIAL META] Resolved title for external catalog request', { title: specialMetadata.title });
+        specialMetadataResult = await specialMetadata.fetchSpecialMetadata(baseIdentifier);
+        if (specialMetadataResult?.title) {
+          metaSources.push({ title: specialMetadataResult.title, name: specialMetadataResult.title });
+          console.log('[SPECIAL META] Resolved title for external catalog request', { title: specialMetadataResult.title });
         }
       } catch (error) {
         console.error('[SPECIAL META] Failed to resolve metadata:', error.message);
@@ -857,11 +890,13 @@ async function streamHandler(req, res) {
     }
     let cinemetaMeta = null;
 
-    const needsCinemeta = !INDEXER_MANAGER_STRICT_ID_MATCH && !incomingTvdbId && !isSpecialRequest && (
+    const needsStrictSeriesTvdb = !isSpecialRequest && type === 'series' && !incomingTvdbId && Boolean(incomingImdbId);
+    const needsRelaxedMetadata = !isSpecialRequest && !INDEXER_MANAGER_STRICT_ID_MATCH && (
       (!hasTitleInQuery) ||
       (type === 'series' && !hasTvdbInQuery) ||
       (type === 'movie' && !hasTmdbInQuery)
     );
+    const needsCinemeta = needsStrictSeriesTvdb || needsRelaxedMetadata;
     if (needsCinemeta) {
       const cinemetaPath = type === 'series' ? `series/${baseIdentifier}.json` : `${type}/${baseIdentifier}.json`;
       const cinemetaUrl = `${CINEMETA_URL}/${cinemetaPath}`;
@@ -994,12 +1029,12 @@ async function streamHandler(req, res) {
       )
     );
 
-    if (!movieTitle && specialMetadata?.title) {
-      movieTitle = specialMetadata.title;
+    if (!movieTitle && specialMetadataResult?.title) {
+      movieTitle = specialMetadataResult.title;
     }
 
-    if (!releaseYear && specialMetadata?.year) {
-      const specialYear = extractYear(specialMetadata.year);
+    if (!releaseYear && specialMetadataResult?.year) {
+      const specialYear = extractYear(specialMetadataResult.year);
       if (specialYear) {
         releaseYear = specialYear;
       }
@@ -1042,12 +1077,12 @@ async function streamHandler(req, res) {
         return true;
       };
 
-      if (metaIds.imdb) {
-        addPlan(searchType, { tokens: [`{ImdbId:${metaIds.imdb}}`] });
-      }
-
       if (type === 'series' && metaIds.tvdb) {
         addPlan('tvsearch', { tokens: [`{TvdbId:${metaIds.tvdb}}`] });
+      }
+
+      if (metaIds.imdb && !(type === 'series' && metaIds.tvdb)) {
+        addPlan(searchType, { tokens: [`{ImdbId:${metaIds.imdb}}`] });
       }
 
       if (type === 'movie' && metaIds.tmdb) {
@@ -1263,14 +1298,27 @@ async function streamHandler(req, res) {
         })
         .map((result) => ({ ...result, _sourceType: 'nzb' }));
 
+      finalNzbResults = finalNzbResults.map((result, index) => annotateNzbResult(result, index));
+
   console.log(`${INDEXER_LOG_PREFIX} Final NZB selection: ${finalNzbResults.length} results`);
     }
 
     const triageOverrides = extractTriageOverrides(req.query || {});
+    const effectiveMaxSizeBytes = (() => {
+      const overrideBytes = triageOverrides.maxSizeBytes;
+      const defaultBytes = INDEXER_MAX_RESULT_SIZE_BYTES;
+      const normalizedOverride = Number.isFinite(overrideBytes) && overrideBytes > 0 ? overrideBytes : null;
+      const normalizedDefault = Number.isFinite(defaultBytes) && defaultBytes > 0 ? defaultBytes : null;
+      if (normalizedOverride && normalizedDefault) {
+        return Math.min(normalizedOverride, normalizedDefault);
+      }
+      return normalizedOverride || normalizedDefault || null;
+    })();
     finalNzbResults = prepareSortedResults(finalNzbResults, {
       sortMode: triageOverrides.sortMode,
       preferredLanguage: triageOverrides.preferredLanguage,
-      maxSizeBytes: triageOverrides.maxSizeBytes,
+      maxSizeBytes: effectiveMaxSizeBytes,
+      allowedResolutions: ALLOWED_RESOLUTIONS,
     });
     const allowedCacheStatuses = new Set(['verified', 'blocked']);
     const requestedDisable = triageOverrides.disabled === true;
@@ -1278,13 +1326,23 @@ async function streamHandler(req, res) {
     const overrideIndexerTokens = (triageOverrides.indexers && triageOverrides.indexers.length > 0)
       ? triageOverrides.indexers
       : null;
-    // Use TRIAGE_PRIORITY_INDEXERS as the primary setting for which indexers to health-check
-    // If TRIAGE_HEALTH_INDEXERS is set, use it as fallback for backward compatibility
-    const healthIndexerTokens = overrideIndexerTokens ?? (TRIAGE_PRIORITY_INDEXERS.length > 0 ? TRIAGE_PRIORITY_INDEXERS : TRIAGE_HEALTH_INDEXERS);
+    const directPaidTokens = overrideIndexerTokens ? [] : getPaidDirectIndexerTokens();
+    const managerHealthTokens = TRIAGE_PRIORITY_INDEXERS.length > 0 ? TRIAGE_PRIORITY_INDEXERS : TRIAGE_HEALTH_INDEXERS;
+    let combinedHealthTokens = [];
+    if (overrideIndexerTokens) {
+      combinedHealthTokens = [...overrideIndexerTokens];
+    } else {
+      if (managerHealthTokens && managerHealthTokens.length > 0) {
+        combinedHealthTokens = [...managerHealthTokens];
+      }
+      if (directPaidTokens.length > 0) {
+        combinedHealthTokens = combinedHealthTokens.concat(directPaidTokens);
+      }
+    }
     const serializedIndexerTokens = TRIAGE_SERIALIZED_INDEXERS.length > 0
       ? TRIAGE_SERIALIZED_INDEXERS
-      : healthIndexerTokens;
-    const healthIndexerSet = new Set((healthIndexerTokens || []).map((token) => normalizeIndexerToken(token)).filter(Boolean));
+      : combinedHealthTokens;
+    const healthIndexerSet = new Set((combinedHealthTokens || []).map((token) => normalizeIndexerToken(token)).filter(Boolean));
     const triagePool = healthIndexerSet.size > 0
       ? finalNzbResults.filter((result) => nzbMatchesIndexer(result, healthIndexerSet))
       : [];
@@ -1311,7 +1369,8 @@ async function streamHandler(req, res) {
       return false;
     };
     const triageCandidatesToRun = triageEligibleResults.filter((candidate) => !candidateHasConclusiveDecision(candidate));
-    const shouldAttemptTriage = triageCandidatesToRun.length > 0 && !requestedDisable && (requestedEnable || TRIAGE_ENABLED);
+    const shouldSkipTriageForRequest = !incomingImdbId && !incomingTvdbId;
+    const shouldAttemptTriage = triageCandidatesToRun.length > 0 && !requestedDisable && !shouldSkipTriageForRequest && (requestedEnable || TRIAGE_ENABLED);
     let triageOutcome = null;
     let triageCompleteForCache = !shouldAttemptTriage;
 
@@ -1325,8 +1384,8 @@ async function streamHandler(req, res) {
           else logFn(`[NZB TRIAGE] ${message}`);
         };
         const triageOptions = {
-          allowedIndexerIds: healthIndexerTokens,
-          preferredIndexerIds: healthIndexerTokens, // Use same indexers for filtering and ranking
+          allowedIndexerIds: combinedHealthTokens,
+          preferredIndexerIds: combinedHealthTokens, // Use same indexers for filtering and ranking
           serializedIndexerIds: serializedIndexerTokens,
           timeBudgetMs: TRIAGE_TIME_BUDGET_MS,
           maxCandidates: TRIAGE_MAX_CANDIDATES,
@@ -1376,6 +1435,8 @@ async function streamHandler(req, res) {
           console.warn(`[NZB TRIAGE] Health check failed: ${triageError.message}`);
         }
       }
+    } else if (shouldSkipTriageForRequest && TRIAGE_ENABLED && !requestedDisable) {
+      console.log('[NZB TRIAGE] Skipping health checks for non-ID request (no IMDb/TVDB identifier)');
     }
 
     if (shouldAttemptTriage) {
