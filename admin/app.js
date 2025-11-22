@@ -19,6 +19,7 @@
   const languageHiddenInput = configForm.querySelector('[data-language-hidden]');
   const languageCheckboxes = Array.from(configForm.querySelectorAll('input[data-language-option]'));
   const languageSelector = configForm.querySelector('[data-language-selector]');
+  const versionBadge = document.getElementById('addonVersionBadge');
 
   let currentManifestUrl = '';
   let copyStatusTimer = null;
@@ -253,6 +254,17 @@
     if (saveButton && !saveInProgress) {
       saveButton.disabled = !hasSource;
     }
+  }
+
+  function updateVersionBadge(version) {
+    if (!versionBadge) return;
+    if (!version) {
+      versionBadge.classList.add('hidden');
+      versionBadge.textContent = '';
+      return;
+    }
+    versionBadge.textContent = `Version ${version}`;
+    versionBadge.classList.remove('hidden');
   }
 
   function assignRowFieldNames(row, ordinal) {
@@ -699,6 +711,7 @@
   const data = await apiRequest('/admin/api/config');
   const values = data.values || {};
   setAvailableNewznabPresets(data?.newznabPresets || []);
+      updateVersionBadge(data?.addonVersion);
       allowNewznabTestSearch = Boolean(data?.debugNewznabSearch);
       setupNewznabRowsFromValues(values);
       populateForm(values);

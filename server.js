@@ -40,12 +40,43 @@ const specialMetadata = require('./src/services/specialMetadata');
 
 const app = express();
 let currentPort = Number(process.env.PORT || 7000);
-const ADDON_VERSION = '1.4.0';
+const ADDON_VERSION = '1.4.1';
 const DEFAULT_ADDON_NAME = 'UsenetStreamer';
 let serverInstance = null;
 const SERVER_HOST = '0.0.0.0';
 const DEDUPE_MAX_PUBLISH_DIFF_DAYS = 14;
 let PAID_INDEXER_TOKENS = new Set();
+
+const QUALITY_FEATURE_PATTERNS = [
+  { label: 'DV', regex: /\b(dolby\s*vision|dolbyvision|dv)\b/i },
+  { label: 'HDR10+', regex: /hdr10\+/i },
+  { label: 'HDR10', regex: /hdr10(?!\+)/i },
+  { label: 'HDR', regex: /\bhdr\b/i },
+  { label: 'SDR', regex: /\bsdr\b/i },
+];
+
+function formatResolutionBadge(resolution) {
+  if (!resolution) return null;
+  const normalized = resolution.toLowerCase();
+  if (normalized === '4320p') return '8K';
+  if (normalized === '2160p') return '4K';
+  if (normalized === '8k') return '8K';
+  if (normalized === '4k') return '4K';
+  if (normalized === 'uhd') return 'UHD';
+  if (normalized.endsWith('p')) return normalized.toUpperCase();
+  return resolution;
+}
+
+function extractQualityFeatureBadges(title) {
+  if (!title) return [];
+  const badges = [];
+  QUALITY_FEATURE_PATTERNS.forEach(({ label, regex }) => {
+    if (regex.test(title)) {
+      badges.push(label);
+    }
+  });
+  return badges;
+}
 
 app.use(cors());
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
@@ -65,6 +96,7 @@ adminApiRouter.get('/config', (req, res) => {
     runtimeEnvPath: runtimeEnv.RUNTIME_ENV_FILE,
     debugNewznabSearch: isNewznabDebugEnabled(),
     newznabPresets: newznabService.getAvailableNewznabPresets(),
+    addonVersion: ADDON_VERSION,
   });
 });
 
@@ -1469,17 +1501,17 @@ async function streamHandler(req, res) {
     }
 
     const logTopLanguages = () => {
-      const sample = finalNzbResults.slice(0, 10).map((result, idx) => ({
-        rank: idx + 1,
-        title: result.title,
-        indexer: result.indexer,
-        resolution: result.resolution || result.release?.resolution || null,
-        sizeGb: result.size ? (result.size / (1024 * 1024 * 1024)).toFixed(2) : null,
-        languages: result.release?.languages || [],
-        indexerLanguage: result.language || null,
-        preferredMatches: resolvedPreferredLanguages.length > 0 ? getPreferredLanguageMatches(result, resolvedPreferredLanguages) : [],
-      }));
-      console.log('[LANGUAGE] Top stream ordering sample', sample);
+      // const sample = finalNzbResults.slice(0, 10).map((result, idx) => ({
+      //   rank: idx + 1,
+      //   title: result.title,
+      //   indexer: result.indexer,
+      //   resolution: result.resolution || result.release?.resolution || null,
+      //   sizeGb: result.size ? (result.size / (1024 * 1024 * 1024)).toFixed(2) : null,
+      //   languages: result.release?.languages || [],
+      //   indexerLanguage: result.language || null,
+      //   preferredMatches: resolvedPreferredLanguages.length > 0 ? getPreferredLanguageMatches(result, resolvedPreferredLanguages) : [],
+      // }));
+      // console.log('[LANGUAGE] Top stream ordering sample', sample);
     };
     logTopLanguages();
     const allowedCacheStatuses = new Set(['verified', 'blocked']);
@@ -1508,10 +1540,28 @@ async function streamHandler(req, res) {
     const triagePool = healthIndexerSet.size > 0
       ? finalNzbResults.filter((result) => nzbMatchesIndexer(result, healthIndexerSet))
       : [];
-    const triageEligibleResults = prioritizeTriageCandidates(
-      triagePool,
-      TRIAGE_MAX_CANDIDATES
-    );
+    const getDecisionStatus = (candidate) => {
+      const decision = triageDecisions.get(candidate.downloadUrl);
+      return decision && decision.status ? String(decision.status).toLowerCase() : null;
+    };
+    const pendingStatuses = new Set(['unverified', 'pending']);
+    const hasPendingRetries = triagePool.some((candidate) => pendingStatuses.has(getDecisionStatus(candidate)));
+    const hasVerifiedResult = triagePool.some((candidate) => getDecisionStatus(candidate) === 'verified');
+    let triageEligibleResults = [];
+
+    if (hasPendingRetries) {
+      triageEligibleResults = prioritizeTriageCandidates(triagePool, TRIAGE_MAX_CANDIDATES, {
+        shouldInclude: (candidate) => pendingStatuses.has(getDecisionStatus(candidate)),
+      });
+    } else if (!hasVerifiedResult) {
+      triageEligibleResults = prioritizeTriageCandidates(triagePool, TRIAGE_MAX_CANDIDATES, {
+        shouldInclude: (candidate) => !getDecisionStatus(candidate),
+      });
+    }
+
+    if (triageEligibleResults.length === 0 && triageDecisions.size === 0) {
+      triageEligibleResults = prioritizeTriageCandidates(triagePool, TRIAGE_MAX_CANDIDATES);
+    }
     const candidateHasConclusiveDecision = (candidate) => {
       const decision = triageDecisions.get(candidate.downloadUrl);
       if (decision && allowedCacheStatuses.has(decision.status)) {
@@ -1679,8 +1729,22 @@ async function streamHandler(req, res) {
         const releaseInfo = result.release || {};
         const releaseLanguages = Array.isArray(releaseInfo.languages) ? releaseInfo.languages : [];
         const sourceLanguage = result.language || null;
-        const qualityMatch = result.title?.match(/(2160p|4K|UHD|1080p|720p|480p)/i);
-        const quality = releaseInfo.resolution || (qualityMatch ? qualityMatch[0] : '') || releaseInfo.qualityLabel || '';
+        const qualityMatch = result.title?.match(/(4320p|2160p|1440p|1080p|720p|576p|540p|480p|360p|240p|8k|4k|uhd)/i);
+        const detectedResolutionToken = releaseInfo.resolution
+          || (qualityMatch ? normalizeResolutionToken(qualityMatch[0]) : null);
+        const resolutionBadge = formatResolutionBadge(detectedResolutionToken);
+        const qualityLabel = releaseInfo.qualityLabel && releaseInfo.qualityLabel !== detectedResolutionToken
+          ? releaseInfo.qualityLabel
+          : null;
+        const featureBadges = extractQualityFeatureBadges(result.title || '');
+        const qualityParts = [];
+        if (resolutionBadge) qualityParts.push(resolutionBadge);
+        if (qualityLabel) qualityParts.push(qualityLabel);
+        featureBadges.forEach((badge) => {
+          if (!qualityParts.includes(badge)) qualityParts.push(badge);
+        });
+        const qualitySummary = qualityParts.join(' ');
+        const quality = resolutionBadge || qualityLabel || '';
         const languageLabel = releaseLanguages.length > 0 ? releaseLanguages.join(', ') : null;
         const preferredLanguageMatches = activePreferredLanguages.length > 0
           ? getPreferredLanguageMatches(result, activePreferredLanguages)
@@ -1787,10 +1851,11 @@ async function streamHandler(req, res) {
         if (preferredLanguageMatches.length > 0) {
           preferredLanguageMatches.forEach((language) => tags.push(language));
         }
-        if (quality) tags.push(quality);
+        // quality summary now part of name; keep tags focused on status/language/size
         if (languageLabel) tags.push(`🌐 ${languageLabel}`);
         if (sizeString) tags.push(sizeString);
-  const name = ADDON_NAME || DEFAULT_ADDON_NAME;
+        const addonLabel = ADDON_NAME || DEFAULT_ADDON_NAME;
+        const name = qualitySummary ? `${addonLabel} ${qualitySummary}` : addonLabel;
         const behaviorHints = {
           notWebReady: true,
           externalPlayer: {
@@ -1844,7 +1909,7 @@ async function streamHandler(req, res) {
             cachedFromHistory: Boolean(historySlot),
             languages: releaseLanguages,
             indexerLanguage: sourceLanguage,
-            resolution: releaseInfo.resolution || null,
+            resolution: detectedResolutionToken || null,
             preferredLanguageMatch: preferredLanguageHit,
             preferredLanguageName: matchedPreferredLanguage,
             preferredLanguageNames: preferredLanguageMatches,
@@ -1881,15 +1946,15 @@ async function streamHandler(req, res) {
         }
 
         if (preferredLanguageMatches.length > 0 || sourceLanguage || releaseLanguages.length > 0) {
-          console.log('[LANGUAGE] Stream classification', {
-            title: result.title,
-            preferredLanguageMatches,
-            parserLanguages: releaseLanguages,
-            indexerLanguage: sourceLanguage,
-            indexer: result.indexer,
-            indexerId: result.indexerId,
-            preferredLanguageHit,
-          });
+          // console.log('[LANGUAGE] Stream classification', {
+          //   title: result.title,
+          //   preferredLanguageMatches,
+          //   parserLanguages: releaseLanguages,
+          //   indexerLanguage: sourceLanguage,
+          //   indexer: result.indexer,
+          //   indexerId: result.indexerId,
+          //   preferredLanguageHit,
+          // });
         }
       });
 

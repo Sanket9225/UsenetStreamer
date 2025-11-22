@@ -26,6 +26,17 @@ header {
   gap: 0.5rem;
 }
 
+.version-badge {
+  align-self: flex-start;
+  background: rgba(0, 179, 255, 0.15);
+  border: 1px solid rgba(0, 179, 255, 0.45);
+  color: #8bd8ff;
+  border-radius: 999px;
+  padding: 0.2rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 header h1 {
   margin: 0;
   font-size: 2.1rem;

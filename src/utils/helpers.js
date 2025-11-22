@@ -9,11 +9,13 @@ function annotateNzbResult(result, sortIndex = 0) {
   const metadata = parseReleaseMetadata(result.title || '');
   const normalizedTitle = normalizeReleaseTitle(result.title);
   const primaryLanguage = result.language || (Array.isArray(metadata.languages) && metadata.languages.length > 0 ? metadata.languages[0] : null);
+  const derivedQualityRank = Number.isFinite(metadata.qualityScore) ? metadata.qualityScore : 0;
   const annotated = {
     ...result,
     ...metadata,
     sortIndex,
     normalizedTitle,
+    qualityRank: derivedQualityRank,
   };
   if (primaryLanguage) {
     annotated.language = primaryLanguage;
@@ -221,14 +223,18 @@ function buildTriageTitleMap(decisions) {
   return titleMap;
 }
 
-function prioritizeTriageCandidates(results, maxCandidates) {
+function prioritizeTriageCandidates(results, maxCandidates, options = {}) {
   if (!Array.isArray(results) || results.length === 0) return [];
   const seenTitles = new Set();
   const selected = [];
+  const shouldInclude = typeof options.shouldInclude === 'function' ? options.shouldInclude : null;
   for (const result of results) {
     if (!result) continue;
     const normalizedTitle = result.normalizedTitle || normalizeReleaseTitle(result.title) || result.downloadUrl;
     if (seenTitles.has(normalizedTitle)) continue;
+    if (shouldInclude && !shouldInclude(result)) {
+      continue;
+    }
     seenTitles.add(normalizedTitle);
     selected.push(result);
     if (selected.length >= Math.max(1, maxCandidates)) break;

@@ -123,17 +123,22 @@ const RESOLUTION_PREFERENCES = [
   '240p'
 ];
 
-const RESOLUTION_PATTERNS = [
-  { label: '4320p', regex: /(4320p|8k)/i },
-  { label: '2160p', regex: /(2160p|4k|uhd)/i },
-  { label: '1440p', regex: /1440p/i },
-  { label: '1080p', regex: /1080p|fullhd|fhd/i },
-  { label: '720p', regex: /720p|hd/i },
-  { label: '576p', regex: /576p/i },
-  { label: '540p', regex: /540p/i },
-  { label: '480p', regex: /480p|sd/i },
-  { label: '360p', regex: /360p/i },
-  { label: '240p', regex: /240p/i }
+const RESOLUTION_NUMERIC_PATTERNS = [
+  { label: '4320p', regex: /\b4320p\b/i },
+  { label: '2160p', regex: /\b2160p\b/i },
+  { label: '1440p', regex: /\b1440p\b/i },
+  { label: '1080p', regex: /\b1080p\b|fullhd|fhd/i },
+  { label: '720p', regex: /\b720p\b|hd\b/i },
+  { label: '576p', regex: /\b576p\b/i },
+  { label: '540p', regex: /\b540p\b/i },
+  { label: '480p', regex: /\b480p\b|sd\b/i },
+  { label: '360p', regex: /\b360p\b/i },
+  { label: '240p', regex: /\b240p\b/i }
+];
+
+const RESOLUTION_SYNONYM_PATTERNS = [
+  { label: '4320p', regex: /\b8k\b/i },
+  { label: '2160p', regex: /\b(4k|uhd)\b/i },
 ];
 
 const QUALITY_SCORE_MAP = RESOLUTION_PREFERENCES.reduce((acc, label, index) => {
@@ -172,7 +177,7 @@ function detectResolution(rawTitle, parsed) {
     if (normalized) return normalized;
   }
   const title = rawTitle || '';
-  for (const entry of RESOLUTION_PATTERNS) {
+  for (const entry of RESOLUTION_NUMERIC_PATTERNS) {
     if (entry.regex.test(title)) {
       return entry.label;
     }
@@ -180,6 +185,11 @@ function detectResolution(rawTitle, parsed) {
   if (parsed?.quality) {
     const normalized = normalizeResolutionLabel(parsed.quality);
     if (normalized) return normalized;
+  }
+  for (const entry of RESOLUTION_SYNONYM_PATTERNS) {
+    if (entry.regex.test(title)) {
+      return entry.label;
+    }
   }
   return null;
 }
