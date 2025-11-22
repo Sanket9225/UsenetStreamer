@@ -438,8 +438,27 @@ function isLikelyNzb(url) {
     normalized.includes('mode=getnzb') ||
     normalized.includes('t=getnzb') ||
     normalized.includes('action=getnzb') ||
-    /\bgetnzb\b/.test(normalized)
+    normalized.includes('t=get&id=') ||
+    /\bgetnzb\b/.test(normalized) ||
+    hasDownloadLikeQuery(url)
   );
+}
+
+function hasDownloadLikeQuery(url) {
+  try {
+    const parsed = new URL(url);
+    const tParam = (parsed.searchParams.get('t') || '').toLowerCase();
+    if (tParam === 'get' || tParam === 'getfile' || tParam === 'download') {
+      return true;
+    }
+    const ext = (parsed.searchParams.get('ext') || '').toLowerCase();
+    if (ext && /^\.?(nzb|mkv|mp4|ts|avi|mp3|flac|rar|7z)$/.test(ext.startsWith('.') ? ext : `.${ext}`)) {
+      return true;
+    }
+  } catch (_) {
+    // ignore URL parse errors
+  }
+  return false;
 }
 
 function normalizeNewznabItem(item, config, { filterNzbOnly = true } = {}) {

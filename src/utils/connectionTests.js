@@ -286,12 +286,16 @@ async function testNewznabSearch(values) {
     rawQuery: query,
     tokens: [],
   };
+  const filterNzbOnly = values?.NEWZNAB_FILTER_NZB_ONLY === undefined
+    ? true
+    : parseBoolean(values.NEWZNAB_FILTER_NZB_ONLY);
   logNewznabDebug('Running admin Newznab test search', {
     plan,
     indexers: configs.map((config) => ({ id: config.id, name: config.displayName, endpoint: config.endpoint })),
+    filterNzbOnly,
   });
   const result = await searchNewznabIndexers(plan, configs, {
-    filterNzbOnly: true,
+    filterNzbOnly,
     debug: NEWZNAB_DEBUG_ENABLED,
     label: '[NEWZNAB][TEST]',
   });
