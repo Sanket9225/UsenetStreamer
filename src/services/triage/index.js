@@ -5,7 +5,7 @@ const NNTPModule = require('nntp/lib/nntp');
 const NNTP = typeof NNTPModule === 'function' ? NNTPModule : NNTPModule?.NNTP;
 function timingLog(event, details) {
   const payload = details ? { ...details, ts: new Date().toISOString() } : { ts: new Date().toISOString() };
-  // console.log(`[NZB TRIAGE][TIMING] ${event}`, payload);
+  console.log(`[NZB TRIAGE][TIMING] ${event}`, payload);
 }
 
 const ARCHIVE_EXTENSIONS = new Set(['.rar', '.r00', '.r01', '.r02', '.7z']);

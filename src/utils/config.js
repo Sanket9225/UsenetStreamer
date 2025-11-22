@@ -109,16 +109,48 @@ function normalizeSortMode(value, fallback = 'quality_then_size') {
   return fallback;
 }
 
+function resolvePreferredLanguages(value, fallback = []) {
+  const fallbackList = Array.isArray(fallback)
+    ? fallback.filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
+    : (fallback ? [fallback] : []);
+  const tokens = [];
+  if (Array.isArray(value)) {
+    tokens.push(...value);
+  } else if (typeof value === 'string') {
+    tokens.push(...value.split(','));
+  } else if (value !== undefined && value !== null) {
+    tokens.push(String(value));
+  }
+  const resolved = [];
+  const seen = new Set();
+  tokens.forEach((token) => {
+    const trimmed = token === undefined || token === null ? '' : String(token).trim();
+    if (!trimmed) return;
+    const normalized = trimmed.toLowerCase();
+    let canonical = LANGUAGE_ALIAS_MAP.get(normalized);
+    if (!canonical && normalized.includes('-')) {
+      const short = normalized.split('-')[0];
+      canonical = LANGUAGE_ALIAS_MAP.get(short);
+    }
+    if (!canonical) {
+      canonical = trimmed;
+    }
+    const signature = canonical.toLowerCase();
+    if (!seen.has(signature)) {
+      seen.add(signature);
+      resolved.push(canonical);
+    }
+  });
+  if (resolved.length > 0) {
+    return resolved;
+  }
+  return fallbackList.slice();
+}
+
 function resolvePreferredLanguage(value, fallback = '') {
-  if (!value) return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return fallback;
-  const direct = LANGUAGE_ALIAS_MAP.get(normalized);
-  if (direct) return direct;
-  if (normalized.includes('-')) {
-    const short = normalized.split('-')[0];
-    const shortMatch = LANGUAGE_ALIAS_MAP.get(short);
-    if (shortMatch) return shortMatch;
+  const list = resolvePreferredLanguages(value, fallback ? [fallback] : []);
+  if (list.length > 0) {
+    return list[0];
   }
   return fallback;
 }
@@ -155,6 +187,7 @@ module.exports = {
   parseCommaList,
   parsePathList,
   normalizeSortMode,
+  resolvePreferredLanguages,
   resolvePreferredLanguage,
   toSizeBytesFromGb,
   collectConfigValues,

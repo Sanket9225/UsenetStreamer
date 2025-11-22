@@ -16,6 +16,9 @@
   const sourceGuardNotice = document.getElementById('sourceGuardNotice');
   const qualityHiddenInput = configForm.querySelector('input[name="NZB_ALLOWED_RESOLUTIONS"]');
   const qualityCheckboxes = Array.from(configForm.querySelectorAll('[data-quality-option]'));
+  const languageHiddenInput = configForm.querySelector('[data-language-hidden]');
+  const languageCheckboxes = Array.from(configForm.querySelectorAll('input[data-language-option]'));
+  const languageSelector = configForm.querySelector('[data-language-selector]');
 
   let currentManifestUrl = '';
   let copyStatusTimer = null;
@@ -205,6 +208,31 @@
       });
     }
     syncQualityHiddenInput();
+  }
+
+  function getSelectedLanguages() {
+    return languageCheckboxes
+      .filter((checkbox) => checkbox.checked)
+      .map((checkbox) => checkbox.value)
+      .filter((value) => value && value.trim().length > 0);
+  }
+
+  function syncLanguageHiddenInput() {
+    if (!languageHiddenInput) return;
+    languageHiddenInput.value = getSelectedLanguages().join(',');
+  }
+
+  function applyLanguageSelectionsFromHidden() {
+    if (!languageHiddenInput || languageCheckboxes.length === 0) return;
+    const stored = (languageHiddenInput.value || '').trim();
+    const tokens = stored
+      ? stored.split(',').map((value) => value.trim()).filter((value) => value.length > 0)
+      : [];
+    const selectedSet = new Set(tokens);
+    languageCheckboxes.forEach((checkbox) => {
+      checkbox.checked = selectedSet.has(checkbox.value);
+    });
+    syncLanguageHiddenInput();
   }
 
   function hasManagerConfigured() {
@@ -674,6 +702,7 @@
       allowNewznabTestSearch = Boolean(data?.debugNewznabSearch);
       setupNewznabRowsFromValues(values);
       populateForm(values);
+      applyLanguageSelectionsFromHidden();
       applyQualitySelectionsFromHidden();
       refreshNewznabFieldNames();
       syncHealthControls();
@@ -827,12 +856,15 @@
   }
 
   function syncSortingControls() {
-    if (!sortingModeSelect || !preferredLanguageSelect) return;
+    if (!sortingModeSelect || !languageHiddenInput) return;
     const requiresLanguage = sortingModeSelect.value === 'language_quality_size';
     if (requiresLanguage) {
-      preferredLanguageSelect.setAttribute('required', 'required');
+      languageHiddenInput.setAttribute('required', 'required');
     } else {
-      preferredLanguageSelect.removeAttribute('required');
+      languageHiddenInput.removeAttribute('required');
+    }
+    if (languageSelector) {
+      languageSelector.classList.toggle('language-required', requiresLanguage);
     }
   }
 
@@ -898,7 +930,6 @@
 
   const testButtons = configForm.querySelectorAll('button[data-test]');
   const sortingModeSelect = configForm.querySelector('select[name="NZB_SORT_MODE"]');
-  const preferredLanguageSelect = configForm.querySelector('select[name="NZB_PREFERRED_LANGUAGE"]');
   testButtons.forEach((button) => {
     button.addEventListener('click', () => runConnectionTest(button));
   });
@@ -927,6 +958,13 @@
   if (sortingModeSelect) {
     sortingModeSelect.addEventListener('change', syncSortingControls);
   }
+  languageCheckboxes.forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      syncLanguageHiddenInput();
+      syncSortingControls();
+      syncSaveGuard();
+    });
+  });
 
   const managerPaidInputs = configForm.querySelectorAll('[name="NZB_TRIAGE_PRIORITY_INDEXERS"], [name="NZB_TRIAGE_HEALTH_INDEXERS"]');
   managerPaidInputs.forEach((input) => {

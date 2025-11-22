@@ -31,9 +31,9 @@ const { parseReleaseMetadata, LANGUAGE_FILTERS, LANGUAGE_SYNONYMS } = require('.
 const cache = require('./src/cache');
 const { ensureSharedSecret } = require('./src/middleware/auth');
 const newznabService = require('./src/services/newznab');
-const { toFiniteNumber, toPositiveInt, toBoolean, parseCommaList, parsePathList, normalizeSortMode, resolvePreferredLanguage, toSizeBytesFromGb, collectConfigValues, computeManifestUrl, stripTrailingSlashes, decodeBase64Value } = require('./src/utils/config');
+const { toFiniteNumber, toPositiveInt, toBoolean, parseCommaList, parsePathList, normalizeSortMode, resolvePreferredLanguages, toSizeBytesFromGb, collectConfigValues, computeManifestUrl, stripTrailingSlashes, decodeBase64Value } = require('./src/utils/config');
 const { normalizeReleaseTitle, parseRequestedEpisode, isVideoFileName, fileMatchesEpisode, normalizeNzbdavPath, inferMimeType, normalizeIndexerToken, nzbMatchesIndexer, cleanSpecialSearchTitle } = require('./src/utils/parsers');
-const { sleep, annotateNzbResult, applyMaxSizeFilter, prepareSortedResults, resultMatchesPreferredLanguage, triageStatusRank, buildTriageTitleMap, prioritizeTriageCandidates, triageDecisionsMatchStatuses, sanitizeDecisionForCache, serializeFinalNzbResults, restoreFinalNzbResults, safeStat } = require('./src/utils/helpers');
+const { sleep, annotateNzbResult, applyMaxSizeFilter, prepareSortedResults, getPreferredLanguageMatch, getPreferredLanguageMatches, triageStatusRank, buildTriageTitleMap, prioritizeTriageCandidates, triageDecisionsMatchStatuses, sanitizeDecisionForCache, serializeFinalNzbResults, restoreFinalNzbResults, safeStat } = require('./src/utils/helpers');
 const indexerService = require('./src/services/indexer');
 const nzbdavService = require('./src/services/nzbdav');
 const specialMetadata = require('./src/services/specialMetadata');
@@ -44,6 +44,8 @@ const ADDON_VERSION = '1.4.0';
 const DEFAULT_ADDON_NAME = 'UsenetStreamer';
 let serverInstance = null;
 const SERVER_HOST = '0.0.0.0';
+const DEDUPE_MAX_PUBLISH_DIFF_DAYS = 14;
+let PAID_INDEXER_TOKENS = new Set();
 
 app.use(cors());
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
@@ -285,6 +287,97 @@ function parseAllowedResolutionList(rawValue) {
     .filter(Boolean);
 }
 
+function refreshPaidIndexerTokens() {
+  const paidTokens = new Set();
+  (TRIAGE_PRIORITY_INDEXERS || []).forEach((token) => {
+    const normalized = normalizeIndexerToken(token);
+    if (normalized) paidTokens.add(normalized);
+  });
+  getPaidDirectIndexerTokens(ACTIVE_NEWZNAB_CONFIGS).forEach((token) => {
+    if (token) paidTokens.add(token);
+  });
+  PAID_INDEXER_TOKENS = paidTokens;
+}
+
+function isResultFromPaidIndexer(result) {
+  if (!result || PAID_INDEXER_TOKENS.size === 0) return false;
+  const tokens = [
+    normalizeIndexerToken(result.indexerId || result.IndexerId),
+    normalizeIndexerToken(result.indexer || result.Indexer),
+  ].filter(Boolean);
+  if (tokens.length === 0) return false;
+  return tokens.some((token) => PAID_INDEXER_TOKENS.has(token));
+}
+
+function dedupeResultsByTitle(results) {
+  if (!Array.isArray(results) || results.length === 0) return [];
+  const buckets = new Map();
+  const deduped = [];
+  for (const result of results) {
+    if (!result || typeof result !== 'object') continue;
+    const normalizedTitle = normalizeReleaseTitle(result.title);
+    const publishMeta = getPublishMetadataFromResult(result);
+    if (publishMeta.publishDateMs && !result.publishDateMs) {
+      result.publishDateMs = publishMeta.publishDateMs;
+    }
+    if (publishMeta.publishDateIso && !result.publishDateIso) {
+      result.publishDateIso = publishMeta.publishDateIso;
+    }
+    if ((publishMeta.ageDays ?? null) !== null && (result.ageDays === undefined || result.ageDays === null)) {
+      result.ageDays = publishMeta.ageDays;
+    }
+    if (!normalizedTitle) {
+      deduped.push(result);
+      continue;
+    }
+    let bucket = buckets.get(normalizedTitle);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(normalizedTitle, bucket);
+    }
+    const candidatePublish = publishMeta.publishDateMs ?? null;
+    const candidateIsPaid = isResultFromPaidIndexer(result);
+    let matchedEntry = null;
+    for (const entry of bucket) {
+      if (areReleasesWithinDays(entry.publishDateMs ?? null, candidatePublish ?? null, DEDUPE_MAX_PUBLISH_DIFF_DAYS)) {
+        matchedEntry = entry;
+        break;
+      }
+    }
+    if (!matchedEntry) {
+      const entry = {
+        publishDateMs: candidatePublish,
+        isPaid: candidateIsPaid,
+        result,
+        listIndex: deduped.length,
+      };
+      bucket.push(entry);
+      deduped.push(result);
+      continue;
+    }
+
+    if (candidateIsPaid && !matchedEntry.isPaid) {
+      matchedEntry.isPaid = true;
+      matchedEntry.publishDateMs = candidatePublish;
+      matchedEntry.result = result;
+      deduped[matchedEntry.listIndex] = result;
+      continue;
+    }
+
+    if (candidateIsPaid === matchedEntry.isPaid) {
+      const existingPublish = matchedEntry.publishDateMs;
+      if (candidatePublish !== null && (existingPublish === null || candidatePublish > existingPublish)) {
+        matchedEntry.publishDateMs = candidatePublish;
+        matchedEntry.result = result;
+        deduped[matchedEntry.listIndex] = result;
+      }
+      continue;
+    }
+    // If we reach here, existing is paid and candidate is not — skip candidate
+  }
+  return deduped;
+}
+
 function buildTriageNntpConfig() {
   const host = (process.env.NZB_TRIAGE_NNTP_HOST || '').trim();
   if (!host) return null;
@@ -298,7 +391,8 @@ function buildTriageNntpConfig() {
 }
 
 let INDEXER_SORT_MODE = normalizeSortMode(process.env.NZB_SORT_MODE, 'quality_then_size');
-let INDEXER_PREFERRED_LANGUAGE = resolvePreferredLanguage(process.env.NZB_PREFERRED_LANGUAGE, '');
+let INDEXER_PREFERRED_LANGUAGES = resolvePreferredLanguages(process.env.NZB_PREFERRED_LANGUAGE, []);
+let INDEXER_DEDUP_ENABLED = toBoolean(process.env.NZB_DEDUP_ENABLED, true);
 let INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
   process.env.NZB_MAX_RESULT_SIZE_GB && process.env.NZB_MAX_RESULT_SIZE_GB !== ''
     ? process.env.NZB_MAX_RESULT_SIZE_GB
@@ -403,7 +497,8 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   });
 
   INDEXER_SORT_MODE = normalizeSortMode(process.env.NZB_SORT_MODE, 'quality_then_size');
-  INDEXER_PREFERRED_LANGUAGE = resolvePreferredLanguage(process.env.NZB_PREFERRED_LANGUAGE, '');
+  INDEXER_PREFERRED_LANGUAGES = resolvePreferredLanguages(process.env.NZB_PREFERRED_LANGUAGE, []);
+  INDEXER_DEDUP_ENABLED = toBoolean(process.env.NZB_DEDUP_ENABLED, true);
   INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
     process.env.NZB_MAX_RESULT_SIZE_GB && process.env.NZB_MAX_RESULT_SIZE_GB !== ''
       ? process.env.NZB_MAX_RESULT_SIZE_GB
@@ -418,6 +513,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   TRIAGE_PRIORITY_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_PRIORITY_INDEXERS);
   TRIAGE_HEALTH_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_HEALTH_INDEXERS);
   TRIAGE_SERIALIZED_INDEXERS = parseCommaList(process.env.NZB_TRIAGE_SERIALIZED_INDEXERS);
+  refreshPaidIndexerTokens();
   TRIAGE_ARCHIVE_DIRS = parsePathList(process.env.NZB_TRIAGE_ARCHIVE_DIRS);
   TRIAGE_NNTP_CONFIG = buildTriageNntpConfig();
   TRIAGE_MAX_DECODED_BYTES = toPositiveInt(process.env.NZB_TRIAGE_MAX_DECODED_BYTES, 32 * 1024);
@@ -475,6 +571,7 @@ const ADMIN_CONFIG_KEYS = [
   'NZB_SORT_MODE',
   'NZB_PREFERRED_LANGUAGE',
   'NZB_MAX_RESULT_SIZE_GB',
+  'NZB_DEDUP_ENABLED',
   'NZB_ALLOWED_RESOLUTIONS',
   'NZBDAV_URL',
   'NZBDAV_API_KEY',
@@ -523,14 +620,23 @@ function extractTriageOverrides(query) {
   const disabled = query.triageDisabled !== undefined ? toBoolean(query.triageDisabled, true) : null;
   const enabled = query.triageEnabled !== undefined ? toBoolean(query.triageEnabled, false) : null;
   const sortMode = typeof query.sortMode === 'string' ? query.sortMode : query.nzbSortMode;
-  const preferredLanguage = query.preferredLanguage ?? query.language ?? query.lang;
+  const preferredLanguageInput = query.preferredLanguages ?? query.preferredLanguage ?? query.language ?? query.lang;
+  let dedupeOverride = null;
+  if (query.dedupe !== undefined) {
+    dedupeOverride = toBoolean(query.dedupe, true);
+  } else if (query.dedupeEnabled !== undefined) {
+    dedupeOverride = toBoolean(query.dedupeEnabled, true);
+  } else if (query.dedupeDisabled !== undefined) {
+    dedupeOverride = !toBoolean(query.dedupeDisabled, false);
+  }
   return {
     maxSizeBytes,
     indexers,
     disabled,
     enabled,
     sortMode: typeof sortMode === 'string' ? sortMode : null,
-    preferredLanguage: typeof preferredLanguage === 'string' ? preferredLanguage : null,
+    preferredLanguages: typeof preferredLanguageInput === 'string' ? preferredLanguageInput : null,
+    dedupeEnabled: dedupeOverride,
   };
 }
 
@@ -824,14 +930,22 @@ async function streamHandler(req, res) {
 
     let usingCachedSearchResults = false;
     let finalNzbResults = [];
+    let dedupedSearchResults = [];
+    let rawSearchResults = [];
     let triageDecisions = cachedSearchMeta
       ? restoreTriageDecisions(cachedSearchMeta.triageDecisionsSnapshot)
       : new Map();
     if (cachedSearchMeta) {
-      finalNzbResults = restoreFinalNzbResults(cachedSearchMeta.finalNzbResults);
+      const restored = restoreFinalNzbResults(cachedSearchMeta.finalNzbResults);
+      rawSearchResults = restored.slice();
+      dedupedSearchResults = dedupeResultsByTitle(restored);
+      finalNzbResults = dedupedSearchResults.slice();
       usingCachedSearchResults = true;
     }
     let triageTitleMap = buildTriageTitleMap(triageDecisions);
+    const triageOverrides = extractTriageOverrides(req.query || {});
+    const dedupeOverride = typeof triageOverrides.dedupeEnabled === 'boolean' ? triageOverrides.dedupeEnabled : null;
+    const dedupeEnabled = dedupeOverride !== null ? dedupeOverride : INDEXER_DEDUP_ENABLED;
 
     const pickFirstDefined = (...values) => values.find((value) => value !== undefined && value !== null && String(value).trim() !== '') || null;
     const meta = req.query || {};
@@ -1145,6 +1259,7 @@ async function streamHandler(req, res) {
       const usingStrictIdMatching = INDEXER_MANAGER_STRICT_ID_MATCH;
       const resultsByKey = usingStrictIdMatching ? null : new Map();
       const aggregatedResults = usingStrictIdMatching ? [] : null;
+      const rawAggregatedResults = [];
       const planSummaries = [];
 
       const planExecutions = searchPlans.map((plan) => {
@@ -1233,6 +1348,8 @@ async function streamHandler(req, res) {
           return true;
         });
 
+        filteredResults.forEach((item) => rawAggregatedResults.push({ result: item, planType: plan.type }));
+
         let addedCount = 0;
         if (usingStrictIdMatching) {
           aggregatedResults.push(...filteredResults.map((item) => ({ result: item, planType: plan.type })));
@@ -1280,11 +1397,22 @@ async function streamHandler(req, res) {
         });
       }
 
-      const dedupedNzbResults = usingStrictIdMatching
-        ? aggregatedResults.map((entry) => entry.result)
-        : Array.from(resultsByKey.values()).map((entry) => entry.result);
+      const dedupedNzbResults = dedupeResultsByTitle(
+        usingStrictIdMatching
+          ? aggregatedResults.map((entry) => entry.result)
+          : Array.from(resultsByKey.values()).map((entry) => entry.result)
+      );
+      const rawNzbResults = rawAggregatedResults.map((entry) => entry.result);
 
-      finalNzbResults = dedupedNzbResults
+      dedupedSearchResults = dedupedNzbResults;
+      rawSearchResults = rawNzbResults.length > 0 ? rawNzbResults : dedupedNzbResults.slice();
+
+      const baseResults = dedupeEnabled ? dedupedSearchResults : rawSearchResults;
+      if (!dedupeEnabled) {
+        console.log(`${INDEXER_LOG_PREFIX} Dedupe disabled for this request; returning ${baseResults.length} raw results`);
+      }
+
+      finalNzbResults = baseResults
         .filter((result, index) => {
           if (!result.downloadUrl || !result.indexerId) {
             console.warn(`${INDEXER_LOG_PREFIX} Skipping NZB result ${index} missing required fields`, {
@@ -1303,7 +1431,6 @@ async function streamHandler(req, res) {
   console.log(`${INDEXER_LOG_PREFIX} Final NZB selection: ${finalNzbResults.length} results`);
     }
 
-    const triageOverrides = extractTriageOverrides(req.query || {});
     const effectiveMaxSizeBytes = (() => {
       const overrideBytes = triageOverrides.maxSizeBytes;
       const defaultBytes = INDEXER_MAX_RESULT_SIZE_BYTES;
@@ -1314,12 +1441,33 @@ async function streamHandler(req, res) {
       }
       return normalizedOverride || normalizedDefault || null;
     })();
+    const resolvedPreferredLanguages = resolvePreferredLanguages(triageOverrides.preferredLanguages, INDEXER_PREFERRED_LANGUAGES);
+    const activeSortMode = triageOverrides.sortMode || INDEXER_SORT_MODE;
+
     finalNzbResults = prepareSortedResults(finalNzbResults, {
-      sortMode: triageOverrides.sortMode,
-      preferredLanguage: triageOverrides.preferredLanguage,
+      sortMode: activeSortMode,
+      preferredLanguages: resolvedPreferredLanguages,
       maxSizeBytes: effectiveMaxSizeBytes,
       allowedResolutions: ALLOWED_RESOLUTIONS,
     });
+    if (dedupeEnabled) {
+      finalNzbResults = dedupeResultsByTitle(finalNzbResults);
+    }
+
+    const logTopLanguages = () => {
+      const sample = finalNzbResults.slice(0, 10).map((result, idx) => ({
+        rank: idx + 1,
+        title: result.title,
+        indexer: result.indexer,
+        resolution: result.resolution || result.release?.resolution || null,
+        sizeGb: result.size ? (result.size / (1024 * 1024 * 1024)).toFixed(2) : null,
+        languages: result.release?.languages || [],
+        indexerLanguage: result.language || null,
+        preferredMatches: resolvedPreferredLanguages.length > 0 ? getPreferredLanguageMatches(result, resolvedPreferredLanguages) : [],
+      }));
+      console.log('[LANGUAGE] Top stream ordering sample', sample);
+    };
+    logTopLanguages();
     const allowedCacheStatuses = new Set(['verified', 'blocked']);
     const requestedDisable = triageOverrides.disabled === true;
     const requestedEnable = triageOverrides.enabled === true;
@@ -1506,7 +1654,7 @@ async function streamHandler(req, res) {
 
     let triageLogCount = 0;
     let triageLogSuppressed = false;
-    const activePreferredLanguage = resolvePreferredLanguage(triageOverrides.preferredLanguage, INDEXER_PREFERRED_LANGUAGE);
+    const activePreferredLanguages = resolvedPreferredLanguages;
 
     const instantStreams = [];
     const regularStreams = [];
@@ -1516,12 +1664,15 @@ async function streamHandler(req, res) {
         const sizeString = sizeInGB ? `${sizeInGB} GB` : 'Size Unknown';
         const releaseInfo = result.release || {};
         const releaseLanguages = Array.isArray(releaseInfo.languages) ? releaseInfo.languages : [];
+        const sourceLanguage = result.language || null;
         const qualityMatch = result.title?.match(/(2160p|4K|UHD|1080p|720p|480p)/i);
         const quality = releaseInfo.resolution || (qualityMatch ? qualityMatch[0] : '') || releaseInfo.qualityLabel || '';
         const languageLabel = releaseLanguages.length > 0 ? releaseLanguages.join(', ') : null;
-        const preferredLanguageHit = activePreferredLanguage
-          ? resultMatchesPreferredLanguage(result, activePreferredLanguage)
-          : false;
+        const preferredLanguageMatches = activePreferredLanguages.length > 0
+          ? getPreferredLanguageMatches(result, activePreferredLanguages)
+          : [];
+        const matchedPreferredLanguage = preferredLanguageMatches.length > 0 ? preferredLanguageMatches[0] : null;
+        const preferredLanguageHit = preferredLanguageMatches.length > 0;
 
         const baseParams = new URLSearchParams({
           indexerId: String(result.indexerId),
@@ -1619,7 +1770,9 @@ async function streamHandler(req, res) {
         const tags = [];
         if (triageTag) tags.push(triageTag);
         if (isInstant) tags.push('⚡ Instant');
-        if (preferredLanguageHit && activePreferredLanguage) tags.push(`${activePreferredLanguage}`);
+        if (preferredLanguageMatches.length > 0) {
+          preferredLanguageMatches.forEach((language) => tags.push(language));
+        }
         if (quality) tags.push(quality);
         if (languageLabel) tags.push(`🌐 ${languageLabel}`);
         if (sizeString) tags.push(sizeString);
@@ -1676,9 +1829,11 @@ async function streamHandler(req, res) {
             cached: Boolean(isInstant),
             cachedFromHistory: Boolean(historySlot),
             languages: releaseLanguages,
+            indexerLanguage: sourceLanguage,
             resolution: releaseInfo.resolution || null,
             preferredLanguageMatch: preferredLanguageHit,
-            preferredLanguageName: preferredLanguageHit ? activePreferredLanguage : null,
+            preferredLanguageName: matchedPreferredLanguage,
+            preferredLanguageNames: preferredLanguageMatches,
           }
         };
         if (triageTag || triageInfo || triageOutcome?.timedOut || !triageApplied) {
@@ -1709,6 +1864,18 @@ async function streamHandler(req, res) {
           instantStreams.push(stream);
         } else {
           regularStreams.push(stream);
+        }
+
+        if (preferredLanguageMatches.length > 0 || sourceLanguage || releaseLanguages.length > 0) {
+          console.log('[LANGUAGE] Stream classification', {
+            title: result.title,
+            preferredLanguageMatches,
+            parserLanguages: releaseLanguages,
+            indexerLanguage: sourceLanguage,
+            indexer: result.indexer,
+            indexerId: result.indexerId,
+            preferredLanguageHit,
+          });
         }
       });
 

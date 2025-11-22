@@ -122,63 +122,71 @@
               </select>
               <span class="field-hint">Choose how releases are prioritized before NZB health checks run.</span>
             </label>
-            <label>Preferred Language
-              <select name="NZB_PREFERRED_LANGUAGE" data-sorting-language>
-                <option value="">No preference</option>
-                <option value="English">English</option>
-                <option value="Tamil">Tamil</option>
-                <option value="Hindi">Hindi</option>
-                <option value="Malayalam">Malayalam</option>
-                <option value="Kannada">Kannada</option>
-                <option value="Telugu">Telugu</option>
-                <option value="Chinese">Chinese</option>
-                <option value="Russian">Russian</option>
-                <option value="Arabic">Arabic</option>
-                <option value="Japanese">Japanese</option>
-                <option value="Korean">Korean</option>
-                <option value="Taiwanese">Taiwanese</option>
-                <option value="Latino">Latino</option>
-                <option value="French">French</option>
-                <option value="Spanish">Spanish</option>
-                <option value="Portuguese">Portuguese</option>
-                <option value="Italian">Italian</option>
-                <option value="German">German</option>
-                <option value="Ukrainian">Ukrainian</option>
-                <option value="Polish">Polish</option>
-                <option value="Czech">Czech</option>
-                <option value="Thai">Thai</option>
-                <option value="Indonesian">Indonesian</option>
-                <option value="Vietnamese">Vietnamese</option>
-                <option value="Dutch">Dutch</option>
-                <option value="Bengali">Bengali</option>
-                <option value="Turkish">Turkish</option>
-                <option value="Greek">Greek</option>
-                <option value="Swedish">Swedish</option>
-                <option value="Romanian">Romanian</option>
-                <option value="Hungarian">Hungarian</option>
-                <option value="Finnish">Finnish</option>
-                <option value="Norwegian">Norwegian</option>
-                <option value="Danish">Danish</option>
-                <option value="Hebrew">Hebrew</option>
-                <option value="Lithuanian">Lithuanian</option>
-                <option value="Punjabi">Punjabi</option>
-                <option value="Marathi">Marathi</option>
-                <option value="Gujarati">Gujarati</option>
-                <option value="Bhojpuri">Bhojpuri</option>
-                <option value="Nepali">Nepali</option>
-                <option value="Urdu">Urdu</option>
-                <option value="Tagalog">Tagalog</option>
-                <option value="Filipino">Filipino</option>
-                <option value="Malay">Malay</option>
-                <option value="Mongolian">Mongolian</option>
-                <option value="Armenian">Armenian</option>
-                <option value="Georgian">Georgian</option>
-              </select>
-              <span class="field-hint">Required only when using the language-first sorting mode.</span>
-            </label>
+            <div class="language-multiselect wide-field" data-language-selector>
+              <span class="field-label">Preferred Languages</span>
+              <input type="hidden" name="NZB_PREFERRED_LANGUAGE" data-language-hidden />
+              <div class="language-checkbox-grid">
+                <label class="checkbox"><input type="checkbox" value="English" data-language-option /> <span>English</span></label>
+                <label class="checkbox"><input type="checkbox" value="Tamil" data-language-option /> <span>Tamil</span></label>
+                <label class="checkbox"><input type="checkbox" value="Hindi" data-language-option /> <span>Hindi</span></label>
+                <label class="checkbox"><input type="checkbox" value="Malayalam" data-language-option /> <span>Malayalam</span></label>
+                <label class="checkbox"><input type="checkbox" value="Kannada" data-language-option /> <span>Kannada</span></label>
+                <label class="checkbox"><input type="checkbox" value="Telugu" data-language-option /> <span>Telugu</span></label>
+                <label class="checkbox"><input type="checkbox" value="Chinese" data-language-option /> <span>Chinese</span></label>
+                <label class="checkbox"><input type="checkbox" value="Russian" data-language-option /> <span>Russian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Arabic" data-language-option /> <span>Arabic</span></label>
+                <label class="checkbox"><input type="checkbox" value="Japanese" data-language-option /> <span>Japanese</span></label>
+                <label class="checkbox"><input type="checkbox" value="Korean" data-language-option /> <span>Korean</span></label>
+                <label class="checkbox"><input type="checkbox" value="Taiwanese" data-language-option /> <span>Taiwanese</span></label>
+                <label class="checkbox"><input type="checkbox" value="Latino" data-language-option /> <span>Latino</span></label>
+                <label class="checkbox"><input type="checkbox" value="French" data-language-option /> <span>French</span></label>
+                <label class="checkbox"><input type="checkbox" value="Spanish" data-language-option /> <span>Spanish</span></label>
+                <label class="checkbox"><input type="checkbox" value="Portuguese" data-language-option /> <span>Portuguese</span></label>
+                <label class="checkbox"><input type="checkbox" value="Italian" data-language-option /> <span>Italian</span></label>
+                <label class="checkbox"><input type="checkbox" value="German" data-language-option /> <span>German</span></label>
+                <label class="checkbox"><input type="checkbox" value="Ukrainian" data-language-option /> <span>Ukrainian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Polish" data-language-option /> <span>Polish</span></label>
+                <label class="checkbox"><input type="checkbox" value="Czech" data-language-option /> <span>Czech</span></label>
+                <label class="checkbox"><input type="checkbox" value="Thai" data-language-option /> <span>Thai</span></label>
+                <label class="checkbox"><input type="checkbox" value="Indonesian" data-language-option /> <span>Indonesian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Vietnamese" data-language-option /> <span>Vietnamese</span></label>
+                <label class="checkbox"><input type="checkbox" value="Dutch" data-language-option /> <span>Dutch</span></label>
+                <label class="checkbox"><input type="checkbox" value="Bengali" data-language-option /> <span>Bengali</span></label>
+                <label class="checkbox"><input type="checkbox" value="Turkish" data-language-option /> <span>Turkish</span></label>
+                <label class="checkbox"><input type="checkbox" value="Greek" data-language-option /> <span>Greek</span></label>
+                <label class="checkbox"><input type="checkbox" value="Swedish" data-language-option /> <span>Swedish</span></label>
+                <label class="checkbox"><input type="checkbox" value="Romanian" data-language-option /> <span>Romanian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Hungarian" data-language-option /> <span>Hungarian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Finnish" data-language-option /> <span>Finnish</span></label>
+                <label class="checkbox"><input type="checkbox" value="Norwegian" data-language-option /> <span>Norwegian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Danish" data-language-option /> <span>Danish</span></label>
+                <label class="checkbox"><input type="checkbox" value="Hebrew" data-language-option /> <span>Hebrew</span></label>
+                <label class="checkbox"><input type="checkbox" value="Lithuanian" data-language-option /> <span>Lithuanian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Punjabi" data-language-option /> <span>Punjabi</span></label>
+                <label class="checkbox"><input type="checkbox" value="Marathi" data-language-option /> <span>Marathi</span></label>
+                <label class="checkbox"><input type="checkbox" value="Gujarati" data-language-option /> <span>Gujarati</span></label>
+                <label class="checkbox"><input type="checkbox" value="Bhojpuri" data-language-option /> <span>Bhojpuri</span></label>
+                <label class="checkbox"><input type="checkbox" value="Nepali" data-language-option /> <span>Nepali</span></label>
+                <label class="checkbox"><input type="checkbox" value="Urdu" data-language-option /> <span>Urdu</span></label>
+                <label class="checkbox"><input type="checkbox" value="Tagalog" data-language-option /> <span>Tagalog</span></label>
+                <label class="checkbox"><input type="checkbox" value="Filipino" data-language-option /> <span>Filipino</span></label>
+                <label class="checkbox"><input type="checkbox" value="Malay" data-language-option /> <span>Malay</span></label>
+                <label class="checkbox"><input type="checkbox" value="Mongolian" data-language-option /> <span>Mongolian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Armenian" data-language-option /> <span>Armenian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Georgian" data-language-option /> <span>Georgian</span></label>
+              </div>
+              <span class="field-hint">Toggle every language you want prioritized when using the language-first sorting mode. Leave all unchecked for no preference.</span>
+            </div>
             <label>Max File Size (GB)
               <input name="NZB_MAX_RESULT_SIZE_GB" type="number" min="0" step="0.1" placeholder="30" />
               <span class="field-hint">Defaults to 30 GB. Set 0 for no cap; larger releases are skipped before health checks.</span>
+            </label>
+            <label class="checkbox">
+              <input name="NZB_DEDUP_ENABLED" type="checkbox" checked />
+              <span>
+                Hide duplicate releases
+                <span class="field-hint">Collapses identical matches (same title/indexer/size). Disable to inspect every result.</span>
+              </span>
             </label>
           </div>
           <div class="quality-filter">
