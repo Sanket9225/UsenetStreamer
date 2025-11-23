@@ -6,7 +6,7 @@ let verifiedNzbCacheBytes = 0;
 const VERIFIED_NZB_CACHE_TTL_MS = (() => {
   const raw = Number(process.env.VERIFIED_NZB_CACHE_TTL_MINUTES);
   if (Number.isFinite(raw) && raw >= 0) return raw * 60 * 1000;
-  return 60 * 60 * 1000; // Default 1 hour
+  return 10 * 60 * 1000; // Default 1 hour
 })();
 
 const VERIFIED_NZB_CACHE_MAX_BYTES = (() => {

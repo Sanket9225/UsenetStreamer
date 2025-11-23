@@ -26,7 +26,8 @@ function parseBoolean(value) {
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 }
 
-const NEWZNAB_DEBUG_ENABLED = parseBoolean(process.env.DEBUG_NEWZNAB_TEST) || parseBoolean(process.env.DEBUG_NEWZNAB_SEARCH);
+const NEWZNAB_DEBUG_ENABLED = (parseBoolean(process.env.DEBUG_NEWZNAB_TEST) || parseBoolean(process.env.DEBUG_NEWZNAB_SEARCH))
+  && !parseBoolean(process.env.DISABLE_NEWZNAB_TEST_LOGS);
 
 function logNewznabDebug(message, context = null) {
   if (!NEWZNAB_DEBUG_ENABLED) return;

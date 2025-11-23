@@ -29,7 +29,25 @@
 
 ---
 
+> **Disclaimer:** UsenetStreamer is not affiliated with any Usenet provider or indexer, does not host or distribute media, and is offered strictly for educational purposes.
+
+## ☕ Support Development
+
+**[Buy Me A Coffee &rarr;](https://buymeacoffee.com/gaikwadsank)** — every cup keeps the addon maintained, hosted, and packed with new features.
+
+---
+
 ## ✨ Feature Highlights
+
+### 🆕 Recent Enhancements (1.3.x → 1.4.x)
+- **Smarter dedupe pipeline** — collapses near-identical releases using normalized titles, indexer IDs, and sizes, so stream rows stay tidy even with aggressive multi-indexer searches.
+- **Multi-language preferences** — pick several preferred audio languages in the admin panel; the sorter surfaces hits with 🌐 badges and falls back gracefully when none match.
+- **Two-tier sorting polish** — quality/size ordering got revamped so languages, instant hits, and per-quality limits all blend without bouncing streams around between refreshes.
+- **Per-resolution caps** — optionally limit the number of 4K/1080p/etc. streams kept before the next tier is considered, preventing walls of similar releases.
+- **Retry-friendly triage** — if every NZB in the first pass fails health checks, the next manifest request transparently samples fresh candidates so you’re not stuck with a dead cache.
+- **Built-in Easynews bridge** — native username/password fields expose Easynews as another indexer, no Flask proxy needed, and streams skip NNTP triage while staying marked ✅.
+- **Curated Newznab presets** — enable the new built-in indexers list to bootstrap direct APIs quickly (paid flag doubles as health-check eligibility).
+- **Cleaner stream formatting** — manifest responses now display consistent title, badge, and language lines across desktop/mobile Stremio.
 
 ### 🚀 Performance & Caching
 - Parallel queries to Prowlarr or NZBHydra with automatic deduplication.
@@ -39,11 +57,18 @@
 ### 🔍 Smart Search & Language Filtering
 - IMDb/TMDB/TVDB-aware search plans and TVDB-prefixed ID support (no Cinemeta needed).
 - Release titles parsed for resolution, quality, and audio language, enabling `quality_then_size` or `language_quality_size` sorting.
-- Preferred language items rise to the top and display with clear 🌐 labels.
+- Preferred language groups (single or multiple) rise to the top and display with clear 🌐 labels.
+- Optional dedupe filter (enabled by default) collapses identical releases; toggle it off to inspect every hit.
+- A single per-quality cap (e.g., 4) keeps only the first few results for each resolution before falling back to the next tier.
 
 ### ⚡ Instant Streams from NZBDav
 - Completed NZBDav jobs are recognized automatically and surfaced with a ⚡ tag.
 - Instant streams are floated to the top of the list so you can start watching immediately.
+
+### 🔌 Built-in Easynews Indexer
+- Toggle Easynews in the admin panel, drop in your username/password, and get native search results without running the standalone proxy.
+- Movies/series use strict Cinemeta matching for precise hits, while external text-only addons stay in loose mode.
+- Easynews results skip triage (they're treated as ✅ verified) but still flow through the usual dedupe/sorting pipeline.
 
 ### 🩺 NNTP Health Checks
 - Optional triage downloads a handful of NZBs, samples archives over NNTP, and flags broken uploads before Stremio sees them.
@@ -157,8 +182,9 @@ This allows forks or containerized deployments to update upstream code without l
 - `INDEXER_MANAGER` (default `prowlarr`) — set `nzbhydra` for Hydra.
 - `INDEXER_MANAGER_URL`, `INDEXER_MANAGER_API_KEY`, `INDEXER_MANAGER_INDEXERS`, `INDEXER_MANAGER_STRICT_ID_MATCH`.
 - `ADDON_BASE_URL` (must be HTTPS), `ADDON_SHARED_SECRET` (required for security).
-- `NZB_SORT_MODE` (`quality_then_size` or `language_quality_size`), `NZB_PREFERRED_LANGUAGE`, `NZB_MAX_RESULT_SIZE_GB` (defaults to 30 GB, set 0 for no cap).
+- `NZB_SORT_MODE` (`quality_then_size` or `language_quality_size`), `NZB_PREFERRED_LANGUAGE` (comma-separated to prioritize multiple languages), `NZB_MAX_RESULT_SIZE_GB` (defaults to 30 GB, set 0 for no cap), `NZB_DEDUP_ENABLED` (collapse duplicate releases by title/indexer/size), `NZB_ALLOWED_RESOLUTIONS` (whitelist of qualities to keep), `NZB_RESOLUTION_LIMIT_PER_QUALITY` (optional uniform cap; e.g. `4` keeps at most four streams for each enabled resolution).
 - `NZBDAV_URL`, `NZBDAV_API_KEY`, `NZBDAV_WEBDAV_URL`, `NZBDAV_WEBDAV_USER`, `NZBDAV_WEBDAV_PASS`, `NZBDAV_CATEGORY*`.
+- `EASYNEWS_ENABLED`, `EASYNEWS_USERNAME`, `EASYNEWS_PASSWORD` — enable the built-in Easynews search bridge (text-only search with optional strict matching).
 - `NZBDAV_HISTORY_FETCH_LIMIT`, `NZBDAV_CACHE_TTL_MINUTES` (controls instant detection cache).
 - `NZB_TRIAGE_*` for NNTP health checks (host, port, user/pass, timeouts, candidate counts, reuse pool, etc.).
 
@@ -169,7 +195,7 @@ See `.env.example` for the complete list and defaults.
 ## 🧠 Advanced Capabilities
 
 ### Language-based ordering
-- Switch to `language_quality_size` sorting to pin a preferred language (set via dashboard or `NZB_PREFERRED_LANGUAGE`).
+- Switch to `language_quality_size` sorting to pin one or more preferred languages (set via dashboard or `NZB_PREFERRED_LANGUAGE=English,Tamil`).
 - Matching releases get a ⭐ tag plus `🌐 <Language>` badges, but non-matching streams stay available.
 
 ### Instant cache awareness
@@ -204,9 +230,3 @@ Anything that can load HTTPS manifests and handle `externalPlayer` hints should 
 - **Issues & PRs:** [GitHub tracker](https://github.com/Sanket9225/UsenetStreamer/issues)
 
 Huge thanks to everyone testing, filing bugs, and sharing feature ideas.
-
----
-
-<p align="center">
-  <strong>Ready?</strong> Add <code>https://your-domain/super-secret-token/manifest.json</code> to Stremio and start streaming from your own Usenet stack.
-</p>

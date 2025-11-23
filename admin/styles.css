@@ -26,6 +26,17 @@ header {
   gap: 0.5rem;
 }
 
+.version-badge {
+  align-self: flex-start;
+  background: rgba(0, 179, 255, 0.15);
+  border: 1px solid rgba(0, 179, 255, 0.45);
+  color: #8bd8ff;
+  border-radius: 999px;
+  padding: 0.2rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 header h1 {
   margin: 0;
   font-size: 2.1rem;
@@ -314,6 +325,38 @@ select:focus {
   border-radius: 8px;
   border: 1px solid rgba(94, 114, 130, 0.4);
   background: rgba(18, 27, 38, 0.9);
+}
+
+.language-multiselect {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.language-multiselect .field-label {
+  font-weight: 600;
+}
+
+.language-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+  gap: 0.35rem;
+  max-height: 100px;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+}
+
+.language-checkbox-grid .checkbox {
+  padding: 0.3rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid rgba(94, 114, 130, 0.35);
+  background: rgba(18, 27, 38, 0.85);
+}
+
+.language-multiselect.language-required {
+  border: 1px solid rgba(0, 179, 255, 0.4);
+  border-radius: 10px;
+  padding: 0.6rem;
 }
 
 

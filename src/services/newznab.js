@@ -30,7 +30,7 @@ const BUILTIN_NEWZNAB_PRESETS = [
     endpoint: 'https://api.nzbgeek.info',
     apiPath: '/api',
     description: 'Popular paid Newznab indexer. Requires membership and API key from your profile.',
-    apiKeyUrl: 'https://nzbgeek.info/index.php?action=profile'
+    apiKeyUrl: 'https://nzbgeek.info/dashboard.php?myaccount'
   },
   {
     id: 'drunkenslug',
@@ -127,14 +127,6 @@ const BUILTIN_NEWZNAB_PRESETS = [
     apiPath: '/api/v1',
     description: 'Invite-only indexer with modern API v1 endpoint.',
     apiKeyUrl: 'https://www.tabula-rasa.pw/profile'
-  },
-  {
-    id: 'torbox-search',
-    label: 'TorBox Search (search-api.torbox.app)',
-    endpoint: 'https://search-api.torbox.app',
-    apiPath: '/newznab',
-    description: 'Unofficial TorBox search API wrapper. Requires TorBox credentials.',
-    apiKeyUrl: 'https://torbox.app/dashboard'
   },
   {
     id: 'usenet-crawler',

@@ -7,12 +7,20 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function annotateNzbResult(result, sortIndex = 0) {
   if (!result || typeof result !== 'object') return result;
   const metadata = parseReleaseMetadata(result.title || '');
-  return {
+  const normalizedTitle = normalizeReleaseTitle(result.title);
+  const primaryLanguage = result.language || (Array.isArray(metadata.languages) && metadata.languages.length > 0 ? metadata.languages[0] : null);
+  const derivedQualityRank = Number.isFinite(metadata.qualityScore) ? metadata.qualityScore : 0;
+  const annotated = {
     ...result,
     ...metadata,
     sortIndex,
-    normalizedTitle: normalizeReleaseTitle(result.title),
+    normalizedTitle,
+    qualityRank: derivedQualityRank,
   };
+  if (primaryLanguage) {
+    annotated.language = primaryLanguage;
+  }
+  return annotated;
 }
 
 function applyMaxSizeFilter(results, maxSizeBytes) {
@@ -49,16 +57,80 @@ function filterByAllowedResolutions(results, allowedResolutions) {
   });
 }
 
-function resultMatchesPreferredLanguage(result, preferredLanguage) {
-  if (!preferredLanguage || !result) return false;
-  const normalized = preferredLanguage.toLowerCase();
-  if (result.language && result.language.toLowerCase() === normalized) {
+function applyResolutionLimits(results, perQualityLimit) {
+  if (!Array.isArray(results) || !Number.isFinite(perQualityLimit) || perQualityLimit <= 0) {
+    return results;
+  }
+  const counters = new Map();
+  return results.filter((result) => {
+    const resolutionLabel = result?.resolution || result?.release?.resolution || null;
+    const token = resolutionLabel ? String(resolutionLabel).trim().toLowerCase() : null;
+    const normalized = token || 'unknown';
+    const current = counters.get(normalized) || 0;
+    if (current >= perQualityLimit) {
+      return false;
+    }
+    counters.set(normalized, current + 1);
     return true;
+  });
+}
+
+function normalizePreferredLanguageList(preferredLanguages) {
+  if (!preferredLanguages) return [];
+  const list = Array.isArray(preferredLanguages)
+    ? preferredLanguages
+    : typeof preferredLanguages === 'string'
+      ? preferredLanguages.split(',')
+      : [];
+  const normalized = [];
+  const seen = new Set();
+  list.forEach((entry) => {
+    const value = entry === undefined || entry === null ? '' : String(entry).trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      normalized.push(value);
+    }
+  });
+  return normalized;
+}
+
+function gatherResultLanguages(result) {
+  if (!result) return [];
+  const collection = [];
+  if (result.language) collection.push(result.language);
+  if (Array.isArray(result.languages)) collection.push(...result.languages);
+  return collection
+    .map((lang) => (lang === undefined || lang === null ? '' : String(lang).trim()))
+    .filter((lang) => lang.length > 0);
+}
+
+function getPreferredLanguageMatches(result, preferredLanguages) {
+  const preferences = normalizePreferredLanguageList(preferredLanguages).map((lang) => lang.toLowerCase());
+  if (!result || preferences.length === 0) return [];
+  const resultLanguages = gatherResultLanguages(result).map((lang) => ({
+    raw: lang,
+    normalized: lang.toLowerCase(),
+  }));
+  if (resultLanguages.length === 0) return [];
+  const matches = [];
+  for (const pref of preferences) {
+    const match = resultLanguages.find((lang) => lang.normalized === pref);
+    if (match) {
+      matches.push(match.raw);
+    }
   }
-  if (Array.isArray(result.languages)) {
-    return result.languages.some((lang) => lang && lang.toLowerCase() === normalized);
-  }
-  return false;
+  return matches;
+}
+
+function getPreferredLanguageMatch(result, preferredLanguages) {
+  const matches = getPreferredLanguageMatches(result, preferredLanguages);
+  return matches.length > 0 ? matches[0] : null;
+}
+
+function resultMatchesPreferredLanguage(result, preferredLanguages) {
+  return getPreferredLanguageMatches(result, preferredLanguages).length > 0;
 }
 
 function compareQualityThenSize(a, b) {
@@ -70,14 +142,15 @@ function compareQualityThenSize(a, b) {
   return bSize - aSize;
 }
 
-function sortAnnotatedResults(results, sortMode, preferredLanguage) {
+function sortAnnotatedResults(results, sortMode, preferredLanguages) {
   if (!Array.isArray(results) || results.length === 0) return results;
 
-  if (sortMode === 'language_quality_size' && preferredLanguage) {
+  const normalizedPreferences = normalizePreferredLanguageList(preferredLanguages);
+  if (sortMode === 'language_quality_size' && normalizedPreferences.length > 0) {
     const preferred = [];
     const others = [];
     for (const result of results) {
-      if (resultMatchesPreferredLanguage(result, preferredLanguage)) {
+      if (resultMatchesPreferredLanguage(result, normalizedPreferences)) {
         preferred.push(result);
       } else {
         others.push(result);
@@ -93,11 +166,12 @@ function sortAnnotatedResults(results, sortMode, preferredLanguage) {
 }
 
 function prepareSortedResults(results, options = {}) {
-  const { maxSizeBytes, sortMode, preferredLanguage, allowedResolutions } = options;
+  const { maxSizeBytes, sortMode, preferredLanguages, allowedResolutions, resolutionLimitPerQuality } = options;
   let working = Array.isArray(results) ? results.slice() : [];
   working = filterByAllowedResolutions(working, allowedResolutions);
   working = applyMaxSizeFilter(working, maxSizeBytes);
-  working = sortAnnotatedResults(working, sortMode, preferredLanguage);
+  working = sortAnnotatedResults(working, sortMode, preferredLanguages);
+  working = applyResolutionLimits(working, resolutionLimitPerQuality);
   return working;
 }
 
@@ -149,14 +223,18 @@ function buildTriageTitleMap(decisions) {
   return titleMap;
 }
 
-function prioritizeTriageCandidates(results, maxCandidates) {
+function prioritizeTriageCandidates(results, maxCandidates, options = {}) {
   if (!Array.isArray(results) || results.length === 0) return [];
   const seenTitles = new Set();
   const selected = [];
+  const shouldInclude = typeof options.shouldInclude === 'function' ? options.shouldInclude : null;
   for (const result of results) {
     if (!result) continue;
     const normalizedTitle = result.normalizedTitle || normalizeReleaseTitle(result.title) || result.downloadUrl;
     if (seenTitles.has(normalizedTitle)) continue;
+    if (shouldInclude && !shouldInclude(result)) {
+      continue;
+    }
     seenTitles.add(normalizedTitle);
     selected.push(result);
     if (selected.length >= Math.max(1, maxCandidates)) break;
@@ -225,7 +303,10 @@ module.exports = {
   annotateNzbResult,
   applyMaxSizeFilter,
   filterByAllowedResolutions,
+  applyResolutionLimits,
   resultMatchesPreferredLanguage,
+  getPreferredLanguageMatches,
+  getPreferredLanguageMatch,
   compareQualityThenSize,
   sortAnnotatedResults,
   prepareSortedResults,
