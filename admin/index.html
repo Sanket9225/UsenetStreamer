@@ -233,6 +233,18 @@
               </label>
             </div>
             <input type="hidden" name="NZB_ALLOWED_RESOLUTIONS" value="" />
+            <label>Streams per Quality (optional)
+              <input name="NZB_RESOLUTION_LIMIT_PER_QUALITY" type="number" min="0" placeholder="Unlimited" />
+              <span class="field-hint">Applies evenly to every enabled resolution. Leave blank or set 0 for no cap.</span>
+            </label>
+            <label>Stream Visibility
+              <select name="NZB_HEALTH_VISIBILITY">
+                <option value="all">Show all results</option>
+                <option value="hide_bad">Hide known-bad results</option>
+                <option value="instant_only">Instant &amp; verified only</option>
+              </select>
+              <span class="field-hint">Show everything, hide unhealthy releases, or show only instant/verified releases.</span>
+            </label>
           </div>
         </section>
 

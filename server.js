@@ -57,6 +57,9 @@ adminApiRouter.get('/config', (req, res) => {
   if (!values.NZB_MAX_RESULT_SIZE_GB) {
     values.NZB_MAX_RESULT_SIZE_GB = String(DEFAULT_MAX_RESULT_SIZE_GB);
   }
+  if (!values.NZB_HEALTH_VISIBILITY) {
+    values.NZB_HEALTH_VISIBILITY = 'all';
+  }
   res.json({
     values,
     manifestUrl: computeManifestUrl(),
@@ -321,6 +324,7 @@ let TRIAGE_STAT_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_STAT_SAMPLE_
 let TRIAGE_ARCHIVE_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_ARCHIVE_SAMPLE_COUNT, 1);
 let TRIAGE_REUSE_POOL = toBoolean(process.env.NZB_TRIAGE_REUSE_POOL, true);
 let TRIAGE_NNTP_KEEP_ALIVE_MS = toPositiveInt(process.env.NZB_TRIAGE_NNTP_KEEP_ALIVE_MS, 0);
+let NZB_HEALTH_VISIBILITY = resolveHealthVisibilityEnv();
 
 let TRIAGE_BASE_OPTIONS = {
   archiveDirs: TRIAGE_ARCHIVE_DIRS,
@@ -336,6 +340,31 @@ let TRIAGE_BASE_OPTIONS = {
 
 const MAX_NEWZNAB_INDEXERS = newznabService.MAX_NEWZNAB_INDEXERS;
 const NEWZNAB_NUMBERED_KEYS = newznabService.NEWZNAB_NUMBERED_KEYS;
+const POSITIVE_HEALTH_STATUSES = new Set(['verified', 'elf-verified', 'healthy', 'good', 'ok', 'passed']);
+const NEGATIVE_HEALTH_STATUSES = new Set(['blocked', 'fetch-error', 'error']);
+const HEALTH_VISIBILITY_MODES = new Set(['all', 'hide_bad', 'instant_only']);
+
+function normalizeHealthVisibilityMode(value) {
+  if (typeof value !== 'string') return 'all';
+  const normalized = value.trim().toLowerCase();
+  if (HEALTH_VISIBILITY_MODES.has(normalized)) return normalized;
+  return 'all';
+}
+
+function resolveHealthVisibilityEnv() {
+  if (typeof process.env.NZB_HEALTH_VISIBILITY === 'string' && process.env.NZB_HEALTH_VISIBILITY.trim()) {
+    return normalizeHealthVisibilityMode(process.env.NZB_HEALTH_VISIBILITY);
+  }
+  return 'all';
+}
+
+function applyNzbHealthConfig() {
+  nzbHealthService.configure({
+    baseUrl: NZB_HEALTH_API_BASE_URL,
+    enabled: NZB_HEALTH_API_ENABLED && Boolean(NZB_HEALTH_API_BASE_URL),
+    timeoutMs: NZB_HEALTH_API_TIMEOUT_MS,
+  });
+}
 
 function maybePrewarmSharedNntpPool() {
   if (!TRIAGE_REUSE_POOL || !TRIAGE_NNTP_CONFIG) {
@@ -427,6 +456,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   TRIAGE_ARCHIVE_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_ARCHIVE_SAMPLE_COUNT, 1);
   TRIAGE_REUSE_POOL = toBoolean(process.env.NZB_TRIAGE_REUSE_POOL, true);
   TRIAGE_NNTP_KEEP_ALIVE_MS = toPositiveInt(process.env.NZB_TRIAGE_NNTP_KEEP_ALIVE_MS, 0);
+  NZB_HEALTH_VISIBILITY = resolveHealthVisibilityEnv();
   TRIAGE_BASE_OPTIONS = {
     archiveDirs: TRIAGE_ARCHIVE_DIRS,
     maxDecodedBytes: TRIAGE_MAX_DECODED_BYTES,
@@ -485,6 +515,10 @@ const ADMIN_CONFIG_KEYS = [
   'NZBDAV_CATEGORY_MOVIES',
   'NZBDAV_CATEGORY_SERIES',
   'NZB_TRIAGE_HEALTH_INDEXERS',
+  'NZB_HEALTH_API_ENABLED',
+  'NZB_HEALTH_API_BASE_URL',
+  'NZB_HEALTH_API_TIMEOUT_MS',
+  'NZB_HEALTH_VISIBILITY',
   'SPECIAL_PROVIDER_ID',
   'SPECIAL_PROVIDER_URL',
   'SPECIAL_PROVIDER_SECRET',
@@ -1550,6 +1584,23 @@ async function streamHandler(req, res) {
         const triageApplied = Boolean(directTriageInfo);
         const triageDerivedFromTitle = Boolean(!directTriageInfo && fallbackAllowed && fallbackTriageInfo);
         const triageStatus = triageInfo?.status || (triageApplied ? 'unknown' : 'not-run');
+        const normalizedTriageStatus = typeof triageStatus === 'string' ? triageStatus.toLowerCase() : null;
+        const hasPositiveStatus = normalizedTriageStatus ? POSITIVE_HEALTH_STATUSES.has(normalizedTriageStatus) : false;
+        const hasNegativeStatus = normalizedTriageStatus ? NEGATIVE_HEALTH_STATUSES.has(normalizedTriageStatus) : false;
+        switch (NZB_HEALTH_VISIBILITY) {
+          case 'instant_only':
+            if (!isInstant && !hasPositiveStatus) {
+              return;
+            }
+            break;
+          case 'hide_bad':
+            if (hasNegativeStatus) {
+              return;
+            }
+            break;
+          default:
+            break;
+        }
         let triagePriority = 1;
         let triageTag = null;
 
