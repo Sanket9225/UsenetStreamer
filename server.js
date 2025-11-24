@@ -466,7 +466,7 @@ const MAX_NEWZNAB_INDEXERS = newznabService.MAX_NEWZNAB_INDEXERS;
 const NEWZNAB_NUMBERED_KEYS = newznabService.NEWZNAB_NUMBERED_KEYS;
 const POSITIVE_HEALTH_STATUSES = new Set(['verified', 'elf-verified', 'healthy', 'good', 'ok', 'passed']);
 const NEGATIVE_HEALTH_STATUSES = new Set(['blocked', 'fetch-error', 'error']);
-const HEALTH_VISIBILITY_MODES = new Set(['all', 'hide_bad', 'instant_only']);
+const HEALTH_VISIBILITY_MODES = new Set(['all', 'hide_bad', 'good_only']);
 
 let NZB_HEALTH_VISIBILITY = resolveHealthVisibilityEnv();
 
@@ -1875,13 +1875,13 @@ async function streamHandler(req, res) {
         const hasPositiveStatus = normalizedTriageStatus ? POSITIVE_HEALTH_STATUSES.has(normalizedTriageStatus) : false;
         const hasNegativeStatus = normalizedTriageStatus ? NEGATIVE_HEALTH_STATUSES.has(normalizedTriageStatus) : false;
         switch (NZB_HEALTH_VISIBILITY) {
-          case 'instant_only':
-            if (!isInstant && !hasPositiveStatus) {
+          case 'hide_bad':
+            if (hasNegativeStatus) {
               return;
             }
             break;
-          case 'hide_bad':
-            if (hasNegativeStatus) {
+          case 'good_only':
+            if (!hasPositiveStatus) {
               return;
             }
             break;
