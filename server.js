@@ -38,6 +38,7 @@ const { sleep, annotateNzbResult, applyMaxSizeFilter, prepareSortedResults, getP
 const indexerService = require('./src/services/indexer');
 const nzbdavService = require('./src/services/nzbdav');
 const specialMetadata = require('./src/services/specialMetadata');
+const tmdbService = require('./src/services/tmdb');
 
 const app = express();
 let currentPort = Number(process.env.PORT || 7000);
@@ -47,6 +48,9 @@ let serverInstance = null;
 const SERVER_HOST = '0.0.0.0';
 const DEDUPE_MAX_PUBLISH_DIFF_DAYS = 14;
 let PAID_INDEXER_TOKENS = new Set();
+let TMDB_API_KEY = (process.env.TMDB_API_KEY || '').trim();
+let TMDB_PREFERRED_LANGUAGE = (process.env.TMDB_PREFERRED_LANGUAGE || '').trim();
+let TMDB_LOCALIZATION_ENABLED = Boolean(TMDB_API_KEY);
 
 const QUALITY_FEATURE_PATTERNS = [
   { label: 'DV', regex: /\b(dolby\s*vision|dolbyvision|dv)\b/i },
@@ -91,6 +95,9 @@ adminApiRouter.get('/config', (req, res) => {
   if (!values.NZB_MAX_RESULT_SIZE_GB) {
     values.NZB_MAX_RESULT_SIZE_GB = String(DEFAULT_MAX_RESULT_SIZE_GB);
   }
+  if (!values.NZB_HEALTH_VISIBILITY) {
+    values.NZB_HEALTH_VISIBILITY = 'all';
+  }
   res.json({
     values,
     manifestUrl: computeManifestUrl(),
@@ -98,6 +105,11 @@ adminApiRouter.get('/config', (req, res) => {
     debugNewznabSearch: isNewznabDebugEnabled(),
     newznabPresets: newznabService.getAvailableNewznabPresets(),
     addonVersion: ADDON_VERSION,
+    tmdbEnabled: Boolean(values.TMDB_API_KEY && values.TMDB_API_KEY.trim()),
+    tmdbState: {
+      apiKeyPresent: Boolean(values.TMDB_API_KEY && values.TMDB_API_KEY.trim()),
+      preferredLanguage: values.TMDB_PREFERRED_LANGUAGE || '',
+    },
   });
 });
 
@@ -295,6 +307,179 @@ function summarizeNewznabPlan(plan) {
   };
 }
 
+function parseAcceptLanguageHeader(value) {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  return value
+    .split(',')
+    .map((segment) => segment.split(';')[0]?.trim())
+    .filter((segment) => segment && segment.length > 0);
+}
+
+function expandLocaleToken(value) {
+  if (typeof value !== 'string') return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  const normalized = trimmed.toLowerCase();
+  const variants = [normalized];
+  if (normalized.includes('-')) {
+    const parts = normalized.split('-').filter(Boolean);
+    const base = parts[0];
+    const region = parts.length > 1 ? parts[parts.length - 1] : null;
+    if (base && !variants.includes(base)) {
+      variants.push(base);
+    }
+    if (region && region !== base && !variants.includes(region)) {
+      variants.push(region);
+    }
+  }
+  return variants;
+}
+
+function buildLocalizationPreferenceList(...inputs) {
+  const seen = new Set();
+  const preferences = [];
+  inputs.forEach((input) => {
+    if (!input) return;
+    if (Array.isArray(input)) {
+      input.forEach((nested) => {
+        expandLocaleToken(nested).forEach((token) => {
+          if (!seen.has(token)) {
+            seen.add(token);
+            preferences.push(token);
+          }
+        });
+      });
+      return;
+    }
+    expandLocaleToken(input).forEach((token) => {
+      if (!seen.has(token)) {
+        seen.add(token);
+        preferences.push(token);
+      }
+    });
+  });
+  return preferences;
+}
+
+function selectLocalizedTitle(localizedMap, preferences = []) {
+  if (!localizedMap || typeof localizedMap !== 'object') return null;
+  for (const pref of preferences) {
+    if (localizedMap[pref]) {
+      return { locale: pref, entry: localizedMap[pref] };
+    }
+  }
+  const fallbackKey = Object.keys(localizedMap)[0];
+  return fallbackKey ? { locale: fallbackKey, entry: localizedMap[fallbackKey] } : null;
+}
+
+function normalizeTitleValue(value, { lowerCase = false, alphanumericOnly = false } = {}) {
+  if (typeof value !== 'string') return '';
+  let normalized = value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (lowerCase) {
+    normalized = normalized.toLowerCase();
+  }
+  if (alphanumericOnly) {
+    normalized = normalized.replace(/[^a-z0-9]+/ig, ' ');
+  } else {
+    normalized = normalized.replace(/\s+/g, ' ');
+  }
+  return normalized.trim();
+}
+
+function normalizeTitleForComparison(value) {
+  return normalizeTitleValue(value, { lowerCase: true, alphanumericOnly: true });
+}
+
+function titlesMatchInsensitive(a, b) {
+  const normalizedA = normalizeTitleForComparison(a);
+  const normalizedB = normalizeTitleForComparison(b);
+  if (!normalizedA && !normalizedB) return true;
+  return normalizedA === normalizedB;
+}
+
+function removeDiacriticsForSearch(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = normalizeTitleValue(value, { lowerCase: false, alphanumericOnly: false });
+  if (!normalized || normalized === value) {
+    return null;
+  }
+  return normalized;
+}
+
+function buildTmdbPreferenceSeeds({ requesterPreferences = [], localizationState = null, preferredLanguage = null }) {
+  const seeds = [];
+  const appendPreferences = (values) => {
+    const tokens = Array.isArray(values) ? values : [values];
+    tokens.forEach((token) => {
+      if (!token) return;
+      const expanded = buildLocalizationPreferenceList(token);
+      expanded.forEach((entry) => {
+        if (!seeds.includes(entry)) {
+          seeds.push(entry);
+        }
+      });
+    });
+  };
+  appendPreferences(requesterPreferences);
+  const originalLanguage = localizationState?.originalLanguage;
+  if (originalLanguage) {
+    appendPreferences(originalLanguage);
+    if (Array.isArray(localizationState.originCountries)) {
+      const combos = localizationState.originCountries
+        .map((countryCode) => {
+          if (!countryCode) return null;
+          const normalizedCountry = String(countryCode).trim().toLowerCase();
+          if (!normalizedCountry) return null;
+          return `${originalLanguage}-${normalizedCountry}`;
+        })
+        .filter(Boolean);
+      appendPreferences(combos);
+    }
+  }
+  if (preferredLanguage) {
+    appendPreferences(preferredLanguage);
+  }
+  appendPreferences(['en-US', 'en']);
+  return seeds;
+}
+
+function deriveTmdbLocalizedQueries({ movieTitle, localizationState, preferenceSeeds, buildQuery }) {
+  if (!localizationState || typeof buildQuery !== 'function') {
+    return null;
+  }
+  const localizationMatch = selectLocalizedTitle(localizationState.localizedTitles, preferenceSeeds);
+  const localizedEntry = localizationMatch?.entry;
+  const matchedLocale = localizationMatch?.locale || null;
+  let candidateTitle = localizedEntry?.title || null;
+  let candidateLocale = matchedLocale;
+  let candidateSource = localizedEntry?.source || null;
+  if (!candidateTitle || titlesMatchInsensitive(candidateTitle, movieTitle)) {
+    candidateTitle = null;
+  }
+  if (!candidateTitle && localizationState.originalTitle && !titlesMatchInsensitive(localizationState.originalTitle, movieTitle)) {
+    candidateTitle = localizationState.originalTitle;
+    candidateLocale = localizationState.originalLanguage || candidateLocale || 'original';
+    candidateSource = 'original';
+  }
+  if (!candidateTitle) {
+    return null;
+  }
+  const localizedQuery = buildQuery(candidateTitle);
+  if (!localizedQuery) {
+    return null;
+  }
+  const asciiTitle = removeDiacriticsForSearch(candidateTitle);
+  const asciiQuery = asciiTitle ? buildQuery(asciiTitle) : null;
+  return {
+    localizedQuery,
+    asciiQuery,
+    locale: candidateLocale,
+    source: candidateSource,
+  };
+}
+
 function logNewznabDebug(message, context = null) {
   if (!isNewznabDebugEnabled()) {
     return;
@@ -459,6 +644,14 @@ let TRIAGE_ARCHIVE_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_ARCHIVE_S
 let TRIAGE_REUSE_POOL = toBoolean(process.env.NZB_TRIAGE_REUSE_POOL, true);
 let TRIAGE_NNTP_KEEP_ALIVE_MS = toPositiveInt(process.env.NZB_TRIAGE_NNTP_KEEP_ALIVE_MS, 0);
 
+const MAX_NEWZNAB_INDEXERS = newznabService.MAX_NEWZNAB_INDEXERS;
+const NEWZNAB_NUMBERED_KEYS = newznabService.NEWZNAB_NUMBERED_KEYS;
+const POSITIVE_HEALTH_STATUSES = new Set(['verified', 'elf-verified', 'healthy', 'good', 'ok', 'passed']);
+const NEGATIVE_HEALTH_STATUSES = new Set(['blocked', 'fetch-error', 'error']);
+const HEALTH_VISIBILITY_MODES = new Set(['all', 'hide_bad', 'instant_only']);
+
+let NZB_HEALTH_VISIBILITY = resolveHealthVisibilityEnv();
+
 let TRIAGE_BASE_OPTIONS = {
   archiveDirs: TRIAGE_ARCHIVE_DIRS,
   maxDecodedBytes: TRIAGE_MAX_DECODED_BYTES,
@@ -471,8 +664,19 @@ let TRIAGE_BASE_OPTIONS = {
   healthCheckTimeoutMs: TRIAGE_TIME_BUDGET_MS,
 };
 
-const MAX_NEWZNAB_INDEXERS = newznabService.MAX_NEWZNAB_INDEXERS;
-const NEWZNAB_NUMBERED_KEYS = newznabService.NEWZNAB_NUMBERED_KEYS;
+function normalizeHealthVisibilityMode(value) {
+  if (typeof value !== 'string') return 'all';
+  const normalized = value.trim().toLowerCase();
+  if (HEALTH_VISIBILITY_MODES.has(normalized)) return normalized;
+  return 'all';
+}
+
+function resolveHealthVisibilityEnv() {
+  if (typeof process.env.NZB_HEALTH_VISIBILITY === 'string' && process.env.NZB_HEALTH_VISIBILITY.trim()) {
+    return normalizeHealthVisibilityMode(process.env.NZB_HEALTH_VISIBILITY);
+  }
+  return 'all';
+}
 
 function maybePrewarmSharedNntpPool() {
   if (!TRIAGE_REUSE_POOL || !TRIAGE_NNTP_CONFIG) {
@@ -567,6 +771,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   TRIAGE_ARCHIVE_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_ARCHIVE_SAMPLE_COUNT, 1);
   TRIAGE_REUSE_POOL = toBoolean(process.env.NZB_TRIAGE_REUSE_POOL, true);
   TRIAGE_NNTP_KEEP_ALIVE_MS = toPositiveInt(process.env.NZB_TRIAGE_NNTP_KEEP_ALIVE_MS, 0);
+  NZB_HEALTH_VISIBILITY = resolveHealthVisibilityEnv();
   TRIAGE_BASE_OPTIONS = {
     archiveDirs: TRIAGE_ARCHIVE_DIRS,
     maxDecodedBytes: TRIAGE_MAX_DECODED_BYTES,
@@ -582,6 +787,9 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   maybePrewarmSharedNntpPool();
   const resolvedAddonBase = ADDON_BASE_URL || `http://${SERVER_HOST}:${currentPort}`;
   easynewsService.reloadConfig({ addonBaseUrl: resolvedAddonBase, sharedSecret: ADDON_SHARED_SECRET });
+  TMDB_API_KEY = (process.env.TMDB_API_KEY || '').trim();
+  TMDB_PREFERRED_LANGUAGE = (process.env.TMDB_PREFERRED_LANGUAGE || '').trim();
+  TMDB_LOCALIZATION_ENABLED = Boolean(TMDB_API_KEY);
 
   const portChanged = previousPort !== undefined && previousPort !== currentPort;
   if (log) {
@@ -609,6 +817,8 @@ const ADMIN_CONFIG_KEYS = [
   'ADDON_BASE_URL',
   'ADDON_NAME',
   'ADDON_SHARED_SECRET',
+  'TMDB_API_KEY',
+  'TMDB_PREFERRED_LANGUAGE',
   'INDEXER_MANAGER',
   'INDEXER_MANAGER_URL',
   'INDEXER_MANAGER_API_KEY',
@@ -630,6 +840,7 @@ const ADMIN_CONFIG_KEYS = [
   'NZBDAV_CATEGORY_MOVIES',
   'NZBDAV_CATEGORY_SERIES',
   'NZB_TRIAGE_HEALTH_INDEXERS',
+  'NZB_HEALTH_VISIBILITY',
   'SPECIAL_PROVIDER_ID',
   'SPECIAL_PROVIDER_URL',
   'SPECIAL_PROVIDER_SECRET',
@@ -1001,6 +1212,12 @@ async function streamHandler(req, res) {
 
     const pickFirstDefined = (...values) => values.find((value) => value !== undefined && value !== null && String(value).trim() !== '') || null;
     const meta = req.query || {};
+    const requesterLocalePreferences = buildLocalizationPreferenceList(
+      meta?.preferredLanguage,
+      meta?.language,
+      TMDB_PREFERRED_LANGUAGE,
+      parseAcceptLanguageHeader(req.headers['accept-language'] || '')
+    );
 
     console.log('[REQUEST] Raw query payload from Stremio', meta);
 
@@ -1210,6 +1427,28 @@ async function streamHandler(req, res) {
 
     console.log('[REQUEST] Resolved title/year', { movieTitle, releaseYear });
 
+    if (TMDB_LOCALIZATION_ENABLED && !metaIds.tmdb) {
+      try {
+        const tmdbResolution = await tmdbService.resolveTmdbId({
+          apiKey: TMDB_API_KEY,
+          type,
+          imdbId: metaIds.imdb,
+          title: movieTitle,
+          year: releaseYear,
+          languageCandidates: requesterLocalePreferences,
+        });
+        if (tmdbResolution?.tmdbId) {
+          metaIds.tmdb = tmdbResolution.tmdbId;
+          console.log('[TMDB] Resolved missing identifier', {
+            tmdbId: metaIds.tmdb,
+            via: tmdbResolution.via || 'unknown',
+          });
+        }
+      } catch (tmdbResolveError) {
+        console.warn('[TMDB] Unable to resolve TMDb identifier', tmdbResolveError?.message || tmdbResolveError);
+      }
+    }
+
     let searchType;
     if (type === 'series') {
       searchType = 'tvsearch';
@@ -1261,25 +1500,72 @@ async function streamHandler(req, res) {
         addPlan(searchType, { tokens: [`{ImdbId:${metaIds.imdb}}`] });
       }
 
-      const textQueryParts = [];
+      const buildTextQueryString = (titleValue) => {
+        const segments = [];
+        if (titleValue) {
+          segments.push(titleValue);
+        }
+        if (type === 'movie' && Number.isFinite(releaseYear)) {
+          segments.push(String(releaseYear));
+        } else if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
+          segments.push(`S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`);
+        }
+        return segments.join(' ').trim();
+      };
+
+      const baseTextQueryValue = buildTextQueryString(movieTitle);
       let easynewsSearchParams = null;
       let textQueryFallbackValue = null;
-      if (movieTitle) {
-        textQueryParts.push(movieTitle);
-      }
-      if (type === 'movie' && Number.isFinite(releaseYear)) {
-        textQueryParts.push(String(releaseYear));
-      } else if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
-        textQueryParts.push(`S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`);
-      }
-
+      let localizedTextQueryValue = null;
+      let localizedAsciiTextQueryValue = null;
+      let tmdbLocalizationState = null;
       const shouldForceTextSearch = isSpecialRequest;
       const shouldAddTextSearch = shouldForceTextSearch || (!INDEXER_MANAGER_STRICT_ID_MATCH && !incomingTvdbId);
 
       if (shouldAddTextSearch) {
-        const fallbackIdentifier = incomingImdbId || baseIdentifier;
-        const textQueryCandidate = textQueryParts.join(' ').trim();
-        textQueryFallbackValue = (textQueryCandidate || fallbackIdentifier).trim();
+        const fallbackIdentifier = incomingImdbId || baseIdentifier || '';
+        textQueryFallbackValue = (baseTextQueryValue || fallbackIdentifier).trim();
+
+        let localizationPlan = null;
+        if (TMDB_LOCALIZATION_ENABLED && metaIds.tmdb) {
+          try {
+            tmdbLocalizationState = await tmdbService.loadTmdbLocalization({
+              apiKey: TMDB_API_KEY,
+              type,
+              tmdbId: metaIds.tmdb,
+            });
+            if (tmdbLocalizationState) {
+              console.log('[TMDB] Localization payload', {
+                tmdbId: metaIds.tmdb,
+                defaultTitle: tmdbLocalizationState.defaultTitle || null,
+                originalTitle: tmdbLocalizationState.originalTitle || null,
+                originalLanguage: tmdbLocalizationState.originalLanguage || null,
+                releaseDate: tmdbLocalizationState.releaseDate || null,
+                localeCount: tmdbLocalizationState.localizedTitles ? Object.keys(tmdbLocalizationState.localizedTitles).length : 0,
+                originCountries: tmdbLocalizationState.originCountries || [],
+              });
+              const preferenceSeeds = buildTmdbPreferenceSeeds({
+                requesterPreferences: requesterLocalePreferences,
+                localizationState: tmdbLocalizationState,
+                preferredLanguage: TMDB_PREFERRED_LANGUAGE,
+              });
+              localizationPlan = deriveTmdbLocalizedQueries({
+                movieTitle,
+                localizationState: tmdbLocalizationState,
+                preferenceSeeds,
+                buildQuery: buildTextQueryString,
+              });
+              if (!localizationPlan) {
+                console.log('[TMDB] No alternate localized title found', { tmdbId: metaIds.tmdb });
+              }
+            } else {
+              console.log('[TMDB] Localization payload missing', { tmdbId: metaIds.tmdb });
+            }
+          } catch (tmdbError) {
+            console.warn('[TMDB] Failed to load localization data', tmdbError?.message || tmdbError);
+          }
+        }
+
         if (textQueryFallbackValue) {
           const addedTextPlan = addPlan('search', { rawQuery: textQueryFallbackValue });
           if (addedTextPlan) {
@@ -1289,6 +1575,29 @@ async function streamHandler(req, res) {
           }
         } else {
           console.log(`${INDEXER_LOG_PREFIX} Skipping text search plan; insufficient metadata`);
+        }
+
+        if (localizationPlan?.localizedQuery) {
+          localizedTextQueryValue = localizationPlan.localizedQuery;
+          const addedLocalizedPlan = addPlan('search', { rawQuery: localizedTextQueryValue });
+          if (addedLocalizedPlan) {
+            console.log('[TMDB] Added localized text search plan', {
+              query: localizedTextQueryValue,
+              locale: localizationPlan.locale || null,
+              source: localizationPlan.source || null,
+            });
+          }
+        }
+
+        if (localizationPlan?.asciiQuery) {
+          localizedAsciiTextQueryValue = localizationPlan.asciiQuery;
+          const addedAsciiPlan = addPlan('search', { rawQuery: localizedAsciiTextQueryValue });
+          if (addedAsciiPlan) {
+            console.log('[TMDB] Added ASCII-normalized localized search plan', {
+              query: localizedAsciiTextQueryValue,
+              locale: localizationPlan.locale || null,
+            });
+          }
         }
       } else {
         const reason = INDEXER_MANAGER_STRICT_ID_MATCH ? 'strict ID matching enabled' : 'tvdb identifier provided';
@@ -1307,9 +1616,9 @@ async function streamHandler(req, res) {
         if (isSpecialRequest) {
           easynewsRawQuery = (specialMetadataResult?.title || movieTitle || baseIdentifier || '').trim();
         } else if (easynewsStrictMode) {
-          easynewsRawQuery = (textQueryParts.join(' ').trim() || movieTitle || '').trim();
+          easynewsRawQuery = (localizedAsciiTextQueryValue || localizedTextQueryValue || baseTextQueryValue || movieTitle || '').trim();
         } else {
-          easynewsRawQuery = (textQueryParts.join(' ').trim() || movieTitle || '').trim();
+          easynewsRawQuery = (localizedAsciiTextQueryValue || localizedTextQueryValue || baseTextQueryValue || movieTitle || '').trim();
         }
         if (!easynewsRawQuery && textQueryFallbackValue) {
           easynewsRawQuery = textQueryFallbackValue;
@@ -1327,6 +1636,7 @@ async function streamHandler(req, res) {
             strictMode: easynewsStrictMode,
             specialTextOnly: Boolean(isSpecialRequest || requestLacksIdentifiers),
           };
+          console.log('[EASYNEWS] Prepared search params', easynewsSearchParams);
         }
       }
 
@@ -1841,6 +2151,23 @@ async function streamHandler(req, res) {
         const triageApplied = Boolean(directTriageInfo);
         const triageDerivedFromTitle = Boolean(!directTriageInfo && fallbackAllowed && fallbackTriageInfo);
         const triageStatus = triageInfo?.status || (triageApplied ? 'unknown' : 'not-run');
+        const normalizedTriageStatus = typeof triageStatus === 'string' ? triageStatus.toLowerCase() : null;
+        const hasPositiveStatus = normalizedTriageStatus ? POSITIVE_HEALTH_STATUSES.has(normalizedTriageStatus) : false;
+        const hasNegativeStatus = normalizedTriageStatus ? NEGATIVE_HEALTH_STATUSES.has(normalizedTriageStatus) : false;
+        switch (NZB_HEALTH_VISIBILITY) {
+          case 'instant_only':
+            if (!isInstant && !hasPositiveStatus) {
+              return;
+            }
+            break;
+          case 'hide_bad':
+            if (hasNegativeStatus) {
+              return;
+            }
+            break;
+          default:
+            break;
+        }
         let triagePriority = 1;
         let triageTag = null;
 

@@ -44,6 +44,7 @@
 - **Multi-language preferences** — pick several preferred audio languages in the admin panel; the sorter surfaces hits with 🌐 badges and falls back gracefully when none match.
 - **Two-tier sorting polish** — quality/size ordering got revamped so languages, instant hits, and per-quality limits all blend without bouncing streams around between refreshes.
 - **Per-resolution caps** — optionally limit the number of 4K/1080p/etc. streams kept before the next tier is considered, preventing walls of similar releases.
+- **TMDb localization fallback** — drop in a TMDb API key and UsenetStreamer now resolves missing IDs, grabs localized titles, and injects localized + ASCII-safe text searches (great for “Bäst i test” / Taskmaster-style shows).
 - **Retry-friendly triage** — if every NZB in the first pass fails health checks, the next manifest request transparently samples fresh candidates so you’re not stuck with a dead cache.
 - **Built-in Easynews bridge** — native username/password fields expose Easynews as another indexer, no Flask proxy needed, and streams skip NNTP triage while staying marked ✅.
 - **Curated Newznab presets** — enable the new built-in indexers list to bootstrap direct APIs quickly (paid flag doubles as health-check eligibility).
@@ -60,6 +61,15 @@
 - Preferred language groups (single or multiple) rise to the top and display with clear 🌐 labels.
 - Optional dedupe filter (enabled by default) collapses identical releases; toggle it off to inspect every hit.
 - A single per-quality cap (e.g., 4) keeps only the first few results for each resolution before falling back to the next tier.
+
+### 🌍 TMDb Localization Fallback
+Need Scandinavian, Latin American, or anime titles that Cinemeta only exposes in English? Enable the TMDb section in the admin dashboard:
+
+1. Generate a **TMDb Read Access Token (v4 auth)** inside your TMDb account and paste it into **Admin &rarr; TMDb Localization &rarr; API Key**.
+2. (Optional) Enter a preferred language code (`sv-SE`, `es-MX`, `ja`, etc.). We fall back to your browser locale, the title’s original language, and finally `en-US` if the field is blank.
+3. Save. Every stream request now auto-resolves missing TMDb IDs via IMDb/title search, downloads translations + alternative titles, and injects localized search plans whenever the translated title differs from the Cinemeta name.
+
+The addon automatically adds an ASCII-normalized backup query (`Bäst i test` → `Bast i test`) so indexers that don’t support diacritics still return matches. Logs show which locale was selected so you can confirm the fallback behavior.
 
 ### ⚡ Instant Streams from NZBDav
 - Completed NZBDav jobs are recognized automatically and surfaced with a ⚡ tag.
@@ -154,6 +164,7 @@ Visit `https://your-addon-domain/<token>/admin/` to:
 - Trigger connection tests for indexer manager, NZBDav, and NNTP provider.
 - Copy the ready-to-use manifest URL right after saving.
 - Restart the addon safely once changes are persisted.
+- Configure **TMDb localization**: add your API key, auto-fill preferred locales from the browser, and monitor whether localization is active (hint text toggles once a key is saved).
 
 The dashboard is protected by the same shared secret as the manifest. Rotate it if you ever suspect exposure.
 
@@ -187,6 +198,7 @@ This allows forks or containerized deployments to update upstream code without l
 - `EASYNEWS_ENABLED`, `EASYNEWS_USERNAME`, `EASYNEWS_PASSWORD` — enable the built-in Easynews search bridge (text-only search with optional strict matching).
 - `NZBDAV_HISTORY_FETCH_LIMIT`, `NZBDAV_CACHE_TTL_MINUTES` (controls instant detection cache).
 - `NZB_TRIAGE_*` for NNTP health checks (host, port, user/pass, timeouts, candidate counts, reuse pool, etc.).
+- `TMDB_API_KEY`, `TMDB_PREFERRED_LANGUAGE`, `TMDB_LOCALIZATION_ENABLED` — power the TMDb localization fallback described above. All three can be managed via the admin UI; setting only the API key automatically turns the feature on.
 
 See `.env.example` for the complete list and defaults.
 

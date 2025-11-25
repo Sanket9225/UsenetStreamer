@@ -19,6 +19,11 @@
   const languageHiddenInput = configForm.querySelector('[data-language-hidden]');
   const languageCheckboxes = Array.from(configForm.querySelectorAll('input[data-language-option]'));
   const languageSelector = configForm.querySelector('[data-language-selector]');
+  const tmdbSection = document.getElementById('tmdbLocalizationSection');
+  const tmdbApiInput = configForm.querySelector('input[name="TMDB_API_KEY"]');
+  const tmdbLanguageInput = configForm.querySelector('input[name="TMDB_PREFERRED_LANGUAGE"]');
+  const tmdbDetailsBlock = tmdbSection?.querySelector('[data-tmdb-details]');
+  const tmdbEmptyHint = tmdbSection?.querySelector('[data-tmdb-empty]');
   const versionBadge = document.getElementById('addonVersionBadge');
 
   let currentManifestUrl = '';
@@ -42,6 +47,8 @@
   const easynewsUserInput = configForm.querySelector('input[name="EASYNEWS_USERNAME"]');
   const easynewsPassInput = configForm.querySelector('input[name="EASYNEWS_PASSWORD"]');
   let saveInProgress = false;
+  let latestTmdbState = null;
+  let tmdbLocaleAutofilled = false;
 
   function getStoredToken() {
     return localStorage.getItem(storageKey) || '';
@@ -718,9 +725,10 @@
     saveStatus.textContent = '';
 
     try {
-  const data = await apiRequest('/admin/api/config');
-  const values = data.values || {};
-  setAvailableNewznabPresets(data?.newznabPresets || []);
+        const data = await apiRequest('/admin/api/config');
+        const values = data.values || {};
+        latestTmdbState = data?.tmdbState || null;
+        setAvailableNewznabPresets(data?.newznabPresets || []);
       updateVersionBadge(data?.addonVersion);
       allowNewznabTestSearch = Boolean(data?.debugNewznabSearch);
       setupNewznabRowsFromValues(values);
@@ -732,11 +740,12 @@
       syncSortingControls();
       syncManagerControls();
       syncNewznabControls();
-      configSection.classList.remove('hidden');
-  updateManifestLink(data.manifestUrl || '');
+        syncTmdbSection(latestTmdbState || {});
+        configSection.classList.remove('hidden');
+        updateManifestLink(data.manifestUrl || '');
       runtimeEnvPath = data.runtimeEnvPath || null;
-  const baseMessage = 'Use the install buttons once HTTPS and your shared token are set.';
-  manifestDescription.textContent = baseMessage;
+        const baseMessage = 'Use the install buttons once HTTPS and your shared token are set.';
+        manifestDescription.textContent = baseMessage;
     } catch (error) {
       authError.textContent = error.message;
       authError.classList.remove('hidden');
@@ -891,6 +900,40 @@
     }
   }
 
+  function hasTmdbApiKey() {
+    return Boolean(tmdbApiInput?.value?.trim());
+  }
+
+  function autoFillTmdbLanguage(tmdbState = {}) {
+    if (!tmdbLanguageInput || tmdbLocaleAutofilled) return;
+    const currentValue = (tmdbLanguageInput.value || '').trim();
+    if (currentValue.length > 0) {
+      tmdbLocaleAutofilled = true;
+      return;
+    }
+    const browserLocaleCandidates = [];
+    if (navigator.language) browserLocaleCandidates.push(navigator.language);
+    if (Array.isArray(navigator.languages)) {
+      browserLocaleCandidates.push(...navigator.languages);
+    }
+    const fallback = tmdbState?.preferredLanguage || browserLocaleCandidates.find((entry) => typeof entry === 'string' && entry.trim().length > 0) || '';
+    if (!fallback) return;
+    tmdbLanguageInput.value = fallback;
+    tmdbLocaleAutofilled = true;
+  }
+
+  function syncTmdbSection(tmdbState = {}) {
+    if (!tmdbSection) return;
+    const keyPresent = hasTmdbApiKey();
+    if (tmdbDetailsBlock) tmdbDetailsBlock.classList.toggle('hidden', !keyPresent);
+    if (tmdbEmptyHint) tmdbEmptyHint.classList.toggle('hidden', keyPresent);
+    if (keyPresent) {
+      autoFillTmdbLanguage(tmdbState);
+    } else {
+      tmdbLocaleAutofilled = false;
+    }
+  }
+
   function syncManagerControls() {
     if (!managerSelect) return;
     const managerValue = managerSelect.value || 'none';
@@ -1001,6 +1044,20 @@
         syncResolutionLimitDisabledStates();
         syncSaveGuard();
       });
+    });
+  }
+
+  if (tmdbApiInput) {
+    tmdbApiInput.addEventListener('input', () => {
+      syncTmdbSection(latestTmdbState || {});
+    });
+  }
+
+  if (tmdbLanguageInput) {
+    tmdbLanguageInput.addEventListener('input', () => {
+      if ((tmdbLanguageInput.value || '').trim().length > 0) {
+        tmdbLocaleAutofilled = true;
+      }
     });
   }
 
