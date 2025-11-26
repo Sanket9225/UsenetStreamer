@@ -25,8 +25,7 @@ Now log into your VPS:
 ssh root@your-vps-ip
 ```
 
-## 2. Install Docker, Compose, and Caddy
-
+## 2. Install Docker, Compose, Caddy and the Usenetstreamer Stack
 ```bash
 git clone https://github.com/Sanket9225/UsenetStreamer.git
 cd UsenetStreamer/Scripts
@@ -35,15 +34,7 @@ chmod +x install.sh
 newgrp docker
 ```
 
-## 3. Prepare Folders and Secrets
-
-```bash
-chmod +x usenetstack.sh
-./usenetstack.sh
-```
-
-## 4. Configure the Services
-
+## 3. Configure the Services
 
 Visit the services:
 
@@ -53,7 +44,7 @@ Visit the services:
   - Either enter Easynews credentials or add direct Newznab endpoints via the built-in presets.
   - *Optional:* If you still run Prowlarr/NZBHydra elsewhere, fill in the URL/API key and toggle which indexers you want shared.
 
-## 5. Final Checklist
+## 4. Final Checklist
 
 - Update `INDEXER_MANAGER_API_KEY`, NZBDav credentials, and `ADDON_BASE_URL` inside the UsenetStreamer dashboard (now reachable at your DuckDNS URL).
 - Run the **Connection Tests** tab to confirm every service is reachable.
