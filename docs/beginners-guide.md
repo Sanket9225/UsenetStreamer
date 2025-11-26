@@ -7,17 +7,20 @@
 2. **Indexer/API Access:** Pick one of the following:
    - Use the **built-in Easynews bridge** (uses your Easynews username/password).
    - Add one or more **direct Newznab APIs** (NZBGeek, Usenet-Crawler, etc.) straight into the UsenetStreamer admin panel.
-   - *German Users:* [SceneNZBs](https://scenenzbs.com/) is by far the best option.
+   - *For German Users:* [SceneNZBs](https://scenenzbs.com/) is by far the best option.
    - *Optional:* Run **Prowlarr or NZBHydra** if you already prefer them, but they are no longer required for this guide.
 3. **DuckDNS Account (Optional):** Only needed if you want public HTTPS access. For home/LAN streaming, you can skip this and use your server’s IP (e.g., `http://192.168.1.50:7000`). If you need remote access, sign up at [DuckDNS](https://www.duckdns.org), create a subdomain (e.g., `mystreamer`), and point it to your VPS/static IP.
    - It should look like [this](https://imgur.com/a/CHxhRzx).
 
 ## 1. Rent a VPS and Log In
 
-The Oracle Free Tier is possible, but there is a risk of the account being terminated. For a cheap option, the [IONOS VPS S](https://www.ionos.de/server/vps) package is more than enough.
+The Oracle Free Tier is possible, but there is a risk of the account being terminated. For a cheap option, the [IONOS](https://www.ionos.de/server/vps) Vps-S package is more than enough.
 
-Log into your VPS:
 
+### IMPORTANT
+Your cloud provider usually has its own firewall. Log into your VPS dashboard and add inbound rules for ports 80, 443, 7000, 3000, and 22 (TCP)—plus 9696 if you chose to publish a manager. On Oracle/Vultr/AWS you’ll find this under “Security List,” “Firewall,” or “VPC security group.” If you skip this step, nothing outside the VPS will reach your services even though UFW allows them. If you expose Prowlarr/NZBHydra on the same box, also allow 9696/tcp.
+
+Now log into your VPS:
 ```bash
 ssh root@your-vps-ip
 ```
@@ -25,10 +28,10 @@ ssh root@your-vps-ip
 ## 2. Install Docker, Compose, and Caddy
 
 ```bash
-git clone [https://github.com/Sanket9225/UsenetStreamer.git](https://github.com/Sanket9225/UsenetStreamer.git)
+git clone https://github.com/Sanket9225/UsenetStreamer.git
 cd UsenetStreamer/Scripts
-chmod +x install_docker.sh
-./install_docker.sh
+chmod +x install_.sh
+./install.sh
 newgrp docker
 ```
 
@@ -39,13 +42,8 @@ chmod +x usenetstack.sh
 ./usenetstack.sh
 ```
 
-## 4. Launch the Stack
+## 4. Configure the Services
 
-```bash
-# Navigate to the install directory
-cd ~/usenetstack
-docker compose up -d
-```
 
 Visit the services:
 
