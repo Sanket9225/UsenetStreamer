@@ -191,6 +191,12 @@ echo "      INSTALLATION SUCCESSFUL!"
 echo "==========================================="
 echo "1. Dashboard: $FULL_URL/$USER_SECRET/admin/"
 echo "2. NZBDav:    http://$USER_DOMAIN:3000 (or via IP)"
+
+# Conditionally display Prowlarr URL
+if [[ "$PROWLARR_CHOICE" =~ ^[Yy]$ ]]; then
+    echo "3. Prowlarr:  http://$USER_DOMAIN:9696 (or via IP)"
+fi
+
 echo ""
 echo "NOTE: To use 'docker' commands manually in the future,"
 echo "      please log out and log back in."
