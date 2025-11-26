@@ -31,7 +31,6 @@ git clone https://github.com/Sanket9225/UsenetStreamer.git
 cd UsenetStreamer/scripts
 chmod +x install.sh
 ./install.sh
-newgrp docker
 ```
 
 ## 3. Configure the Services
