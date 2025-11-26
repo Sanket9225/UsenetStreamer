@@ -1,110 +1,64 @@
-#!/bin/bash
+# Beginner Guide
 
-# Exit immediately if a command exits with a non-zero status
-set -e
+## 0. Accounts and Services You Need First
 
-echo "--- Starting Server Installation ---"
+1. **Usenet Provider:** e.g., Newshosting, Easynews, Eweka. Without a provider, you cannot download anything.
+   - *Tip:* German users should check [Mydealz](https://www.mydealz.de/) for Usenet provider deals. Other users should check Reddit, as it often has good deals.
+2. **Indexer/API Access:** Pick one of the following:
+   - Use the **built-in Easynews bridge** (uses your Easynews username/password).
+   - Add one or more **direct Newznab APIs** (NZBGeek, Usenet-Crawler, etc.) straight into the UsenetStreamer admin panel.
+   - *German Users:* [SceneNZBs](https://scenenzbs.com/) is by far the best option.
+   - *Optional:* Run **Prowlarr or NZBHydra** if you already prefer them, but they are no longer required for this guide.
+3. **DuckDNS Account (Optional):** Only needed if you want public HTTPS access. For home/LAN streaming, you can skip this and use your server’s IP (e.g., `http://192.168.1.50:7000`). If you need remote access, sign up at [DuckDNS](https://www.duckdns.org), create a subdomain (e.g., `mystreamer`), and point it to your VPS/static IP.
+   - It should look like [this](https://imgur.com/a/CHxhRzx).
 
-# --- PART 1: DOCKER INSTALLATION ---
+## 1. Rent a VPS and Log In
 
-echo "[1/3] Installing Docker..."
+The Oracle Free Tier is possible, but there is a risk of the account being terminated. For a cheap option, the [IONOS VPS S](https://www.ionos.de/server/vps) package is more than enough.
 
-# 1. Update existing list of packages
-sudo apt update
+Log into your VPS:
 
-# 2. Install prerequisites
-sudo apt install -y ca-certificates curl gnupg lsb-release debian-keyring debian-archive-keyring apt-transport-https
+```bash
+ssh root@your-vps-ip
+```
 
-# 3. Add Docker’s official GPG key
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
+## 2. Install Docker, Compose, and Caddy
 
-# 4. Set up the Docker repository
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+```bash
+git clone [https://github.com/Sanket9225/UsenetStreamer.git](https://github.com/Sanket9225/UsenetStreamer.git)
+cd UsenetStreamer/Scripts
+chmod +x install_docker.sh
+./install_docker.sh
+newgrp docker
+```
 
-# 5. Update package index again
-sudo apt update
+## 3. Prepare Folders and Secrets
 
-# 6. Install Docker Engine and plugins
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```bash
+chmod +x usenetstack.sh
+./usenetstack.sh
+```
 
-# 7. Add user to docker group
-sudo usermod -aG docker $USER
+## 4. Launch the Stack
 
-echo "Docker installed successfully."
+```bash
+# Navigate to the install directory
+cd ~/usenetstack
+docker compose up -d
+```
 
-# --- PART 2: CADDY INSTALLATION ---
+Visit the services:
 
-echo "[2/3] Installing Caddy Web Server..."
+- `http://your-vps-ip:3000` – **Configure NZBDav:** Add your Usenet provider credentials, set up a WebDAV username/password, and note the API URL for later.
+- `http://your-vps-ip:7000/<ADDON_SECRET>/admin/` – **Configure UsenetStreamer:**
+  - Paste your NZBDav API/WebDAV info (click the "Test Connection" button).
+  - Either enter Easynews credentials or add direct Newznab endpoints via the built-in presets.
+  - *Optional:* If you still run Prowlarr/NZBHydra elsewhere, fill in the URL/API key and toggle which indexers you want shared.
 
-# 1. Add Caddy GPG key
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+## 5. Final Checklist
 
-# 2. Add Caddy Repository
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+- Update `INDEXER_MANAGER_API_KEY`, NZBDav credentials, and `ADDON_BASE_URL` inside the UsenetStreamer dashboard (now reachable at your DuckDNS URL).
+- Run the **Connection Tests** tab to confirm every service is reachable.
+- Add `https://mystreamer.duckdns.org/super-secret-token/manifest.json` inside Stremio.
 
-# 3. Update and Install Caddy
-sudo apt update
-sudo apt install -y caddy
-
-echo "Caddy installed successfully."
-
-# --- PART 3: FIREWALL CONFIGURATION ---
-
-echo "[3/3] Configuring Firewall (UFW)..."
-
-# Allow SSH first (Critical to avoid lockout)
-sudo ufw allow 22/tcp
-
-# Allow HTTP/HTTPS for Caddy
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-
-# Allow Application Ports (NZBDav & UsenetStreamer direct access)
-sudo ufw allow 3000/tcp
-sudo ufw allow 7000/tcp
-
-# Ask about Prowlarr/NZBHydra
-read -p "Do you want to expose Prowlarr/NZBHydra (Port 9696)? (y/n): " PROWLARR_CHOICE
-if [[ "$PROWLARR_CHOICE" =~ ^[Yy]$ ]]; then
-    echo "Allowing Port 9696..."
-    sudo ufw allow 9696/tcp
-else
-    echo "Skipping Port 9696."
-fi
-
-# Enable firewall (using --force to avoid prompt)
-sudo ufw --force enable
-sudo ufw reload
-
-echo "Firewall configured."
-
-# --- PART 4: CADDY CONFIGURATION ---
-
-echo "--- Configuration ---"
-echo "We need to configure Caddy to point to your Docker container."
-read -p "Enter your full Domain URL (e.g., mystreamer.duckdns.org): " USER_DOMAIN
-
-if [ -z "$USER_DOMAIN" ]; then
-  echo "No domain entered. Skipping Caddyfile configuration."
-else
-  echo "Writing configuration to /etc/caddy/Caddyfile..."
-  
-  cat <<EOF | sudo tee /etc/caddy/Caddyfile
-$USER_DOMAIN {
-    reverse_proxy 127.0.0.1:7000
-}
-EOF
-
-  echo "Restarting Caddy to apply changes..."
-  sudo systemctl restart caddy
-fi
-
-echo "--- Installation Complete ---"
-echo "1. Docker is ready."
-echo "2. Caddy is running and serving $USER_DOMAIN."
-echo "3. Firewall is active."
-echo "4. Please log out and log back in to use Docker commands without 'sudo'."
+Need more help? Jump into [Discord](https://discord.gg/NJsprZyz) and share screenshots/logs.
