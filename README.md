@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://discord.gg/NJsprZyz"><img src="https://img.shields.io/badge/Discord-Join-blue?logo=discord&logoColor=white" alt="Join Discord" /></a>
+  <a href="https://discord.gg/tUwNjXSZZN"><img src="https://img.shields.io/badge/Discord-Join-blue?logo=discord&logoColor=white" alt="Join Discord" /></a>
   <a href="https://buymeacoffee.com/gaikwadsank"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-yellow?logo=buymeacoffee&logoColor=white" alt="Buy me a coffee" /></a>
   <a href="https://github.com/Sanket9225/UsenetStreamer/actions"><img src="https://img.shields.io/github/actions/workflow/status/Sanket9225/UsenetStreamer/docker-publish.yml?label=docker%20build" alt="CI badge" /></a>
   <a href="https://ghcr.io/sanket9225/usenetstreamer"><img src="https://img.shields.io/badge/Docker-ghcr.io%2Fsanket9225%2Fusenetstreamer-blue?logo=docker" alt="Docker image" /></a>
@@ -23,7 +23,7 @@
 - **Docker image:** `ghcr.io/sanket9225/usenetstreamer:latest`
 - **Admin dashboard:** `https://your-addon-domain/<token>/admin/`
 - **Manifest template:** `https://your-addon-domain/<token>/manifest.json`
-- **Discord:** [Community chat](https://discord.gg/cu9bzk9h)
+- **Discord:** [Community chat](https://discord.gg/tUwNjXSZZN)
 - **Support:** [Buy me a coffee](https://buymeacoffee.com/gaikwadsank)
 - **Self-hosting guide:** [Jump to instructions](#-deployment)
 
@@ -213,7 +213,7 @@ Anything that can load HTTPS manifests and handle `externalPlayer` hints should 
 
 ## 🤝 Support & Community
 
-- **Discord:** [Join the chat](https://discord.gg/NJsprZyz)
+- **Discord:** [Join the chat](https://discord.gg/tUwNjXSZZN)
 - **Buy me a coffee:** [Keep development humming](https://buymeacoffee.com/gaikwadsank)
 - **Issues & PRs:** [GitHub tracker](https://github.com/Sanket9225/UsenetStreamer/issues)
 
