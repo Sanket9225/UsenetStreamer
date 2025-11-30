@@ -33,7 +33,7 @@
   let newznabPresets = [];
 
   const MAX_NEWZNAB_INDEXERS = 20;
-  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID'];
+  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAGINATE'];
 
   const managerSelect = configForm.querySelector('select[name="INDEXER_MANAGER"]');
   const newznabList = document.getElementById('newznab-indexers-list');
@@ -395,6 +395,10 @@
           <label class="checkbox">
             <input type="checkbox" data-field="PAID" />
             <span>Paid / Health-ready</span>
+          </label>
+          <label class="checkbox" title="Fetch up to 5 pages of results (slower but more results)">
+            <input type="checkbox" data-field="PAGINATE" />
+            <span>Paginate</span>
           </label>
         </div>
         <div class="row-controls">
