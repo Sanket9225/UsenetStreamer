@@ -24,6 +24,7 @@
   const nativeModeNotice = document.getElementById('nativeModeNotice');
   const indexerManagerGroup = document.getElementById('indexerManagerGroup');
   const nzbdavGroup = document.getElementById('nzbdavGroup');
+  const easynewsHttpsWarning = document.getElementById('easynewsHttpsWarning');
 
   let currentManifestUrl = '';
   let copyStatusTimer = null;
@@ -918,6 +919,10 @@
     // Show/hide native mode notice
     if (nativeModeNotice) {
       nativeModeNotice.classList.toggle('hidden', !isNativeMode);
+    }
+
+    if (easynewsHttpsWarning) {
+      easynewsHttpsWarning.classList.toggle('hidden', !isNativeMode);
     }
     
     // Hide NZBDav section in native mode
