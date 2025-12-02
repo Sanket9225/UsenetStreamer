@@ -204,11 +204,14 @@ async function testNzbdavConnection(values) {
     });
 
     const webdavResponse = await axios.request({
-      method: 'HEAD',
+      method: 'PROPFIND',
       url: `${webdavUrl}/`,
       auth: {
         username: webdavUser,
         password: webdavPass,
+      },
+      headers: {
+        'Depth': '0',
       },
       timeout,
       maxRedirects: 0,
@@ -220,6 +223,10 @@ async function testNzbdavConnection(values) {
     }
     if (webdavResponse.status >= 400) {
       throw new Error(`WebDAV endpoint returned status ${webdavResponse.status}`);
+    }
+    // PROPFIND should return 207 Multi-Status for valid WebDAV; anything else is suspicious
+    if (webdavResponse.status !== 207 && webdavResponse.status !== 200) {
+      throw new Error(`Unexpected WebDAV response status ${webdavResponse.status} (expected 207)`);
     }
 
     const diagnosticMessage = diagnosticNote

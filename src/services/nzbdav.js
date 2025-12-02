@@ -29,6 +29,13 @@ let NZBDAV_HISTORY_FETCH_LIMIT = (() => {
   return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 500) : 400;
 })();
 
+// WebDAV client cache (must be declared before reloadConfig)
+let webdavClientPromise = null;
+
+function resetWebdavClient() {
+  webdavClientPromise = null;
+}
+
 function reloadConfig() {
   NZBDAV_URL = (process.env.NZBDAV_URL || '').trim();
   NZBDAV_API_KEY = (process.env.NZBDAV_API_KEY || '').trim();
@@ -46,6 +53,8 @@ function reloadConfig() {
     const raw = Number(process.env.NZBDAV_HISTORY_FETCH_LIMIT);
     return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 500) : 400;
   })();
+  // Invalidate cached WebDAV client so next request uses fresh credentials
+  resetWebdavClient();
 }
 
 reloadConfig();
@@ -353,31 +362,28 @@ function buildNzbdavCacheKey(downloadUrl, category, requestedEpisode = null) {
   return keyParts.join('|');
 }
 
-// WebDAV client (lazy loaded)
-const getWebdavClient = (() => {
-  let clientPromise = null;
-  return async () => {
-    if (clientPromise) return clientPromise;
+// WebDAV client getter (uses module-level webdavClientPromise declared at top)
+async function getWebdavClient() {
+  if (webdavClientPromise) return webdavClientPromise;
 
-    clientPromise = (async () => {
-      const { createClient } = await import('webdav');
+  webdavClientPromise = (async () => {
+    const { createClient } = await import('webdav');
 
-      const trimmedBase = NZBDAV_WEBDAV_URL.replace(/\/+$/, '');
-      const rootSegment = (NZBDAV_WEBDAV_ROOT || '').replace(/^\/+/, '').replace(/\/+$/, '');
-      const baseUrl = rootSegment ? `${trimmedBase}/${rootSegment}` : trimmedBase;
+    const trimmedBase = NZBDAV_WEBDAV_URL.replace(/\/+$/, '');
+    const rootSegment = (NZBDAV_WEBDAV_ROOT || '').replace(/^\/+/, '').replace(/\/+$/, '');
+    const baseUrl = rootSegment ? `${trimmedBase}/${rootSegment}` : trimmedBase;
 
-      const authOptions = {};
-      if (NZBDAV_WEBDAV_USER && NZBDAV_WEBDAV_PASS) {
-        authOptions.username = NZBDAV_WEBDAV_USER;
-        authOptions.password = NZBDAV_WEBDAV_PASS;
-      }
+    const authOptions = {};
+    if (NZBDAV_WEBDAV_USER && NZBDAV_WEBDAV_PASS) {
+      authOptions.username = NZBDAV_WEBDAV_USER;
+      authOptions.password = NZBDAV_WEBDAV_PASS;
+    }
 
-      return createClient(baseUrl, authOptions);
-    })();
+    return createClient(baseUrl, authOptions);
+  })();
 
-    return clientPromise;
-  };
-})();
+  return webdavClientPromise;
+}
 
 async function listWebdavDirectory(directory) {
   const client = await getWebdavClient();
