@@ -50,7 +50,7 @@ const ADMIN_CONFIG_KEYS = [
 
 const VIDEO_EXTENSIONS = new Set([
   '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv',
-  '.webm', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts'
+  '.webm', '.m4v', '.mpg', '.mpeg', '.3gp', '.ts', '.m2ts', '.mts'
 ]);
 
 module.exports = {

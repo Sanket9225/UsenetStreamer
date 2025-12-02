@@ -85,6 +85,7 @@ function inferMimeType(fileName) {
     ['.flv', 'video/x-flv'],
     ['.ts', 'video/mp2t'],
     ['.m2ts', 'video/mp2t'],
+    ['.mts', 'video/mp2t'],
     ['.mpg', 'video/mpeg'],
     ['.mpeg', 'video/mpeg'],
   ]);
