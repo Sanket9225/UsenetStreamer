@@ -3,7 +3,7 @@ const { parseStringPromise: parseXmlString } = require('xml2js');
 const { stripTrailingSlashes } = require('../utils/config');
 
 const MAX_NEWZNAB_INDEXERS = 20;
-const NEWZNAB_FIELD_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID'];
+const NEWZNAB_FIELD_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAGINATE'];
 const NEWZNAB_NUMBERED_KEYS = [];
 for (let i = 1; i <= MAX_NEWZNAB_INDEXERS; i += 1) {
   const idx = String(i).padStart(2, '0');
@@ -262,6 +262,8 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
   const enabled = parseBoolean(enabledRaw, true);
   const paidRaw = source[`NEWZNAB_PAID_${key}`];
   const isPaid = parseBoolean(paidRaw, false);
+  const paginateRaw = source[`NEWZNAB_PAGINATE_${key}`];
+  const isPaginated = parseBoolean(paginateRaw, false);
 
   const hasAnyValue = endpoint || apiKey || apiPathRaw || name || enabledRaw !== undefined;
   if (!hasAnyValue && !includeEmpty) {
@@ -282,6 +284,7 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
     displayName,
     enabled,
     isPaid,
+    isPaginated,
     slug,
     dedupeKey: slug || `indexer-${key}`,
     baseUrl: normalizedEndpoint ? `${normalizedEndpoint}${apiPath}` : '',
@@ -488,61 +491,84 @@ function normalizeNewznabItem(item, config, { filterNzbOnly = true } = {}) {
 async function fetchIndexerResults(config, plan, options) {
   const params = buildSearchParams(plan);
   params.apikey = config.apiKey;
+  
+  // Decide how many pages to fetch
+  // If config.isPaginated is true, fetch 5 pages. Otherwise, fetch 1.
+  const maxPages = config.isPaginated ? 5 : 1;
   const requestUrl = config.baseUrl || `${config.endpoint}${config.apiPath}`;
-  const safeParams = { ...params, apikey: maskApiKey(params.apikey) };
   const logPrefix = options.label || '[NEWZNAB]';
-  if (options.logEndpoints) {
-    const tokenSummary = Array.isArray(plan?.tokens) && plan.tokens.length > 0 ? plan.tokens.join(' ') : null;
-    console.log(`${logPrefix}[ENDPOINT]`, {
-      indexer: config.displayName || config.endpoint,
-      planType: plan?.type,
-      query: plan?.query,
-      tokens: tokenSummary,
-      url: requestUrl,
-    });
-  }
-  if (options.debug) {
-    console.log(`${logPrefix}[SEARCH][REQ]`, { url: requestUrl, params: safeParams });
+  const allItems = [];
+
+  // Loop through pages
+  for (let page = 0; page < maxPages; page++) {
+    const offset = page * 100; // Standard Newznab offset
+    const pageParams = { ...params, offset: String(offset) };
+    const safeParams = { ...pageParams, apikey: maskApiKey(pageParams.apikey) };
+
+    if (options.logEndpoints) {
+      console.log(`${logPrefix}[ENDPOINT] (Page ${page + 1})`, {
+        indexer: config.displayName,
+        url: requestUrl,
+        offset
+      });
+    }
+
+    if (options.debug) {
+      console.log(`${logPrefix}[SEARCH][REQ] (Page ${page + 1})`, { url: requestUrl, params: safeParams });
+    }
+
+    try {
+      const response = await axios.get(requestUrl, {
+        params: pageParams,
+        timeout: options.timeoutMs || DEFAULT_REQUEST_TIMEOUT_MS,
+        responseType: 'text',
+        validateStatus: () => true,
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        // If auth fails, don't try next pages
+        if (page === 0) throw new Error('Unauthorized (check API key)');
+        break;
+      }
+      if (response.status >= 400) {
+        if (page === 0) throw new Error(`HTTP ${response.status}`);
+        break; 
+      }
+
+      const body = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+      const parsed = await parseXmlString(body, XML_PARSE_OPTIONS);
+      
+      const explicitError = extractErrorFromParsed(parsed) || extractErrorFromBody(body);
+      if (explicitError) {
+        if (page === 0) throw new Error(explicitError);
+        break;
+      }
+
+      const channel = parsed?.channel || parsed?.rss?.channel || parsed?.rss?.Channel || parsed?.rss;
+      const itemsRaw = channel?.item || channel?.Item || parsed?.item || [];
+      const items = ensureArray(itemsRaw)
+        .map((item) => normalizeNewznabItem(item, config, { filterNzbOnly: options.filterNzbOnly }))
+        .filter(Boolean);
+
+      if (items.length > 0) {
+        allItems.push(...items);
+      }
+
+      // If we got fewer than 100 results, we reached the end. Stop looping.
+      if (items.length < 100) {
+        break;
+      }
+
+    } catch (err) {
+      // If page 1 fails, throw the error so the UI shows it.
+      // If page 2+ fails, just return what we have so far.
+      if (page === 0) throw err;
+      console.warn(`${logPrefix} Error fetching page ${page + 1} for ${config.displayName}: ${err.message}`);
+      break;
+    }
   }
 
-  const response = await axios.get(requestUrl, {
-    params,
-    timeout: options.timeoutMs || DEFAULT_REQUEST_TIMEOUT_MS,
-    responseType: 'text',
-    validateStatus: () => true,
-  });
-
-  const contentType = response.headers?.['content-type'];
-  const body = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
-
-  if (options.debug) {
-    console.log(`${logPrefix}[SEARCH][RESP]`, {
-      url: requestUrl,
-      status: response.status,
-      contentType,
-      body: body?.slice(0, DEBUG_BODY_CHAR_LIMIT),
-    });
-  }
-
-  if (response.status === 401 || response.status === 403) {
-    throw new Error('Unauthorized (check API key)');
-  }
-  if (response.status >= 400) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  const parsed = await parseXmlString(body, XML_PARSE_OPTIONS);
-  const explicitError = extractErrorFromParsed(parsed) || extractErrorFromBody(body);
-  if (explicitError) {
-    throw new Error(explicitError);
-  }
-  const channel = parsed?.channel || parsed?.rss?.channel || parsed?.rss?.Channel || parsed?.rss;
-  const itemsRaw = channel?.item || channel?.Item || parsed?.item || [];
-  const items = ensureArray(itemsRaw)
-    .map((item) => normalizeNewznabItem(item, config, { filterNzbOnly: options.filterNzbOnly }))
-    .filter(Boolean);
-
-  return { config, items };
+  return { config, items: allItems };
 }
 
 async function searchNewznabIndexers(plan, configs, options = {}) {
