@@ -244,10 +244,13 @@ function prioritizeTriageCandidates(results, maxCandidates, options = {}) {
 }
 
 function triageDecisionsMatchStatuses(decisionMap, candidates, allowedStatuses) {
-  if (!decisionMap || !candidates || candidates.length === 0) return false;
+  if (!decisionMap || !candidates || candidates.length === 0 || !allowedStatuses || allowedStatuses.size === 0) {
+    return false;
+  }
   for (const candidate of candidates) {
     const decision = decisionMap.get(candidate.downloadUrl);
-    if (!decision || !allowedStatuses.has(decision.status)) {
+    const status = decision?.status ? String(decision.status).toLowerCase() : null;
+    if (!status || !allowedStatuses.has(status)) {
       return false;
     }
   }

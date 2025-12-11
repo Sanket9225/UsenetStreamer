@@ -60,7 +60,51 @@ const QUALITY_FEATURE_PATTERNS = [
 
 // Blocklist patterns for unplayable/unwanted release types
 // Matches standalone tokens: .iso, -iso-, (iso), space-delimited, etc.
-const RELEASE_BLOCKLIST_REGEX = /(?:^|[\s.\-_(\[])(?:iso|img|bin|cue|exe)(?:[\s.\-_)\]]|$)/i;
+const RELEASE_BLOCKLIST_REGEX = /(?:^|[\s.\-_(\[])(?:iso|img|bin|cue|exe)(?:[\s.\-_\)\]]|$)/i;
+
+const PREFETCH_NZBDAV_JOB_TTL_MS = 60 * 60 * 1000;
+const prefetchedNzbdavJobs = new Map();
+const TRIAGE_FINAL_STATUSES = new Set(['verified', 'blocked', 'unverified_7z']);
+
+function isTriageFinalStatus(status) {
+  if (!status) return false;
+  return TRIAGE_FINAL_STATUSES.has(String(status).toLowerCase());
+}
+
+function prunePrefetchedNzbdavJobs() {
+  if (prefetchedNzbdavJobs.size === 0) return;
+  const cutoff = Date.now() - PREFETCH_NZBDAV_JOB_TTL_MS;
+  for (const [key, entry] of prefetchedNzbdavJobs.entries()) {
+    if (entry?.createdAt && entry.createdAt < cutoff) {
+      prefetchedNzbdavJobs.delete(key);
+    }
+  }
+}
+
+async function resolvePrefetchedNzbdavJob(downloadUrl) {
+  prunePrefetchedNzbdavJobs();
+  const entry = prefetchedNzbdavJobs.get(downloadUrl);
+  if (!entry) return null;
+  if (entry.promise) {
+    try {
+      const resolved = await entry.promise;
+      const merged = { ...resolved, createdAt: resolved.createdAt || Date.now() };
+      const latest = prefetchedNzbdavJobs.get(downloadUrl);
+      if (latest && latest.promise === entry.promise) {
+        prefetchedNzbdavJobs.set(downloadUrl, merged);
+      }
+      return merged;
+    } catch (error) {
+      const latest = prefetchedNzbdavJobs.get(downloadUrl);
+      if (latest && latest.promise === entry.promise) {
+        prefetchedNzbdavJobs.delete(downloadUrl);
+      }
+      console.warn('[NZBDAV] Prefetch job failed before reuse:', error.message || error);
+      return null;
+    }
+  }
+  return entry;
+}
 
 function formatResolutionBadge(resolution) {
   if (!resolution) return null;
@@ -546,7 +590,7 @@ let TRIAGE_STAT_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_STAT_SAMPLE_
 let TRIAGE_ARCHIVE_SAMPLE_COUNT = toPositiveInt(process.env.NZB_TRIAGE_ARCHIVE_SAMPLE_COUNT, 1);
 let TRIAGE_REUSE_POOL = toBoolean(process.env.NZB_TRIAGE_REUSE_POOL, true);
 let TRIAGE_NNTP_KEEP_ALIVE_MS = toPositiveInt(process.env.NZB_TRIAGE_NNTP_KEEP_ALIVE_MS, 0);
-let TRIAGE_PREFETCH_FIRST_VERIFIED = toBoolean(process.env.NZB_TRIAGE_PREFETCH_FIRST_VERIFIED, false);
+let TRIAGE_PREFETCH_FIRST_VERIFIED = toBoolean(process.env.NZB_TRIAGE_PREFETCH_FIRST_VERIFIED, true);
 
 let TRIAGE_BASE_OPTIONS = {
   archiveDirs: TRIAGE_ARCHIVE_DIRS,
@@ -1134,11 +1178,27 @@ async function streamHandler(req, res) {
       : null;
     let cachedStreamEntry = null;
     let cachedSearchMeta = null;
+    let cachedTriageDecisionMap = null;
     if (streamCacheKey) {
       cachedStreamEntry = cache.getStreamCacheEntry(streamCacheKey);
       if (cachedStreamEntry) {
         const cacheMeta = cachedStreamEntry.meta;
         if (cacheMeta?.version === 1 && Array.isArray(cacheMeta.finalNzbResults)) {
+          const snapshot = Array.isArray(cacheMeta.triageDecisionsSnapshot) ? cacheMeta.triageDecisionsSnapshot : [];
+          cachedTriageDecisionMap = restoreTriageDecisions(snapshot);
+          if (!cacheMeta.triageComplete && Array.isArray(cacheMeta.triagePendingDownloadUrls)) {
+            const pendingList = cacheMeta.triagePendingDownloadUrls;
+            const unresolved = pendingList.filter((downloadUrl) => {
+              const decision = cachedTriageDecisionMap.get(downloadUrl);
+              return !isTriageFinalStatus(decision?.status);
+            });
+            if (unresolved.length === 0) {
+              cacheMeta.triageComplete = true;
+              cacheMeta.triagePendingDownloadUrls = [];
+            } else if (unresolved.length !== pendingList.length) {
+              cacheMeta.triagePendingDownloadUrls = unresolved;
+            }
+          }
           cachedSearchMeta = cacheMeta;
           if (cacheMeta.triageComplete) {
             console.log('[CACHE] Stream cache hit (rehydrating finalized results)', {
@@ -1167,9 +1227,10 @@ async function streamHandler(req, res) {
     let finalNzbResults = [];
     let dedupedSearchResults = [];
     let rawSearchResults = [];
-    let triageDecisions = cachedSearchMeta
-      ? restoreTriageDecisions(cachedSearchMeta.triageDecisionsSnapshot)
-      : new Map();
+    let triageDecisions = cachedTriageDecisionMap
+      || (cachedSearchMeta
+        ? restoreTriageDecisions(cachedSearchMeta.triageDecisionsSnapshot)
+        : new Map());
     if (cachedSearchMeta) {
       const restored = restoreFinalNzbResults(cachedSearchMeta.finalNzbResults);
       rawSearchResults = restored.slice();
@@ -2075,7 +2136,7 @@ async function streamHandler(req, res) {
       // console.log('[LANGUAGE] Top stream ordering sample', sample);
     };
     logTopLanguages();
-    const allowedCacheStatuses = new Set(['verified', 'blocked', 'unverified_7z']);
+    const allowedCacheStatuses = TRIAGE_FINAL_STATUSES;
     const requestedDisable = triageOverrides.disabled === true;
     const requestedEnable = triageOverrides.enabled === true;
     const overrideIndexerTokens = (triageOverrides.indexers && triageOverrides.indexers.length > 0)
@@ -2149,7 +2210,7 @@ async function streamHandler(req, res) {
     }
     const candidateHasConclusiveDecision = (candidate) => {
       const decision = triageDecisions.get(candidate.downloadUrl);
-      if (decision && allowedCacheStatuses.has(decision.status)) {
+      if (decision && isTriageFinalStatus(decision.status)) {
         return true;
       }
       const normalizedTitle = normalizeReleaseTitle(candidate.title);
@@ -2157,7 +2218,7 @@ async function streamHandler(req, res) {
         const derived = triageTitleMap.get(normalizedTitle);
         if (
           derived
-          && allowedCacheStatuses.has(derived.status)
+          && isTriageFinalStatus(derived.status)
           && indexerService.canShareDecision(derived.publishDateMs, candidate.publishDateMs)
         ) {
           return true;
@@ -2432,7 +2493,7 @@ async function streamHandler(req, res) {
         if (triageStatus === 'verified') {
           triagePriority = 0;
           triageTag = '✅';
-        } else if (triageStatus === 'unverified') {
+        } else if (triageStatus === 'unverified' || triageStatus === 'unverified_7z') {
           triageTag = '⚠️';
         } else if (triageStatus === 'blocked') {
           triagePriority = 2;
@@ -2691,20 +2752,47 @@ async function streamHandler(req, res) {
     res.json(responsePayload);
 
     if (TRIAGE_PREFETCH_FIRST_VERIFIED && STREAMING_MODE !== 'native' && prefetchCandidate) {
-      setImmediate(async () => {
-        try {
-          const cachedEntry = cache.getVerifiedNzbCacheEntry(prefetchCandidate.downloadUrl);
-          await nzbdavService.addNzbToNzbdav({
-            downloadUrl: prefetchCandidate.downloadUrl,
-            cachedEntry,
-            category: prefetchCandidate.category,
-            jobLabel: prefetchCandidate.title,
+      prunePrefetchedNzbdavJobs();
+      if (prefetchedNzbdavJobs.has(prefetchCandidate.downloadUrl)) {
+        // Prefetch already running or completed for this download URL
+      } else {
+        const jobPromise = new Promise((resolve, reject) => {
+          setImmediate(async () => {
+            try {
+              const cachedEntry = cache.getVerifiedNzbCacheEntry(prefetchCandidate.downloadUrl);
+              if (cachedEntry) {
+                console.log('[CACHE] Using verified NZB payload for prefetch', { downloadUrl: prefetchCandidate.downloadUrl });
+              }
+              const added = await nzbdavService.addNzbToNzbdav({
+                downloadUrl: prefetchCandidate.downloadUrl,
+                cachedEntry,
+                category: prefetchCandidate.category,
+                jobLabel: prefetchCandidate.title,
+              });
+              resolve({
+                nzoId: added.nzoId,
+                category: prefetchCandidate.category,
+                jobName: prefetchCandidate.title,
+                createdAt: Date.now(),
+              });
+            } catch (error) {
+              reject(error);
+            }
           });
-          console.log('[NZBDAV] Prefetched first verified NZB to NZBDav queue');
-        } catch (prefetchError) {
-          console.warn('[NZBDAV] Prefetch of first verified NZB failed:', prefetchError.message);
-        }
-      });
+        });
+
+        prefetchedNzbdavJobs.set(prefetchCandidate.downloadUrl, { promise: jobPromise, createdAt: Date.now() });
+
+        jobPromise
+          .then((jobInfo) => {
+            prefetchedNzbdavJobs.set(prefetchCandidate.downloadUrl, jobInfo);
+            console.log(`[NZBDAV] Prefetched first verified NZB queued (nzoId=${jobInfo.nzoId})`);
+          })
+          .catch((prefetchError) => {
+            prefetchedNzbdavJobs.delete(prefetchCandidate.downloadUrl);
+            console.warn('[NZBDAV] Prefetch of first verified NZB failed:', prefetchError.message);
+          });
+      }
     }
   } catch (error) {
     console.error('[ERROR] Processing failed:', error.message);
@@ -2772,13 +2860,25 @@ async function handleNzbdavStream(req, res) {
     const category = nzbdavService.getNzbdavCategory(type);
     const requestedEpisode = parseRequestedEpisode(type, id, req.query || {});
     const cacheKey = nzbdavService.buildNzbdavCacheKey(downloadUrl, category, requestedEpisode);
-    const existingSlotHint = req.query.historyNzoId
+    let existingSlotHint = req.query.historyNzoId
       ? {
           nzoId: req.query.historyNzoId,
           jobName: req.query.historyJobName,
           category: req.query.historyCategory
         }
       : null;
+
+    let prefetchedSlotHint = null;
+    if (!existingSlotHint) {
+      prefetchedSlotHint = await resolvePrefetchedNzbdavJob(downloadUrl);
+      if (prefetchedSlotHint?.nzoId) {
+        existingSlotHint = {
+          nzoId: prefetchedSlotHint.nzoId,
+          jobName: prefetchedSlotHint.jobName,
+          category: prefetchedSlotHint.category,
+        };
+      }
+    }
 
     let inlineEasynewsEntry = null;
     if (!existingSlotHint && easynewsPayload) {
@@ -2819,6 +2919,15 @@ async function handleNzbdavStream(req, res) {
         inlineCachedEntry: inlineEasynewsEntry,
       })
     );
+
+    if (prefetchedSlotHint?.nzoId) {
+      prefetchedNzbdavJobs.set(downloadUrl, {
+        ...prefetchedSlotHint,
+        jobName: streamData.jobName || prefetchedSlotHint.jobName,
+        category: streamData.category || prefetchedSlotHint.category,
+        createdAt: Date.now(),
+      });
+    }
 
     if ((req.method || 'GET').toUpperCase() === 'HEAD') {
       const inferredMime = inferMimeType(streamData.fileName || title || 'stream');

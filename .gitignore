@@ -53,3 +53,5 @@ statPipelineBenchmark.js
 test_nzbs/
 
 scripts/
+
+scripts\testTriage.js
