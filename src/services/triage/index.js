@@ -1,7 +1,7 @@
 const { parseStringPromise } = require('xml2js');
 const fs = require('fs/promises');
 const path = require('path');
-const { isVideoFileName } = require('../../utils/parsers');
+const { isVideoFileName, cleanSpecialSearchTitle } = require('../../utils/parsers');
 const NNTPModule = require('nntp/lib/nntp');
 const NNTP = typeof NNTPModule === 'function' ? NNTPModule : NNTPModule?.NNTP;
 function timingLog(event, details) {
@@ -25,7 +25,7 @@ const DEFAULT_OPTIONS = {
   maxDecodedBytes: 256 * 1024,
   nntpMaxConnections: 60,
   reuseNntpPool: true,
-  nntpKeepAliveMs: 120000 ,
+  nntpKeepAliveMs: 120000,
   maxParallelNzbs: Number.POSITIVE_INFINITY,
   statSampleCount: 1,
   archiveSampleCount: 1,
@@ -301,6 +301,15 @@ async function analyzeSingleNzb(raw, ctx) {
   const parsed = await parseStringPromise(raw, { explicitArray: false, trim: true });
   const files = extractFiles(parsed);
   const blockers = new Set();
+
+  // Check for unsupported ISO files
+  const hasIso = files.some((file) => {
+    const name = file.filename || guessFilenameFromSubject(file.subject) || '';
+    return name.toLowerCase().endsWith('.iso');
+  });
+  if (hasIso) {
+    blockers.add('unsupported-iso');
+  }
   const warnings = new Set();
   const archiveFindings = [];
   const archiveFiles = files.filter(isArchiveFile);
@@ -470,22 +479,81 @@ async function analyzeSingleNzb(raw, ctx) {
     }
 
     const archivesWithSegments = archiveCandidates.filter((archive) => archive.segments.length > 0 && archive !== primaryArchive);
-      const archiveSampleCount = Math.max(1, Math.floor(ctx.config?.archiveSampleCount ?? 1));
-        const sampleArchives = pickRandomElements(
-          archivesWithSegments.filter((archive) => {
-            const segmentId = archive.segments[0]?.id;
-            return segmentId && !checkedSegments.has(segmentId);
-          }),
-          archiveSampleCount,
-        );
+    const archiveSampleCount = Math.max(1, Math.floor(ctx.config?.archiveSampleCount ?? 1));
+    const sampleArchives = pickRandomElements(
+      archivesWithSegments.filter((archive) => {
+        const segmentId = archive.segments[0]?.id;
+        return segmentId && !checkedSegments.has(segmentId);
+      }),
+      archiveSampleCount,
+    );
 
-        await Promise.all(sampleArchives.map(async (archive) => {
-          const segment = archive.segments.find((entry) => entry?.id && !checkedSegments.has(entry.id));
-          if (!segment) return;
-          await runStatCheck(archive, segment);
-        }));
+    await Promise.all(sampleArchives.map(async (archive) => {
+      const segment = archive.segments.find((entry) => entry?.id && !checkedSegments.has(entry.id));
+      if (!segment) return;
+      await runStatCheck(archive, segment);
+    }));
   }
   if (!storedArchiveFound && blockers.size === 0) warnings.add('rar-m0-unverified');
+
+  if (blockers.size === 0) {
+    const nzbTitle = extractTitle(parsed);
+    // Perform Content Validation: check if the found video content actually matches the NZB title
+    let candidateName = null;
+
+    if (storedArchiveFound) {
+      // Find the inner filename from the successful archive inspection
+      const successfulFinding = archiveFindings.find((f) =>
+        (f.status === 'rar-stored' || f.status === 'sevenzip-stored') && f.details?.name
+      );
+      if (successfulFinding) {
+        candidateName = successfulFinding.details.name;
+      }
+    } else if (hasPlayableVideo) {
+      // If no archive but we have a raw video file, pick the largest one or first one
+      const videoFiles = files.filter((f) => isPlayableVideoName(f.filename || guessFilenameFromSubject(f.subject)));
+      if (videoFiles.length > 0) {
+        // Sort by size (segments * bytes) if available, or just pick first
+        // Simplified: just pick the first one for now as a heuristic
+        candidateName = videoFiles[0].filename || guessFilenameFromSubject(videoFiles[0].subject);
+      }
+    }
+
+    if (candidateName && nzbTitle) {
+      const normalizedTitle = cleanSpecialSearchTitle(nzbTitle).toLowerCase();
+      const normalizedFile = cleanSpecialSearchTitle(candidateName).toLowerCase();
+
+      // Heuristic: Check for token overlap
+      // We require at least one significant token from the NZB title to be present in the filename
+      // UNLESS the title is extremely short/generic.
+
+      const titleTokens = normalizedTitle.split(' ').filter((t) => t.length > 2);
+      const fileTokens = new Set(normalizedFile.split(' '));
+
+      let matchFound = false;
+      if (titleTokens.length === 0) {
+        matchFound = true; // Title is too short/stateless to validate (e.g. "1917" or "X")
+      } else {
+        matchFound = titleTokens.some((token) => fileTokens.has(token));
+      }
+
+      if (!matchFound) {
+        // console.log('[NZB TRIAGE] Content Mismatch Rejected', {
+        //   nzbTitle,
+        //   candidateName,
+        //   normalizedTitle,
+        //   normalizedFile
+        // });
+        blockers.add('content-mismatch');
+        archiveFindings.push({
+          source: 'content-validation',
+          filename: candidateName,
+          status: 'filename-mismatch',
+          details: { nzbTitle, normalizedTitle, normalizedFile }
+        });
+      }
+    }
+  }
 
   const decision = blockers.size === 0 ? 'accept' : 'reject';
   return buildDecision(decision, blockers, warnings, {
@@ -913,10 +981,10 @@ function inspectRar4(buffer) {
     if (headerType === 0x74) {
       let pos = offset + 7;
       if (pos + 11 > buffer.length) return { status: 'rar-insufficient-data' };
-      
-      const packSize = buffer.readUInt32LE(pos); 
+
+      const packSize = buffer.readUInt32LE(pos);
       addSize = packSize;
-      
+
       pos += 4; // pack size
       pos += 4; // unpacked size
       pos += 1; // host OS
@@ -945,9 +1013,9 @@ function inspectRar4(buffer) {
       if (encrypted) return { status: 'rar-encrypted', details: { name } };
       if (solid) return { status: 'rar-solid', details: { name } };
       if (methodByte !== 0x30) {
-         // return { status: 'rar-compressed', details: { name, method: methodByte } };
-         // Don't return early! We need to scan all files to check for nested archives.
-         // But if we find a video file, we can stop and accept.
+        // return { status: 'rar-compressed', details: { name, method: methodByte } };
+        // Don't return early! We need to scan all files to check for nested archives.
+        // But if we find a video file, we can stop and accept.
       }
 
       if (!storedDetails) {
@@ -1040,7 +1108,7 @@ function inspectRar5(buffer) {
     // Actually, 'headerSize' includes the Type, Flags, etc.
     // So the block ends at: (offset + 4 + sizeRes.bytes) + headerSize + dataSize
     const nextBlockOffset = offset + 4 + sizeRes.bytes + headerSize + dataSize;
-    
+
     // console.log(`[RAR5] Block type: ${headerType}, size: ${headerSize}, data: ${dataSize}, next: ${nextBlockOffset}`);
 
     if (headerType === 0x02) { // File Header
@@ -1571,7 +1639,7 @@ function statSegmentWithClient(client, segmentId) {
       if (completed) return; // Already timed out
       completed = true;
       clearTimeout(timer);
-      
+
       if (err) {
         const error = new Error(err.message || 'STAT failed');
         const codeFromMessage = err.message && err.message.includes('430') ? 'STAT_MISSING' : err.code;
@@ -1656,7 +1724,7 @@ async function createNntpPool(config, maxConnections, options = {}) {
           errno: err?.errno,
         });
       });
-    } catch (_) {}
+    } catch (_) { }
     try {
       const socketFields = ['socket', 'stream', '_socket', 'tlsSocket', 'connection'];
       for (const key of socketFields) {
@@ -1672,7 +1740,7 @@ async function createNntpPool(config, maxConnections, options = {}) {
           });
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   };
 
   const connectTasks = Array.from({ length: connectionCount }, () => createNntpClient(config));
@@ -1938,7 +2006,7 @@ async function createNntpClient({ host, port = 119, user, pass, useTLS = false, 
   const client = new NNTP();
   const connectStart = Date.now();
   timingLog('nntp-connect:start', { host, port, useTLS, auth: Boolean(user) });
-  
+
   // Attach early error handler to catch DNS/connection failures before 'ready'
   const earlyErrorHandler = (err) => {
     timingLog('nntp-connect:error', {
@@ -1958,14 +2026,14 @@ async function createNntpClient({ host, port = 119, user, pass, useTLS = false, 
       code: err?.code
     });
   };
-  
+
   client.once('error', earlyErrorHandler);
-  
+
   await new Promise((resolve, reject) => {
     client.once('ready', () => {
       // Remove the early error handler since we're about to add persistent ones
       client.removeListener('error', earlyErrorHandler);
-      
+
       timingLog('nntp-connect:ready', {
         host,
         port,
@@ -1988,7 +2056,7 @@ async function createNntpClient({ host, port = 119, user, pass, useTLS = false, 
           });
           console.warn('[NZB TRIAGE] NNTP client runtime error', err?.message || err);
         });
-      } catch (_) {}
+      } catch (_) { }
       try {
         // attach to a few common socket field names used by different NNTP implementations
         const socketFields = ['socket', 'stream', '_socket', 'tlsSocket', 'connection'];
@@ -2001,7 +2069,7 @@ async function createNntpClient({ host, port = 119, user, pass, useTLS = false, 
             });
           }
         }
-      } catch (_) {}
+      } catch (_) { }
       resolve();
     });
     // This error handler is for connection phase failures (DNS, TLS handshake, auth)
@@ -2009,10 +2077,10 @@ async function createNntpClient({ host, port = 119, user, pass, useTLS = false, 
     client.once('error', (err) => {
       reject(err);
     });
-    
+
     // Intercept socket creation to attach error handlers immediately
     const originalConnect = client.connect;
-    client.connect = function(...args) {
+    client.connect = function (...args) {
       const result = originalConnect.apply(this, args);
       // After connect() is called, the socket should exist
       process.nextTick(() => {
@@ -2024,11 +2092,11 @@ async function createNntpClient({ host, port = 119, user, pass, useTLS = false, 
               s.on('error', earlyErrorHandler);
             }
           }
-        } catch (_) {}
+        } catch (_) { }
       });
       return result;
     };
-    
+
     client.connect({
       host,
       port,
