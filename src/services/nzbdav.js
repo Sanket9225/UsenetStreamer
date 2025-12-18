@@ -439,7 +439,18 @@ async function findBestVideoFile({ category, jobName, requestedEpisode }) {
         continue;
       }
 
-      if (!entryName || !isVideoFileName(entryName)) {
+      if (!entryName) {
+        continue;
+      }
+
+      if (entryName.toLowerCase().endsWith('.iso')) {
+        const error = new Error('[NZBDAV] ISO file detected, serving failure video');
+        error.isNzbdavFailure = true;
+        error.failureMessage = 'ISO file detected';
+        throw error;
+      }
+
+      if (!isVideoFileName(entryName)) {
         continue;
       }
 
