@@ -11,9 +11,11 @@ function timingLog(event, details) {
 
 const ARCHIVE_EXTENSIONS = new Set(['.rar', '.r00', '.r01', '.r02', '.7z', '.zip']);
 const VIDEO_FILE_EXTENSIONS = ['.mkv', '.mp4', '.mov', '.avi', '.ts', '.m4v', '.mpg', '.mpeg', '.wmv', '.flv', '.webm'];
+const ISO_FILE_EXTENSIONS = ['.iso'];
 const ARCHIVE_ONLY_MIN_PARTS = 10;
 const RAR4_SIGNATURE = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00]);
 const RAR5_SIGNATURE = Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00]);
+const ARCHIVE_SAMPLE_ENTRY_LIMIT = 5;
 
 const TRIAGE_ACTIVITY_TTL_MS = 5 * 60 * 1000; // 5 mins window for keep-alives
 let lastTriageActivityTs = 0;
@@ -581,6 +583,12 @@ function isArchiveEntryName(name) {
     || lower.endsWith('.zip');
 }
 
+function isIsoFileName(name) {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+  return ISO_FILE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
 function isPlayableVideoName(name) {
   if (!name) return false;
   if (!isVideoFileName(name)) return false;
@@ -596,13 +604,14 @@ function isSevenZipFilename(name) {
 
 function analyzeBufferFilenames(buffer) {
   if (!buffer || buffer.length === 0) {
-    return { nested: 0, playable: 0, samples: [] };
+    return { nested: 0, playable: 0, discImages: 0, samples: [] };
   }
   const ascii = buffer.toString('latin1');
   const filenameRegex = /[A-Za-z0-9_\-()\[\]\s]{3,120}\.[A-Za-z0-9]{2,5}(?:\.[A-Za-z0-9]{2,5})?/g;
   const matches = ascii.match(filenameRegex) || [];
   let nested = 0;
   let playable = 0;
+  let discImages = 0;
   const samples = [];
   matches.forEach((raw) => {
     const normalized = raw.trim().toLowerCase();
@@ -612,11 +621,22 @@ function analyzeBufferFilenames(buffer) {
       playable += 1;
       return;
     }
+    if (ISO_FILE_EXTENSIONS.some((ext) => normalized.endsWith(ext))) {
+      discImages += 1;
+      return;
+    }
     if (isArchiveEntryName(normalized)) {
       nested += 1;
     }
   });
-  return { nested, playable, samples };
+  return { nested, playable, discImages, samples };
+}
+
+function recordSampleEntry(target, name) {
+  if (!target || !name) return;
+  if (target.includes(name)) return;
+  if (target.length >= ARCHIVE_SAMPLE_ENTRY_LIMIT) return;
+  target.push(name);
 }
 
 function applyHeuristicArchiveHints(result, buffer, context = {}) {
@@ -628,6 +648,18 @@ function applyHeuristicArchiveHints(result, buffer, context = {}) {
     return result;
   }
   const hints = analyzeBufferFilenames(buffer);
+  if (hints.discImages > 0) {
+    return {
+      status: 'rar-iso-image',
+      details: {
+        ...(result.details || {}),
+        discImages: hints.discImages,
+        heuristic: true,
+        sample: hints.samples[0] || null,
+        filename: context.filename || null,
+      }
+    };
+  }
   if (hints.nested > 0 && hints.playable === 0) {
     const detailPatch = {
       ...(result.details || {}),
@@ -849,6 +881,7 @@ function handleArchiveStatus(status, blockers, warnings) {
     case 'rar-nested-archive':
     case 'sevenzip-nested-archive':
     case 'sevenzip-unsupported':
+    case 'rar-iso-image':
       blockers.add(status);
       break;
     case 'stat-missing':
@@ -897,6 +930,7 @@ function inspectRar4(buffer) {
   let storedDetails = null;
   let nestedArchiveCount = 0;
   let playableEntryFound = false;
+  const sampleEntries = [];
 
   while (offset + 7 <= buffer.length) {
     const headerType = buffer[offset + 2];
@@ -937,13 +971,17 @@ function inspectRar4(buffer) {
       // if (headerFlags & 0x0200) pos += 4; // REMOVED: 0x0200 is UNICODE, not size
       if (pos + nameSize > buffer.length) return { status: 'rar-insufficient-data' };
       const name = buffer.slice(pos, pos + nameSize).toString('utf8').replace(/\0/g, '');
+      recordSampleEntry(sampleEntries, name);
+      if (isIsoFileName(name)) {
+        return { status: 'rar-iso-image', details: { name, sampleEntries } };
+      }
       const encrypted = Boolean(headerFlags & 0x0004);
       const solid = Boolean(headerFlags & 0x0010);
 
       // console.log(`[RAR4] Found entry: "${name}" (method: ${methodByte}, encrypted: ${encrypted}, solid: ${solid})`);
 
-      if (encrypted) return { status: 'rar-encrypted', details: { name } };
-      if (solid) return { status: 'rar-solid', details: { name } };
+      if (encrypted) return { status: 'rar-encrypted', details: { name, sampleEntries } };
+      if (solid) return { status: 'rar-solid', details: { name, sampleEntries } };
       if (methodByte !== 0x30) {
          // return { status: 'rar-compressed', details: { name, method: methodByte } };
          // Don't return early! We need to scan all files to check for nested archives.
@@ -971,7 +1009,7 @@ function inspectRar4(buffer) {
       // });
       return {
         status: 'rar-nested-archive',
-        details: { nestedEntries: nestedArchiveCount },
+        details: { nestedEntries: nestedArchiveCount, sampleEntries },
       };
     }
     // console.log('[NZB TRIAGE] RAR4 archive marked stored', {
@@ -979,7 +1017,7 @@ function inspectRar4(buffer) {
     //   nestedEntries: nestedArchiveCount,
     //   sample: storedDetails?.name,
     // });
-    return { status: 'rar-stored', details: storedDetails };
+    return { status: 'rar-stored', details: { ...storedDetails, sampleEntries } };
   }
 
   return { status: 'rar-header-not-found' };
@@ -990,6 +1028,7 @@ function inspectRar5(buffer) {
   let nestedArchiveCount = 0;
   let playableEntryFound = false;
   let storedDetails = null;
+  const sampleEntries = [];
 
   while (offset < buffer.length) {
     if (offset + 7 > buffer.length) break;
@@ -1078,6 +1117,10 @@ function inspectRar5(buffer) {
                     // console.log(`[RAR5] Found entry: "${name}"`);
 
                     if (!storedDetails) storedDetails = { name };
+                    recordSampleEntry(sampleEntries, name);
+                    if (isIsoFileName(name)) {
+                      return { status: 'rar-iso-image', details: { name, sampleEntries } };
+                    }
 
                     if (isVideoFileName(name)) {
                       playableEntryFound = true;
@@ -1104,7 +1147,7 @@ function inspectRar5(buffer) {
       // });
       return {
         status: 'rar-nested-archive',
-        details: { nestedEntries: nestedArchiveCount },
+        details: { nestedEntries: nestedArchiveCount, sampleEntries },
       };
     }
     // console.log('[NZB TRIAGE] RAR5 archive marked stored', {
@@ -1112,10 +1155,10 @@ function inspectRar5(buffer) {
     //   nestedEntries: nestedArchiveCount,
     //   sample: storedDetails?.name,
     // });
-    return { status: 'rar-stored', details: storedDetails };
+    return { status: 'rar-stored', details: { ...storedDetails, sampleEntries } };
   }
 
-  return { status: 'rar-stored', details: { note: 'rar5-header-assumed-stored' } };
+  return { status: 'rar-stored', details: { note: 'rar5-header-assumed-stored', sampleEntries } };
 }
 
 function readRar5Vint(buffer, offset) {

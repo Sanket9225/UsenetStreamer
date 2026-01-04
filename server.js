@@ -2301,10 +2301,11 @@ async function streamHandler(req, res) {
             const statusCounts = {};
             let loggedSamples = 0;
             const sampleLimit = 5;
+            const logDecisionSamples = false;
             triageDecisions.forEach((decision, downloadUrl) => {
               const status = decision?.status || 'unknown';
               statusCounts[status] = (statusCounts[status] || 0) + 1;
-              if (loggedSamples < sampleLimit) {
+              if (logDecisionSamples && loggedSamples < sampleLimit) {
                 console.log('[NZB TRIAGE] Decision sample', {
                   status,
                   blockers: decision?.blockers || [],
@@ -2316,7 +2317,7 @@ async function streamHandler(req, res) {
                 loggedSamples += 1;
               }
             });
-            if (triageDecisions.size > sampleLimit) {
+            if (logDecisionSamples && triageDecisions.size > sampleLimit) {
               console.log(`[NZB TRIAGE] (${triageDecisions.size - sampleLimit}) additional decisions omitted from sample log`);
             }
             console.log('[NZB TRIAGE] Decision status breakdown', statusCounts);
@@ -2642,6 +2643,19 @@ async function streamHandler(req, res) {
         }
 
         if (triageApplied && triageLogCount < 10) {
+          const archiveSampleEntries = [];
+          (triageInfo?.archiveFindings || []).forEach((finding) => {
+            const samples = finding?.details?.sampleEntries;
+            if (Array.isArray(samples)) {
+              samples.forEach((entry) => {
+                if (entry && !archiveSampleEntries.includes(entry)) {
+                  archiveSampleEntries.push(entry);
+                }
+              });
+            } else if (finding?.details?.name && !archiveSampleEntries.includes(finding.details.name)) {
+              archiveSampleEntries.push(finding.details.name);
+            }
+          });
           console.log('[NZB TRIAGE] Stream candidate status', {
             title: result.title,
             downloadUrl: result.downloadUrl,
@@ -2651,6 +2665,7 @@ async function streamHandler(req, res) {
             blockers: triageInfo?.blockers || [],
             warnings: triageInfo?.warnings || [],
             archiveFindings: triageInfo?.archiveFindings || [],
+            archiveSampleEntries,
             archiveCheckStatus,
             missingArticlesStatus,
             timedOut: Boolean(triageOutcome?.timedOut)

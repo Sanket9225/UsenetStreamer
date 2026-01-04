@@ -350,6 +350,9 @@ function applyTokenToParams(token, params) {
       if (rawValue) params.ep = rawValue;
       break;
     default:
+      if (rawValue) {
+        params[key] = rawValue;
+      }
       break;
   }
 }
@@ -436,9 +439,16 @@ function isLikelyNzb(url) {
 
 function normalizeNewznabItem(item, config, { filterNzbOnly = true } = {}) {
   if (!item) return null;
+  const parsedGuid = parseGuid(item.guid || item.GUID);
   let downloadUrl = null;
+
+  // Prefer GUID when it already points at an NZB (SceneNZBs et al.)
+  if (parsedGuid && isLikelyNzb(parsedGuid)) {
+    downloadUrl = parsedGuid;
+  }
+
   const enclosure = item.enclosure;
-  if (enclosure) {
+  if (!downloadUrl && enclosure) {
     const enclosureTarget = Array.isArray(enclosure) ? enclosure[0] : enclosure;
     downloadUrl = enclosureTarget?.url || enclosureTarget?.href || enclosureTarget?.link;
     if (!downloadUrl && enclosureTarget?.guid) {
@@ -448,9 +458,8 @@ function normalizeNewznabItem(item, config, { filterNzbOnly = true } = {}) {
   if (!downloadUrl && item.link) {
     downloadUrl = item.link;
   }
-  if (!downloadUrl) {
-    const guid = parseGuid(item.guid || item.GUID);
-    if (guid) downloadUrl = guid;
+  if (!downloadUrl && parsedGuid) {
+    downloadUrl = parsedGuid;
   }
   if (!downloadUrl) return null;
 
@@ -462,12 +471,11 @@ function normalizeNewznabItem(item, config, { filterNzbOnly = true } = {}) {
   const sizeValue = attrMap.size || attrMap.filesize || attrMap['contentlength'] || item.size || item.Size;
   const publishDate = item.pubDate || item.pubdate || attrMap.pubdate || attrMap['publishdate'] || attrMap['usenetdate'];
   const title = toTrimmedString(item.title || item.Title || item.name || downloadUrl);
-  const guid = parseGuid(item.guid || item.GUID);
 
   const resolved = {
     title: title || downloadUrl,
     downloadUrl,
-    guid,
+    guid: parsedGuid,
     size: parseSizeValue(sizeValue),
     publishDate,
     publishDateMs: publishDate ? Date.parse(publishDate) : undefined,
