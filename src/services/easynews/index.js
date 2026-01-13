@@ -1,4 +1,4 @@
-const axios = require('axios');
+const externalApi = require('../../utils/externalApi');
 const { stripTrailingSlashes, toBoolean } = require('../../utils/config');
 
 const EASYNEWS_BASE_URL = 'https://members.easynews.com';
@@ -17,12 +17,6 @@ const DISALLOWED_EXTENSIONS = new Set(['.rar', '.zip', '.exe', '.jpg', '.png']);
 const ALLOWED_VIDEO_EXTENSIONS = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.ts', '.mov', '.wmv', '.mpg', '.mpeg', '.flv', '.webm']);
 const EASYNEWS_INDEXER_ID = 'easynews';
 const EASYNEWS_INDEXER_NAME = 'Easynews';
-
-const httpClient = axios.create({
-  baseURL: EASYNEWS_BASE_URL,
-  timeout: DEFAULT_TIMEOUT_MS,
-  validateStatus: (status) => status >= 200 && status < 500,
-});
 
 let EASYNEWS_ENABLED = false;
 let EASYNEWS_USERNAME = '';
@@ -73,9 +67,6 @@ function buildAuthConfig(override = null) {
     auth: {
       username,
       password,
-    },
-    headers: {
-      'User-Agent': 'UsenetStreamer-Easynews/1.0'
     }
   };
 }
@@ -420,8 +411,14 @@ async function fetchSearchResults(query, authOverride = null) {
   params.set('s1d', '-');
   params.append('fty[]', 'VIDEO');
 
-  const requestUrl = `/2.0/search/solr-search/?${params.toString()}`;
-  const response = await httpClient.get(requestUrl, buildAuthConfig(authOverride));
+  const requestUrl = `${EASYNEWS_BASE_URL}/2.0/search/solr-search/?${params.toString()}`;
+  
+  const response = await externalApi.get(requestUrl, {
+    service: 'easynews',
+    ...buildAuthConfig(authOverride),
+    timeout: DEFAULT_TIMEOUT_MS,
+    validateStatus: (status) => status >= 200 && status < 500
+  });
   if (response.status === 401 || response.status === 403) {
     throw new Error('Easynews rejected credentials');
   }
@@ -529,11 +526,13 @@ async function downloadEasynewsNzb(payloadToken) {
     ...(authConfig.headers || {}),
     'Content-Type': 'application/x-www-form-urlencoded',
   };
-  const response = await httpClient.post('/2.0/api/dl-nzb', form.toString(), {
+  const response = await externalApi.post(`${EASYNEWS_BASE_URL}/2.0/api/dl-nzb`, form.toString(), {
+    service: 'easynews',
     ...authConfig,
     headers: mergedHeaders,
     responseType: 'arraybuffer',
     timeout: EASYNEWS_NZB_DOWNLOAD_TIMEOUT_MS,
+    validateStatus: (status) => status >= 200 && status < 500
   });
   if (response.status !== 200) {
     throw new Error(`Easynews NZB download failed (${response.status})`);

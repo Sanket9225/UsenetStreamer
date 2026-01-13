@@ -1,4 +1,4 @@
-const axios = require('axios');
+const externalApi = require('../../utils/externalApi');
 const { triageNzbs } = require('./index');
 
 const DEFAULT_TIME_BUDGET_MS = 45000;
@@ -295,13 +295,13 @@ async function triageAndRank(nzbResults, options = {}) {
           abortController.abort();
         }, downloadTimeoutMs);
 
-        const response = await axios.get(downloadUrl, {
+        const response = await externalApi.get(downloadUrl, {
           responseType: 'text',
+          service: 'triage',
           timeout: downloadTimeoutMs,
           signal: abortController.signal,
           headers: {
-            Accept: 'application/x-nzb,text/xml;q=0.9,*/*;q=0.8',
-            'User-Agent': 'UsenetStreamer-Triage',
+            Accept: 'application/x-nzb,text/xml;q=0.9,*/*;q=0.8'
           },
           transitional: { silentJSONParsing: true, forcedJSONParsing: false },
         }).finally(() => {

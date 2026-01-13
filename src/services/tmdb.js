@@ -1,5 +1,5 @@
 // TMDb service - Localized title fetching for improved search
-const axios = require('axios');
+const externalApi = require('../utils/externalApi');
 const https = require('https');
 
 // Disable keep-alive to force fresh connections and avoid stale-socket ECONNRESET
@@ -162,7 +162,8 @@ async function tmdbRequest(endpoint, params = {}) {
 
   for (let attempt = 0; attempt <= TMDB_RETRY_COUNT; attempt++) {
     try {
-      const response = await axios.get(url, {
+      const response = await externalApi.get(url, {
+        service: 'tmdb',
         params,
         headers: {
           'Authorization': `Bearer ${TMDB_API_KEY}`,

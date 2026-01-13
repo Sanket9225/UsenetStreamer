@@ -178,6 +178,26 @@ The dashboard is protected by the same shared secret as the manifest. Rotate it 
 
 See `.env.example` for the complete list and defaults.
 
+### 🕵️ User-Agent configuration
+
+You can control outbound `User-Agent` headers the addon sends to external services. There are two levels:
+
+- Specific per-service env vars (highest priority):
+  - `ADDON_USER_AGENT_EASYNEWS` — Easynews requests
+  - `ADDON_USER_AGENT_INDEXER` — Indexer manager requests (Prowlarr/NZBHydra)
+  - `ADDON_USER_AGENT_NEWZNAB` — Direct Newznab indexer requests
+  - `ADDON_USER_AGENT_NZBDAV` — NZBDav HEAD/stream proxy requests
+  - `ADDON_USER_AGENT_SPECIALMETADATA` - Special Metadata
+  - `ADDON_USER_AGENT_TMDB` — TMDB API requests
+  - `ADDON_USER_AGENT_TRIAGE` — Triage NZB downloads
+
+- A global env var:
+  - `ADDON_USER_AGENT_GLOBAL` (fallback if the specific per-service var is not set) — applies to the services that support per-service env vars.
+
+- Default (when not set): `UsenetStreamer/<version>` (e.g., `UsenetStreamer/1.6.0`)
+
+**Note:** `ADDON_USER_AGENT_TRIAGE` controls HTTP requests when downloading NZB files from indexers. Direct NNTP connections to your Usenet provider (for health checks) don't support User-Agent headers.
+
 ---
 
 ## 🧠 Advanced Capabilities
