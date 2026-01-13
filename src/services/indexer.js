@@ -1,5 +1,6 @@
 // Indexer service - Prowlarr and NZBHydra integration
-const axios = require('axios');
+const externalApi = require('../utils/externalApi');
+
 const { getPublishMetadataFromResult, areReleasesWithinDays } = require('../utils/publishInfo');
 
 // Configuration (runtime reloadable)
@@ -90,7 +91,8 @@ async function executeProwlarrSearch(plan) {
   const requestUrl = `${INDEXER_MANAGER_BASE_URL}/api/v1/search`;
   const fullUrl = serializedParams ? `${requestUrl}?${serializedParams}` : requestUrl;
   console.log('[PROWLARR] Requesting search', { url: fullUrl });
-  const response = await axios.get(fullUrl, {
+  const response = await externalApi.get(fullUrl, {
+    service: 'indexer',
     headers: { 'X-Api-Key': INDEXER_MANAGER_API_KEY },
     timeout: 60000
   });
@@ -316,7 +318,8 @@ function normalizeHydraResults(data) {
 
 async function executeNzbhydraSearch(plan) {
   const params = buildHydraSearchParams(plan);
-  const response = await axios.get(`${INDEXER_MANAGER_BASE_URL}/api`, {
+  const response = await externalApi.get(`${INDEXER_MANAGER_BASE_URL}/api`, {
+    service: 'indexer',
     params,
     timeout: 60000
   });

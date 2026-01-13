@@ -1,4 +1,4 @@
-const axios = require('axios');
+const externalApi = require('../utils/externalApi');
 const { parseStringPromise: parseXmlString } = require('xml2js');
 const { stripTrailingSlashes } = require('../utils/config');
 
@@ -505,7 +505,8 @@ async function fetchIndexerResults(config, plan, options) {
     console.log(`${logPrefix}[SEARCH][REQ]`, { url: requestUrl, params: safeParams });
   }
 
-  const response = await axios.get(requestUrl, {
+  const response = await externalApi.get(requestUrl, {
+    service: 'newznab',
     params,
     timeout: options.timeoutMs || DEFAULT_REQUEST_TIMEOUT_MS,
     responseType: 'text',
@@ -627,7 +628,8 @@ async function testNewznabCaps(config, options = {}) {
     console.log(`${logPrefix}[REQ]`, { url: requestUrl, params: { ...params, apikey: maskApiKey(params.apikey) } });
   }
 
-  const response = await axios.get(requestUrl, {
+  const response = await externalApi.get(requestUrl, {
+    service: 'newznab',
     params,
     timeout: options.timeoutMs || 12000,
     responseType: 'text',

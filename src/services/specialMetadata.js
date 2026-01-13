@@ -1,5 +1,5 @@
 // Special metadata service - External catalog provider integration
-const axios = require('axios');
+const externalApi = require('../utils/externalApi');
 const { cleanSpecialSearchTitle, stripTrailingSlashes } = require('../utils/parsers');
 
 // Configuration
@@ -34,7 +34,7 @@ async function fetchSpecialMetadata(identifier) {
   const requestUrl = `${trimmedBase}/stream/movie/${encodeURIComponent(identifier)}.json`;
   console.log('[SPECIAL META] Fetching metadata for external catalog request');
 
-  const response = await axios.get(requestUrl, { timeout: 10000 });
+  const response = await externalApi.get(requestUrl, { service: 'specialmetadata', timeout: 10000 });
   const streams = response.data?.streams;
   const firstTitle = Array.isArray(streams) && streams.length > 0 ? streams[0]?.title : null;
 
