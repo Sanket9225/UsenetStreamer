@@ -316,14 +316,6 @@ function filterUsableConfigs(configs = [], { requireEnabled = true, requireApiKe
   });
 }
 
-function mapPlanType(planType) {
-  const normalized = (planType || '').toString().toLowerCase();
-  if (normalized === 'movie' || normalized === 'tvsearch' || normalized === 'search') {
-    return normalized;
-  }
-  return 'search';
-}
-
 function applyTokenToParams(token, params) {
   if (!token || typeof token !== 'string') return;
   const match = token.match(/^\{([^:]+):(.*)\}$/);
@@ -355,9 +347,37 @@ function applyTokenToParams(token, params) {
 }
 
 function buildSearchParams(plan) {
-  const params = {
-    t: mapPlanType(plan?.type),
-  };
+  const params = {};
+  
+  // Determine if this is an ID-based search (has imdbid, tmdbid, or tvdbid tokens)
+  const hasIdToken = Array.isArray(plan?.tokens) && plan.tokens.some(token => {
+    const match = token?.match(/^\{([^:]+):/);
+    return match && ['imdbid', 'tmdbid', 'tvdbid'].includes(match[1].trim().toLowerCase());
+  });
+  
+  // For movie/TV searches:
+  // - Use t=movie/tvsearch ONLY if we have ID tokens (imdbid, tmdbid, tvdbid)
+  // - Otherwise use t=search with category filters (Newznab standard: https://newznab.readthedocs.io/en/latest/misc/api.html#predefined-categories)
+  // Movies = Category 2000
+  // TV     = Category 5000
+  if (plan?.type === 'movie') {
+    if (hasIdToken) {
+      params.t = 'movie';
+    } else {
+      params.t = 'search';
+      params.cat = '2000';
+    }
+  } else if (plan?.type === 'tvsearch') {
+    if (hasIdToken) {
+      params.t = 'tvsearch';
+    } else {
+      params.t = 'search';
+      params.cat = '5000';
+    }
+  } else {
+    params.t = 'search';
+  }
+  
   if (Array.isArray(plan?.tokens)) {
     plan.tokens.forEach((token) => applyTokenToParams(token, params));
   }
