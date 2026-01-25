@@ -11,9 +11,10 @@ const TMDB_RETRY_DELAY_MS = 500;
 const RETRYABLE_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'ENOTFOUND', 'EAI_AGAIN']);
 
 // Configuration (reloaded from process.env)
+let TMDB_ENABLED = true;
 let TMDB_API_KEY = '';
 let TMDB_SEARCH_LANGUAGES = []; // Array of additional locale codes like ['hi-IN', 'ta-IN']
-let TMDB_SEARCH_MODE = 'regional_only'; // 'regional_only' | 'english_and_regional'
+const TMDB_SEARCH_MODE = 'english_and_regional';
 
 // In-memory cache for TMDb responses
 const tmdbCache = new Map();
@@ -71,12 +72,14 @@ const LANGUAGE_TO_TMDB_LOCALE = {
 };
 
 function reloadConfig() {
+  const enabledRaw = (process.env.TMDB_ENABLED ?? 'true').toString().trim().toLowerCase();
+  TMDB_ENABLED = !['false', '0', 'off', 'no'].includes(enabledRaw);
   TMDB_API_KEY = (process.env.TMDB_API_KEY || '').trim();
   const languagesStr = (process.env.TMDB_SEARCH_LANGUAGES || '').trim();
   TMDB_SEARCH_LANGUAGES = languagesStr ? languagesStr.split(',').map(l => l.trim()).filter(Boolean) : [];
-  TMDB_SEARCH_MODE = (process.env.TMDB_SEARCH_MODE || 'regional_only').trim();
   
   console.log('[TMDB] Config reloaded', { 
+    enabled: TMDB_ENABLED,
     hasApiKey: Boolean(TMDB_API_KEY), 
     additionalLanguages: TMDB_SEARCH_LANGUAGES,
     searchMode: TMDB_SEARCH_MODE,
@@ -86,11 +89,12 @@ function reloadConfig() {
 reloadConfig();
 
 function isConfigured() {
-  return Boolean(TMDB_API_KEY);
+  return Boolean(TMDB_ENABLED && TMDB_API_KEY);
 }
 
 function getConfig() {
   return {
+    enabled: TMDB_ENABLED,
     apiKey: TMDB_API_KEY,
     additionalLanguages: TMDB_SEARCH_LANGUAGES,
     searchMode: TMDB_SEARCH_MODE,

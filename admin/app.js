@@ -22,6 +22,9 @@
   const tmdbLanguageHiddenInput = configForm.querySelector('[data-tmdb-language-hidden]');
   const tmdbLanguageCheckboxes = Array.from(configForm.querySelectorAll('input[data-tmdb-language-option]'));
   const tmdbLanguageSelector = configForm.querySelector('[data-tmdb-language-selector]');
+  const tmdbEnabledToggle = configForm.querySelector('input[name="TMDB_ENABLED"]');
+  const tmdbApiInput = configForm.querySelector('input[name="TMDB_API_KEY"]');
+  const tmdbTestButton = configForm.querySelector('button[data-test="tmdb"]');
   const versionBadge = document.getElementById('addonVersionBadge');
   const streamingModeSelect = document.getElementById('streamingModeSelect');
   const nativeModeNotice = document.getElementById('nativeModeNotice');
@@ -107,6 +110,14 @@
     normalized = normalized.replace(/\/+/g, '/');
     normalized = normalized.replace(/\/+$/, '');
     return normalized;
+  }
+
+  function setDisabledState(targets, disabled) {
+    if (!Array.isArray(targets)) return;
+    targets.forEach((target) => {
+      if (!target) return;
+      target.disabled = disabled;
+    });
   }
 
   function populateForm(values) {
@@ -991,7 +1002,14 @@
   }
 
   function syncTmdbLanguageControls() {
-    // Always visible now - no mode switching needed
+    const enabled = Boolean(tmdbEnabledToggle?.checked);
+    setDisabledState([tmdbApiInput, tmdbTestButton], !enabled);
+    tmdbLanguageCheckboxes.forEach((checkbox) => {
+      checkbox.disabled = !enabled;
+    });
+    if (tmdbLanguageSelector) {
+      tmdbLanguageSelector.classList.toggle('disabled', !enabled);
+    }
   }
 
   function syncNewznabControls() {
@@ -1126,6 +1144,13 @@
       syncTmdbLanguageHiddenInput();
     });
   });
+
+  if (tmdbEnabledToggle) {
+    tmdbEnabledToggle.addEventListener('change', () => {
+      syncTmdbLanguageControls();
+      syncSaveGuard();
+    });
+  }
 
   if (easynewsToggle) {
     easynewsToggle.addEventListener('change', syncSaveGuard);

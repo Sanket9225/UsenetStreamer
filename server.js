@@ -1656,53 +1656,50 @@ async function streamHandler(req, res) {
         } else {
         // Only use fallback identifier if we don't have TMDb titles coming
         const hasTmdbTitles = metaSources.some(s => s?._tmdbTitles?.length > 0);
-        const fallbackIdentifier = hasTmdbTitles ? null : (incomingImdbId || baseIdentifier);
-        textQueryFallbackValue = (textQueryCandidate || fallbackIdentifier || '').trim();
+        const hasHumanTitleMeta = Boolean(movieTitle && movieTitle.trim());
+        const fallbackIdentifier = hasTmdbTitles || hasHumanTitleMeta ? null : (incomingImdbId || baseIdentifier);
+        const rawFallback = (textQueryCandidate || fallbackIdentifier || '').trim();
+        textQueryFallbackValue = tmdbService.normalizeToAscii(rawFallback);
+        if (textQueryFallbackValue && textQueryFallbackValue !== rawFallback) {
+          console.log(`${INDEXER_LOG_PREFIX} Normalized text query to ASCII`, { original: rawFallback, normalized: textQueryFallbackValue });
+        }
         if (textQueryFallbackValue) {
           const addedTextPlan = addPlan('search', { rawQuery: textQueryFallbackValue });
           if (addedTextPlan) {
             console.log(`${INDEXER_LOG_PREFIX} Added text search plan`, { query: textQueryFallbackValue });
           } else {
-            console.log(`${INDEXER_LOG_PREFIX} Text search plan already present`, { query: textQueryFallbackValue });
+            console.log(`${INDEXER_LOG_PREFIX} Text search plan already present (deduped)`, { query: textQueryFallbackValue });
           }
         } else {
-          console.log(`${INDEXER_LOG_PREFIX} Skipping text search plan; will use TMDb titles instead`);
+          console.log(`${INDEXER_LOG_PREFIX} Skipping text search plan (empty after ASCII normalization); will use TMDb titles instead`);
         }
         }
 
         // TMDb multi-language searches: add search plans for each configured language
         const tmdbTitles = metaSources.find(s => s?._tmdbTitles)?._tmdbTitles;
         if (tmdbTitles && tmdbTitles.length > 0 && !isSpecialRequest) {
-          console.log(`[TMDB] Adding ${tmdbTitles.length} language-specific search plans`);
+          console.log(`[TMDB] Adding up to ${tmdbTitles.length} normalized TMDb search plans`);
           tmdbTitles.forEach((titleObj) => {
-            let localizedQuery = titleObj.title;
+            const normalizedBase = (titleObj.asciiTitle || '').trim();
+            if (!normalizedBase) {
+              console.log(`${INDEXER_LOG_PREFIX} Skipping TMDb title with no ASCII representation`, { language: titleObj.language, title: titleObj.title });
+              return;
+            }
+
+            let normalizedQuery = normalizedBase;
             if (type === 'movie' && Number.isFinite(releaseYear)) {
-              localizedQuery = `${localizedQuery} ${releaseYear}`;
+              normalizedQuery = `${normalizedQuery} ${releaseYear}`;
             } else if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
-              localizedQuery = `${localizedQuery} S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
+              normalizedQuery = `${normalizedQuery} S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
             }
-            const added = addPlan('search', { rawQuery: localizedQuery });
+
+            const added = addPlan('search', { rawQuery: normalizedQuery });
             if (added) {
-              console.log(`${INDEXER_LOG_PREFIX} Added TMDb ${titleObj.language} search plan`, { query: localizedQuery });
+              console.log(`${INDEXER_LOG_PREFIX} Added normalized TMDb ${titleObj.language} search plan`, { query: normalizedQuery });
             }
 
-            // Add ASCII fallback if different
-            if (titleObj.asciiTitle && titleObj.asciiTitle !== titleObj.title) {
-              let asciiQuery = titleObj.asciiTitle;
-              if (type === 'movie' && Number.isFinite(releaseYear)) {
-                asciiQuery = `${asciiQuery} ${releaseYear}`;
-              } else if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
-                asciiQuery = `${asciiQuery} S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
-              }
-              const addedAscii = addPlan('search', { rawQuery: asciiQuery });
-              if (addedAscii) {
-                console.log(`${INDEXER_LOG_PREFIX} Added TMDb ${titleObj.language} ASCII search plan`, { query: asciiQuery });
-              }
-            }
-
-            // Store first TMDb query for Easynews fallback
             if (!tmdbLocalizedQuery) {
-              tmdbLocalizedQuery = localizedQuery;
+              tmdbLocalizedQuery = normalizedQuery;
             }
           });
         }

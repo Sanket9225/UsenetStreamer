@@ -529,6 +529,11 @@ button.ghost.danger:hover {
   gap: 0.6rem;
 }
 
+.language-multiselect.disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .language-checkbox-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));

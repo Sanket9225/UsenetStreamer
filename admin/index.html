@@ -394,10 +394,14 @@
         <section class="group">
           <h3>TMDb Metadata & Localization (Optional)</h3>
           <p class="hint">When enabled, fetches metadata directly from TMDb (skips Cinemeta) and adds localized title searches for non-English content. Example: A Telugu movie will search with its original Telugu title, English title, and any additional languages you select below.</p>
+          <label class="checkbox">
+            <input name="TMDB_ENABLED" type="checkbox" />
+            <span>Enable TMDb Metadata</span>
+          </label>
           <div class="field-grid">
-            <label>TMDb API Key
+            <label>TMDb API Read Access Token
               <input name="TMDB_API_KEY" type="password" autocomplete="new-password" placeholder="eyJ..." />
-              <span class="field-hint">Get your Read Access Token (v4 auth) from <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>. When provided, TMDb becomes the primary metadata source.</span>
+              <span class="field-hint">Paste your v4 API Read Access Token from <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">themoviedb.org/settings/api</a>. TMDb requests use this token when metadata is enabled.</span>
             </label>
             <label>Additional Languages (Optional)
               <span class="field-hint">Select additional languages to search with, along with auto-detected language. Leave empty to use only auto-detected language.</span>
@@ -483,13 +487,6 @@
                 <label class="checkbox"><input type="checkbox" value="am-ET" data-tmdb-language-option /> <span>Amharic</span></label>
               </div>
             </div>
-            <label>Search Mode
-              <select name="TMDB_SEARCH_MODE" id="tmdbSearchModeSelect">
-                <option value="regional_only">Regional languages only</option>
-                <option value="english_and_regional">English + Regional languages</option>
-              </select>
-              <span class="field-hint">Choose whether to search with English titles + regional titles, or only regional titles.</span>
-            </label>
           </div>
           <div class="inline-actions">
             <button type="button" class="secondary" data-test="tmdb">Test TMDb Connection</button>
