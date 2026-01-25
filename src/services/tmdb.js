@@ -11,7 +11,7 @@ const TMDB_RETRY_DELAY_MS = 500;
 const RETRYABLE_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'ENOTFOUND', 'EAI_AGAIN']);
 
 // Configuration (reloaded from process.env)
-let TMDB_ENABLED = true;
+let TMDB_ENABLED = false;
 let TMDB_API_KEY = '';
 let TMDB_SEARCH_LANGUAGES = []; // Array of additional locale codes like ['hi-IN', 'ta-IN']
 const TMDB_SEARCH_MODE = 'english_and_regional';
@@ -72,7 +72,7 @@ const LANGUAGE_TO_TMDB_LOCALE = {
 };
 
 function reloadConfig() {
-  const enabledRaw = (process.env.TMDB_ENABLED ?? 'true').toString().trim().toLowerCase();
+  const enabledRaw = (process.env.TMDB_ENABLED ?? 'false').toString().trim().toLowerCase();
   TMDB_ENABLED = !['false', '0', 'off', 'no'].includes(enabledRaw);
   TMDB_API_KEY = (process.env.TMDB_API_KEY || '').trim();
   const languagesStr = (process.env.TMDB_SEARCH_LANGUAGES || '').trim();

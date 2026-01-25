@@ -126,7 +126,11 @@
       const key = element.name;
       const rawValue = Object.prototype.hasOwnProperty.call(values, key) ? values[key] : '';
       if (element.type === 'checkbox') {
-        element.checked = parseBool(rawValue);
+        if (key === 'TMDB_ENABLED' && rawValue === '') {
+          element.checked = false;
+        } else {
+          element.checked = parseBool(rawValue);
+        }
       } else if (element.type === 'number' && rawValue === '') {
         element.value = '';
       } else {
