@@ -15,8 +15,8 @@ server_very_old.js
 
 EASYNEWS_INDEXER
 
-statPipelineBenchmark.js
-
-
+# Test scripts and NZB files
+scripts/
 test_nzbs/
-scripts
+assets/*.nzb
+*.nzb
