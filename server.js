@@ -2598,7 +2598,16 @@ async function streamHandler(req, res) {
         }
 
         const tokenSegment = ADDON_SHARED_SECRET ? `/${ADDON_SHARED_SECRET}` : '';
-        const streamUrl = `${addonBaseUrl}${tokenSegment}/nzb/stream?${baseParams.toString()}`;
+        const rawFilename = (result.title || 'stream').toString().trim();
+        const normalizedFilename = rawFilename
+          .replace(/[\\/:*?"<>|]+/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        const fileBase = normalizedFilename || 'stream';
+        const hasVideoExt = /\.(mkv|mp4|m4v|avi|mov|wmv|mpg|mpeg|ts|webm)$/i.test(fileBase);
+        const fileWithExt = hasVideoExt ? fileBase : `${fileBase}.mkv`;
+        const encodedFilename = encodeURIComponent(fileWithExt);
+        const streamUrl = `${addonBaseUrl}${tokenSegment}/nzb/stream/${encodedFilename}?${baseParams.toString()}`;
         const tags = [];
         if (triageTag) tags.push(triageTag);
         if (isInstant && STREAMING_MODE !== 'native') tags.push('⚡ Instant');
@@ -3017,7 +3026,7 @@ async function handleNzbdavStream(req, res) {
   }
 }
 
-['/:token/nzb/stream', '/nzb/stream'].forEach((route) => {
+['/:token/nzb/stream/:filename', '/nzb/stream/:filename', '/:token/nzb/stream', '/nzb/stream'].forEach((route) => {
   app.get(route, handleNzbdavStream);
   app.head(route, handleNzbdavStream);
 });
