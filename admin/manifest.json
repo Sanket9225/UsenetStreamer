@@ -1,0 +1,22 @@
+{
+  "name": "UsenetStreamer Control Panel",
+  "short_name": "UsenetStreamer",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0b1118",
+  "theme_color": "#0b1118",
+  "description": "Configure UsenetStreamer settings and manage indexers.",
+  "icons": [
+    {
+      "src": "/assets/icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

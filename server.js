@@ -161,9 +161,9 @@ adminApiRouter.post('/config', async (req, res) => {
 
   // Debug: log TMDb related keys
   console.log('[ADMIN] Received TMDb config:', {
+    TMDB_ENABLED: incoming.TMDB_ENABLED,
     TMDB_API_KEY: incoming.TMDB_API_KEY ? `(${incoming.TMDB_API_KEY.length} chars)` : '(empty)',
-    TMDB_SEARCH_LANGUAGE_MODE: incoming.TMDB_SEARCH_LANGUAGE_MODE,
-    TMDB_SEARCH_LANGUAGE: incoming.TMDB_SEARCH_LANGUAGE,
+    TMDB_SEARCH_LANGUAGES: incoming.TMDB_SEARCH_LANGUAGES,
   });
 
   const updates = {};
@@ -176,11 +176,11 @@ adminApiRouter.post('/config', async (req, res) => {
   if (!ADMIN_CONFIG_KEYS.includes('TMDB_API_KEY')) {
     console.error('[ADMIN] TMDB_API_KEY missing from ADMIN_CONFIG_KEYS');
   }
-  if (!ADMIN_CONFIG_KEYS.includes('TMDB_SEARCH_LANGUAGE_MODE')) {
-    console.error('[ADMIN] TMDB_SEARCH_LANGUAGE_MODE missing from ADMIN_CONFIG_KEYS');
+  if (!ADMIN_CONFIG_KEYS.includes('TMDB_ENABLED')) {
+    console.error('[ADMIN] TMDB_ENABLED missing from ADMIN_CONFIG_KEYS');
   }
-  if (!ADMIN_CONFIG_KEYS.includes('TMDB_SEARCH_LANGUAGE')) {
-    console.error('[ADMIN] TMDB_SEARCH_LANGUAGE missing from ADMIN_CONFIG_KEYS');
+  if (!ADMIN_CONFIG_KEYS.includes('TMDB_SEARCH_LANGUAGES')) {
+    console.error('[ADMIN] TMDB_SEARCH_LANGUAGES missing from ADMIN_CONFIG_KEYS');
   }
   const tmdbKeysInAdminConfig = ADMIN_CONFIG_KEYS.filter((k) => k.startsWith('TMDB_'));
   console.log('[ADMIN] TMDb keys in ADMIN_CONFIG_KEYS:', tmdbKeysInAdminConfig);
@@ -214,18 +214,18 @@ adminApiRouter.post('/config', async (req, res) => {
   if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_API_KEY')) {
     updates.TMDB_API_KEY = incoming.TMDB_API_KEY ? String(incoming.TMDB_API_KEY) : '';
   }
-  if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_SEARCH_LANGUAGE_MODE')) {
-    updates.TMDB_SEARCH_LANGUAGE_MODE = incoming.TMDB_SEARCH_LANGUAGE_MODE ? String(incoming.TMDB_SEARCH_LANGUAGE_MODE) : '';
+  if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_ENABLED')) {
+    updates.TMDB_ENABLED = incoming.TMDB_ENABLED ? String(incoming.TMDB_ENABLED) : 'false';
   }
-  if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_SEARCH_LANGUAGE')) {
-    updates.TMDB_SEARCH_LANGUAGE = incoming.TMDB_SEARCH_LANGUAGE ? String(incoming.TMDB_SEARCH_LANGUAGE) : '';
+  if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_SEARCH_LANGUAGES')) {
+    updates.TMDB_SEARCH_LANGUAGES = incoming.TMDB_SEARCH_LANGUAGES ? String(incoming.TMDB_SEARCH_LANGUAGES) : '';
   }
 
   // Debug: log what we're about to save
   console.log('[ADMIN] TMDb updates to save:', {
+    TMDB_ENABLED: updates.TMDB_ENABLED,
     TMDB_API_KEY: updates.TMDB_API_KEY ? `(${updates.TMDB_API_KEY.length} chars)` : '(not in updates)',
-    TMDB_SEARCH_LANGUAGE_MODE: updates.TMDB_SEARCH_LANGUAGE_MODE,
-    TMDB_SEARCH_LANGUAGE: updates.TMDB_SEARCH_LANGUAGE,
+    TMDB_SEARCH_LANGUAGES: updates.TMDB_SEARCH_LANGUAGES,
   });
 
   try {
@@ -587,7 +587,7 @@ let TRIAGE_MAX_DECODED_BYTES = toPositiveInt(process.env.NZB_TRIAGE_MAX_DECODED_
 let TRIAGE_NNTP_MAX_CONNECTIONS = toPositiveInt(process.env.NZB_TRIAGE_MAX_CONNECTIONS, 12);
 let TRIAGE_MAX_PARALLEL_NZBS = toPositiveInt(process.env.NZB_TRIAGE_MAX_PARALLEL_NZBS, 16);
 let TRIAGE_STAT_SAMPLE_COUNT = 0;
-let TRIAGE_ARCHIVE_SAMPLE_COUNT = 3;
+let TRIAGE_ARCHIVE_SAMPLE_COUNT = 1;
 let TRIAGE_REUSE_POOL = toBoolean(process.env.NZB_TRIAGE_REUSE_POOL, true);
 let TRIAGE_NNTP_KEEP_ALIVE_MS = toPositiveInt(process.env.NZB_TRIAGE_NNTP_KEEP_ALIVE_MS, 0);
 let TRIAGE_PREFETCH_FIRST_VERIFIED = toBoolean(process.env.NZB_TRIAGE_PREFETCH_FIRST_VERIFIED, true);
@@ -836,9 +836,9 @@ const ADMIN_CONFIG_KEYS = [
   'EASYNEWS_USERNAME',
   'EASYNEWS_PASSWORD',
   'EASYNEWS_TREAT_AS_INDEXER',
+  'TMDB_ENABLED',
   'TMDB_API_KEY',
   'TMDB_SEARCH_LANGUAGES',
-  'TMDB_SEARCH_MODE',
 ];
 
 ADMIN_CONFIG_KEYS.push('NEWZNAB_ENABLED', 'NEWZNAB_FILTER_NZB_ONLY', ...NEWZNAB_NUMBERED_KEYS);

@@ -55,6 +55,7 @@ body {
   background-image: var(--bg-overlay);
   background-attachment: fixed;
   color: var(--text-primary);
+  overflow-x: hidden;
 }
 
 .container {
@@ -183,6 +184,7 @@ header h1 {
   gap: 0.6rem;
   font-weight: 600;
   color: var(--text-secondary);
+  min-width: 0;
 }
 
 .field-grid label.wide-field {
@@ -244,6 +246,8 @@ select {
   font-size: 0.95rem;
   transition: border 140ms ease, box-shadow 160ms ease, transform 100ms ease;
   min-height: 48px;
+  width: 100%;
+  max-width: 100%;
 }
 
 input:hover,
@@ -266,6 +270,7 @@ select {
   background-position: right 1.1rem center;
   padding-right: 2.6rem;
   cursor: pointer;
+  white-space: normal;
 }
 
 .checkbox {
@@ -579,6 +584,102 @@ button.ghost.danger:hover {
 
 .hidden {
   display: none !important;
+}
+
+@media (max-width: 900px) {
+  .container {
+    padding: 1.25rem;
+  }
+
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .newznab-preset-bar,
+  .newznab-actions-top,
+  .inline-actions,
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .inline-actions button,
+  .actions button {
+    width: 100%;
+  }
+
+  .language-checkbox-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    max-height: 260px;
+  }
+}
+
+@media (max-width: 720px) {
+  .container {
+    padding: 1rem 0.9rem 2.2rem;
+    gap: 2rem;
+  }
+
+  .card {
+    padding: 1.4rem 1.2rem;
+  }
+
+  .group {
+    padding: 1.2rem 1.1rem;
+  }
+
+  .field-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .manifest-row {
+    grid-template-columns: 1fr;
+  }
+
+  .newznab-row {
+    padding: 1.1rem;
+  }
+
+  .newznab-row .row-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 520px) {
+  :root {
+    font-size: 14px;
+  }
+
+  .container {
+    padding: 0.85rem 0.75rem 2rem;
+  }
+
+  .card {
+    padding: 1.1rem 1rem;
+    border-radius: var(--radius-md);
+  }
+
+  .group {
+    padding: 1rem;
+  }
+
+  input[type="text"],
+  input[type="url"],
+  input[type="password"],
+  input[type="number"],
+  select {
+    min-height: 44px;
+    padding: 0.65rem 0.85rem;
+  }
+
+  .primary,
+  .secondary,
+  button.ghost {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 @media (max-width: 960px) {
