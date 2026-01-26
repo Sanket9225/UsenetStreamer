@@ -99,6 +99,8 @@
 mkdir -p ~/usenetstreamer-config
 docker run -d --restart unless-stopped \
   --name usenetstreamer \
+  --log-opt max-size=10m \
+  --log-opt max-file=1 \
   -p 7000:7000 \
   -e ADDON_SHARED_SECRET=super-secret-token \
   -e CONFIG_DIR=/data/config \
@@ -116,6 +118,11 @@ services:
     restart: unless-stopped
     ports:
       - "7000:7000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "1"
     environment:
       ADDON_SHARED_SECRET: super-secret-token
       CONFIG_DIR: /data/config
