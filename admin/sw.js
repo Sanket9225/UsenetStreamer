@@ -1,4 +1,4 @@
-const CACHE_NAME = 'usenetstreamer-admin-v1';
+const CACHE_NAME = 'usenetstreamer-admin-v3';
 const ASSETS = [
   './',
   './index.html',

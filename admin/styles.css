@@ -178,6 +178,21 @@ header h1 {
   gap: 1.4rem 1.6rem;
 }
 
+.tmdb-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.4rem 1.6rem;
+}
+
+.tmdb-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
 .field-grid label {
   display: flex;
   flex-direction: column;
@@ -531,7 +546,26 @@ button.ghost.danger:hover {
 .language-multiselect {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.35rem;
+}
+
+.tmdb-language-block {
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(86, 110, 135, 0.28);
+  background: rgba(8, 16, 26, 0.6);
+}
+
+.language-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+}
+
+.language-header .field-label,
+.language-header .field-hint {
+  margin: 0;
 }
 
 .language-multiselect.disabled {
@@ -549,6 +583,7 @@ button.ghost.danger:hover {
   border-radius: var(--radius-sm);
   border: 1px solid rgba(86, 110, 135, 0.28);
   background: rgba(8, 16, 26, 0.8);
+  margin-top: 0;
 }
 
 .language-checkbox-grid .checkbox {
@@ -629,6 +664,11 @@ button.ghost.danger:hover {
   }
 
   .field-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .tmdb-row {
     grid-template-columns: 1fr;
     gap: 1rem;
   }

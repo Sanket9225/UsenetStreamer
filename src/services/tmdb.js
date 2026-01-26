@@ -14,7 +14,7 @@ const RETRYABLE_CODES = new Set(['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'ENO
 let TMDB_ENABLED = false;
 let TMDB_API_KEY = '';
 let TMDB_SEARCH_LANGUAGES = []; // Array of additional locale codes like ['hi-IN', 'ta-IN']
-const TMDB_SEARCH_MODE = 'english_and_regional';
+let TMDB_SEARCH_MODE = 'english_only'; // 'english_only' | 'english_and_regional' | 'regional_only'
 
 // In-memory cache for TMDb responses
 const tmdbCache = new Map();
@@ -77,6 +77,12 @@ function reloadConfig() {
   TMDB_API_KEY = (process.env.TMDB_API_KEY || '').trim();
   const languagesStr = (process.env.TMDB_SEARCH_LANGUAGES || '').trim();
   TMDB_SEARCH_LANGUAGES = languagesStr ? languagesStr.split(',').map(l => l.trim()).filter(Boolean) : [];
+  const modeRaw = (process.env.TMDB_SEARCH_MODE || 'english_only').toString().trim().toLowerCase();
+  if (['english_only', 'english_and_regional', 'regional_only'].includes(modeRaw)) {
+    TMDB_SEARCH_MODE = modeRaw;
+  } else {
+    TMDB_SEARCH_MODE = 'english_only';
+  }
   
   console.log('[TMDB] Config reloaded', { 
     enabled: TMDB_ENABLED,
@@ -360,16 +366,25 @@ async function getMetadataAndTitles({ imdbId, type }) {
   console.log(`[TMDB] Auto-detect: fetching original language [${originalLanguage}] as ${originalLocale}`);
   
   // Step 2: Determine all languages to fetch
-  const languagesToFetch = [originalLocale];
-  
-  // Add English if search mode requires it and original isn't English
-  if (TMDB_SEARCH_MODE === 'english_and_regional' && originalLanguage !== 'en') {
-    languagesToFetch.push('en-US');
+  const languagesToFetch = [];
+  const pushLocale = (locale) => {
+    if (locale && !languagesToFetch.includes(locale)) {
+      languagesToFetch.push(locale);
+    }
+  };
+
+  if (TMDB_SEARCH_MODE === 'english_only') {
+    pushLocale('en-US');
+  } else {
+    pushLocale(originalLocale);
+    if (TMDB_SEARCH_MODE === 'english_and_regional') {
+      pushLocale('en-US');
+    }
   }
   
   // Add additional selected languages
   if (TMDB_SEARCH_LANGUAGES.length > 0) {
-    languagesToFetch.push(...TMDB_SEARCH_LANGUAGES);
+    TMDB_SEARCH_LANGUAGES.forEach((locale) => pushLocale(locale));
   }
   
   console.log(`[TMDB] Fetching ${languagesToFetch.length} language(s) in parallel:`, languagesToFetch);

@@ -141,6 +141,9 @@ adminApiRouter.get('/config', (req, res) => {
   if (!values.NZB_MAX_RESULT_SIZE_GB) {
     values.NZB_MAX_RESULT_SIZE_GB = String(DEFAULT_MAX_RESULT_SIZE_GB);
   }
+  if (!values.TMDB_SEARCH_MODE) {
+    values.TMDB_SEARCH_MODE = 'english_only';
+  }
   res.json({
     values,
     manifestUrl: computeManifestUrl(),
@@ -164,6 +167,7 @@ adminApiRouter.post('/config', async (req, res) => {
     TMDB_ENABLED: incoming.TMDB_ENABLED,
     TMDB_API_KEY: incoming.TMDB_API_KEY ? `(${incoming.TMDB_API_KEY.length} chars)` : '(empty)',
     TMDB_SEARCH_LANGUAGES: incoming.TMDB_SEARCH_LANGUAGES,
+    TMDB_SEARCH_MODE: incoming.TMDB_SEARCH_MODE,
   });
 
   const updates = {};
@@ -181,6 +185,9 @@ adminApiRouter.post('/config', async (req, res) => {
   }
   if (!ADMIN_CONFIG_KEYS.includes('TMDB_SEARCH_LANGUAGES')) {
     console.error('[ADMIN] TMDB_SEARCH_LANGUAGES missing from ADMIN_CONFIG_KEYS');
+  }
+  if (!ADMIN_CONFIG_KEYS.includes('TMDB_SEARCH_MODE')) {
+    console.error('[ADMIN] TMDB_SEARCH_MODE missing from ADMIN_CONFIG_KEYS');
   }
   const tmdbKeysInAdminConfig = ADMIN_CONFIG_KEYS.filter((k) => k.startsWith('TMDB_'));
   console.log('[ADMIN] TMDb keys in ADMIN_CONFIG_KEYS:', tmdbKeysInAdminConfig);
@@ -220,12 +227,16 @@ adminApiRouter.post('/config', async (req, res) => {
   if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_SEARCH_LANGUAGES')) {
     updates.TMDB_SEARCH_LANGUAGES = incoming.TMDB_SEARCH_LANGUAGES ? String(incoming.TMDB_SEARCH_LANGUAGES) : '';
   }
+  if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_SEARCH_MODE')) {
+    updates.TMDB_SEARCH_MODE = incoming.TMDB_SEARCH_MODE ? String(incoming.TMDB_SEARCH_MODE) : '';
+  }
 
   // Debug: log what we're about to save
   console.log('[ADMIN] TMDb updates to save:', {
     TMDB_ENABLED: updates.TMDB_ENABLED,
     TMDB_API_KEY: updates.TMDB_API_KEY ? `(${updates.TMDB_API_KEY.length} chars)` : '(not in updates)',
     TMDB_SEARCH_LANGUAGES: updates.TMDB_SEARCH_LANGUAGES,
+    TMDB_SEARCH_MODE: updates.TMDB_SEARCH_MODE,
   });
 
   try {
@@ -839,6 +850,7 @@ const ADMIN_CONFIG_KEYS = [
   'TMDB_ENABLED',
   'TMDB_API_KEY',
   'TMDB_SEARCH_LANGUAGES',
+  'TMDB_SEARCH_MODE',
 ];
 
 ADMIN_CONFIG_KEYS.push('NEWZNAB_ENABLED', 'NEWZNAB_FILTER_NZB_ONLY', ...NEWZNAB_NUMBERED_KEYS);
@@ -1061,17 +1073,22 @@ function matchesStrictSearch(title, strictPhrase) {
   const candidateTokens = candidate.split(' ').filter(Boolean);
   const phraseTokens = strictPhrase.split(' ').filter(Boolean);
   if (phraseTokens.length === 0) return true;
-  for (let i = 0; i <= candidateTokens.length - phraseTokens.length; i += 1) {
-    let match = true;
-    for (let j = 0; j < phraseTokens.length; j += 1) {
-      if (candidateTokens[i + j] !== phraseTokens[j]) {
-        match = false;
+  
+  // Relaxed matching: all phrase tokens must appear in order, but gaps allowed
+  let candidateIdx = 0;
+  for (const token of phraseTokens) {
+    let found = false;
+    while (candidateIdx < candidateTokens.length) {
+      if (candidateTokens[candidateIdx] === token) {
+        found = true;
+        candidateIdx += 1;
         break;
       }
+      candidateIdx += 1;
     }
-    if (match) return true;
+    if (!found) return false;
   }
-  return false;
+  return true;
 }
 
 function ensureAddonConfigured() {
@@ -1628,13 +1645,28 @@ async function streamHandler(req, res) {
 
       console.log('[REQUEST] Resolved title/year', { movieTitle, releaseYear, elapsedMs: Date.now() - requestStartTs });
 
+      // Strip subtitle after colon for series only (e.g., "Show Name: The Subtitle" → "Show Name")
+      const stripSeriesSubtitle = (title) => {
+        if (!title) return title;
+        const colonIdx = title.indexOf(':');
+        if (colonIdx > 0 && colonIdx < title.length - 1) {
+          const afterColon = title.slice(colonIdx + 1).trim();
+          // Only strip if it's not a year
+          if (!/^\d{4}$/.test(afterColon)) {
+            return title.slice(0, colonIdx).trim();
+          }
+        }
+        return title;
+      };
+      const searchTitle = type === 'series' ? stripSeriesSubtitle(movieTitle) : movieTitle;
+
       // Continue with text-based searches using TMDb titles
       const textQueryParts = [];
       let tmdbLocalizedQuery = null;
       let easynewsSearchParams = null;
       let textQueryFallbackValue = null;
-      if (movieTitle) {
-        textQueryParts.push(movieTitle);
+      if (searchTitle) {
+        textQueryParts.push(searchTitle);
       }
       if (type === 'movie' && Number.isFinite(releaseYear)) {
         textQueryParts.push(String(releaseYear));
