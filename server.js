@@ -43,7 +43,7 @@ const tmdbService = require('./src/services/tmdb');
 
 const app = express();
 let currentPort = Number(process.env.PORT || 7000);
-const ADDON_VERSION = '1.6.0';
+const ADDON_VERSION = '1.6.1';
 const DEFAULT_ADDON_NAME = 'UsenetStreamer';
 let serverInstance = null;
 const SERVER_HOST = '0.0.0.0';
@@ -1678,33 +1678,41 @@ async function streamHandler(req, res) {
       const shouldAddTextSearch = shouldForceTextSearch || (!INDEXER_MANAGER_STRICT_ID_MATCH && !incomingTvdbId);
 
       if (shouldAddTextSearch) {
-        const textQueryCandidate = textQueryParts.join(' ').trim();
-        const isEpisodeOnly = /^s\d{2}e\d{2}$/i.test(textQueryCandidate) && !movieTitle;
-        const isYearOnly = /^\d{4}$/.test(textQueryCandidate);
-        if (strictTextMode && isEpisodeOnly) {
-          console.log(`${INDEXER_LOG_PREFIX} Skipping episode-only text plan (no title)`);
-        } else if (strictTextMode && isYearOnly && (!movieTitle || !movieTitle.trim())) {
-          console.log(`${INDEXER_LOG_PREFIX} Skipping year-only text plan (strict mode, no title)`);
-        } else {
-        // Only use fallback identifier if we don't have TMDb titles coming
         const hasTmdbTitles = metaSources.some(s => s?._tmdbTitles?.length > 0);
         const hasHumanTitleMeta = Boolean(movieTitle && movieTitle.trim());
-        const fallbackIdentifier = hasTmdbTitles || hasHumanTitleMeta ? null : (incomingImdbId || baseIdentifier);
-        const rawFallback = (textQueryCandidate || fallbackIdentifier || '').trim();
-        textQueryFallbackValue = tmdbService.normalizeToAscii(rawFallback);
-        if (textQueryFallbackValue && textQueryFallbackValue !== rawFallback) {
-          console.log(`${INDEXER_LOG_PREFIX} Normalized text query to ASCII`, { original: rawFallback, normalized: textQueryFallbackValue });
-        }
-        if (textQueryFallbackValue) {
-          const addedTextPlan = addPlan('search', { rawQuery: textQueryFallbackValue });
-          if (addedTextPlan) {
-            console.log(`${INDEXER_LOG_PREFIX} Added text search plan`, { query: textQueryFallbackValue });
-          } else {
-            console.log(`${INDEXER_LOG_PREFIX} Text search plan already present (deduped)`, { query: textQueryFallbackValue });
-          }
+        if (!hasTmdbTitles && !hasHumanTitleMeta) {
+          console.log(`${INDEXER_LOG_PREFIX} Skipping text search plans (no TMDb/Cinemeta title)`);
         } else {
-          console.log(`${INDEXER_LOG_PREFIX} Skipping text search plan (empty after ASCII normalization); will use TMDb titles instead`);
-        }
+          const textQueryCandidate = textQueryParts.join(' ').trim();
+          const isEpisodeOnly = /^s\d{2}e\d{2}$/i.test(textQueryCandidate) && !movieTitle;
+          const isYearOnly = /^\d{4}$/.test(textQueryCandidate);
+          if (strictTextMode && isEpisodeOnly) {
+            console.log(`${INDEXER_LOG_PREFIX} Skipping episode-only text plan (no title)`);
+          } else if (strictTextMode && isYearOnly && (!movieTitle || !movieTitle.trim())) {
+            console.log(`${INDEXER_LOG_PREFIX} Skipping year-only text plan (strict mode, no title)`);
+          } else {
+            const rawFallback = textQueryCandidate.trim();
+            textQueryFallbackValue = tmdbService.normalizeToAscii(rawFallback);
+            if (textQueryFallbackValue && textQueryFallbackValue !== rawFallback) {
+              console.log(`${INDEXER_LOG_PREFIX} Normalized text query to ASCII`, { original: rawFallback, normalized: textQueryFallbackValue });
+            }
+            const normalizedValue = (textQueryFallbackValue || '').trim();
+            const normalizedYearOnly = /^\d{4}$/.test(normalizedValue);
+            const normalizedEpisodeOnly = /^s\d{2}e\d{2}$/i.test(normalizedValue) || /^s\d{2}$/i.test(normalizedValue) || /^e\d{2}$/i.test(normalizedValue);
+            const rawHadNonAscii = /[^\x00-\x7F]/.test(rawFallback);
+            if ((normalizedYearOnly || normalizedEpisodeOnly) && rawHadNonAscii) {
+              console.log(`${INDEXER_LOG_PREFIX} Skipping text search plan (normalized to episode/year only)`, { original: rawFallback, normalized: normalizedValue });
+            } else if (normalizedValue) {
+              const addedTextPlan = addPlan('search', { rawQuery: textQueryFallbackValue });
+              if (addedTextPlan) {
+                console.log(`${INDEXER_LOG_PREFIX} Added text search plan`, { query: textQueryFallbackValue });
+              } else {
+                console.log(`${INDEXER_LOG_PREFIX} Text search plan already present (deduped)`, { query: textQueryFallbackValue });
+              }
+            } else {
+              console.log(`${INDEXER_LOG_PREFIX} Skipping text search plan (empty after ASCII normalization); will use TMDb titles instead`);
+            }
+          }
         }
 
         // TMDb multi-language searches: add search plans for each configured language
@@ -2689,20 +2697,20 @@ async function streamHandler(req, res) {
               archiveSampleEntries.push(finding.details.name);
             }
           });
-          console.log('[NZB TRIAGE] Stream candidate status', {
-            title: result.title,
-            downloadUrl: result.downloadUrl,
-            status: triageStatus,
-            triageApplied,
-            triagePriority,
-            blockers: triageInfo?.blockers || [],
-            warnings: triageInfo?.warnings || [],
-            archiveFindings: triageInfo?.archiveFindings || [],
-            archiveSampleEntries,
-            archiveCheckStatus,
-            missingArticlesStatus,
-            timedOut: Boolean(triageOutcome?.timedOut)
-          });
+          // console.log('[NZB TRIAGE] Stream candidate status', {
+          //   title: result.title,
+          //   downloadUrl: result.downloadUrl,
+          //   status: triageStatus,
+          //   triageApplied,
+          //   triagePriority,
+          //   blockers: triageInfo?.blockers || [],
+          //   warnings: triageInfo?.warnings || [],
+          //   archiveFindings: triageInfo?.archiveFindings || [],
+          //   archiveSampleEntries,
+          //   archiveCheckStatus,
+          //   missingArticlesStatus,
+          //   timedOut: Boolean(triageOutcome?.timedOut)
+          // });
           triageLogCount += 1;
         } else if (!triageApplied) {
           // Skip logging for streams that were never part of the triage batch
