@@ -177,6 +177,7 @@
             <div class="language-multiselect wide-field" data-language-selector>
               <span class="field-label">Preferred Languages</span>
               <input type="hidden" name="NZB_PREFERRED_LANGUAGE" data-language-hidden />
+              <input type="text" class="language-search" placeholder="Search languages..." data-search-target="nzb" />
               <div class="language-checkbox-grid">
                 <label class="checkbox"><input type="checkbox" value="English" data-language-option /> <span>English</span></label>
                 <label class="checkbox"><input type="checkbox" value="Tamil" data-language-option /> <span>Tamil</span></label>
@@ -254,12 +255,12 @@
             </div>
             <div class="quality-checkbox-grid">
               <label class="checkbox">
-                <input type="checkbox" data-quality-option value="4320p" checked />
+                <input type="checkbox" data-quality-option value="8k" checked />
                 <span>4320p / 8K</span>
               </label>
               <label class="checkbox">
-                <input type="checkbox" data-quality-option value="2160p" checked />
-                <span>2160p / 4K / UHD</span>
+                <input type="checkbox" data-quality-option value="4k" checked />
+                <span>2160p / 4K UHD</span>
               </label>
               <label class="checkbox">
                 <input type="checkbox" data-quality-option value="1440p" checked />
@@ -303,6 +304,44 @@
               <input name="NZB_RESOLUTION_LIMIT_PER_QUALITY" type="number" min="0" placeholder="Unlimited" />
               <span class="field-hint">Applies evenly to every enabled resolution. Leave blank or set 0 for no cap.</span>
             </label>
+          </div>
+          <div class="advanced-filters">
+            <div class="advanced-filters-header">
+              <span>Release Exclusions</span>
+              <span class="field-hint">Comma-separated list of items to exclude from results. Click "Show Examples" for available options.</span>
+            </div>
+            <div class="field-grid">
+              <label class="wide-field">Exclude Releases Containing (comma-separated)
+                <textarea name="NZB_RELEASE_EXCLUSIONS" rows="3" placeholder="e.g. cam,ts,hardcoded,yify"></textarea>
+                <span class="field-hint">Add codecs, sources, audio, flags, or groups to exclude. Case-insensitive.</span>
+              </label>
+            </div>
+            <details class="exclusion-examples">
+              <summary>Show Examples & Available Options</summary>
+              <div class="examples-grid">
+                <div class="example-category">
+                  <h4>Video Codecs</h4>
+                  <code>x264, x265, h264, hevc, xvid, mpeg2, vp8, vp9, av1</code>
+                </div>
+                <div class="example-category">
+                  <h4>Sources (Quality)</h4>
+                  <code>cam, telesync, telecine, scr, dvdscr, dvdrip, hdtv, pdtv, web-dl, webrip, webcap, bdrip, brrip, bluray, remux, uhdrip, hdrip, vhsrip, sdtv, tvrip, vodr, workprint</code>
+                </div>
+                <div class="example-category">
+                  <h4>Audio Codecs</h4>
+                  <code>aac, ac3, eac3, mp3, flac, truehd, atmos, dts lossy, dts lossless, dd</code>
+                </div>
+                <div class="example-category">
+                  <h4>Flags</h4>
+                  <code>hardcoded, proper, repack, hdr, extended, remastered, unrated, remux, retail</code>
+                </div>
+                <div class="example-category">
+                  <h4>Release Groups</h4>
+                  <code>yify, rarbg, evo, eztv</code>
+                  <p class="hint">Use actual group names from releases</p>
+                </div>
+              </div>
+            </details>
           </div>
         </section>
 
@@ -422,6 +461,7 @@
               <span class="field-hint">Select additional languages to search with, along with auto-detected language. Leave empty to use only auto-detected language.</span>
             </div>
             <input type="hidden" name="TMDB_SEARCH_LANGUAGES" data-tmdb-language-hidden />
+            <input type="text" class="language-search" placeholder="Search languages..." data-search-target="tmdb" />
             <div class="language-checkbox-grid">
                 <label class="checkbox"><input type="checkbox" value="en-US" data-tmdb-language-option /> <span>English (US)</span></label>
                 <label class="checkbox"><input type="checkbox" value="en-GB" data-tmdb-language-option /> <span>English (UK)</span></label>

@@ -135,11 +135,20 @@ Then browse to `https://your-domain/super-secret-token/admin/` to enter your cre
 ### Source installation
 
 ```bash
-git clone https://github.com/Sanket9225/UsenetStreamer.git
+# Clone the repository including submodules
+git clone --recursive https://github.com/Sanket9225/UsenetStreamer.git
 cd UsenetStreamer
+
+# Install dependencies and build the parser library
 npm install
-node server.js
+npm run build:parser
+
+# Start the server
+npm start
 ```
+
+> [!NOTE]
+> The `build:parser` step is required to compile the `@viren070/parse-torrent-title` submodule into a compatible CommonJS module used by the addon. If you didn't clone with `--recursive`, run `git submodule update --init --recursive` before building.
 
 Create `.env` (see `.env.example`) or, better, load `http://localhost:7000/<token>/admin/` to configure everything from the UI.
 

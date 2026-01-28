@@ -1,4 +1,4 @@
-const parseTorrentTitle = require('parse-torrent-title');
+const { parseTorrentTitle } = require('../../utils/lib/parse-torrent-title/index.js');
 
 const LANGUAGE_FILTERS = [
   'English',
@@ -111,8 +111,8 @@ const LANGUAGE_PATTERNS = Object.fromEntries(
 );
 
 const RESOLUTION_PREFERENCES = [
-  '4320p',
-  '2160p',
+  '8k',
+  '4k',
   '1440p',
   '1080p',
   '720p',
@@ -123,23 +123,7 @@ const RESOLUTION_PREFERENCES = [
   '240p'
 ];
 
-const RESOLUTION_NUMERIC_PATTERNS = [
-  { label: '4320p', regex: /\b4320p\b/i },
-  { label: '2160p', regex: /\b2160p\b/i },
-  { label: '1440p', regex: /\b1440p\b/i },
-  { label: '1080p', regex: /\b1080p\b|fullhd|fhd/i },
-  { label: '720p', regex: /\b720p\b|hd\b/i },
-  { label: '576p', regex: /\b576p\b/i },
-  { label: '540p', regex: /\b540p\b/i },
-  { label: '480p', regex: /\b480p\b|sd\b/i },
-  { label: '360p', regex: /\b360p\b/i },
-  { label: '240p', regex: /\b240p\b/i }
-];
 
-const RESOLUTION_SYNONYM_PATTERNS = [
-  { label: '4320p', regex: /\b8k\b/i },
-  { label: '2160p', regex: /\b(4k|uhd)\b/i },
-];
 
 const QUALITY_SCORE_MAP = RESOLUTION_PREFERENCES.reduce((acc, label, index) => {
   acc[label] = RESOLUTION_PREFERENCES.length - index;
@@ -159,60 +143,49 @@ function buildLanguagePattern(token) {
   return new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i');
 }
 
-function detectLanguages(title) {
-  const normalizedTitle = (title || '').toLowerCase();
-  if (!normalizedTitle) return [];
-  const matches = new Set();
-  for (const [language, patterns] of Object.entries(LANGUAGE_PATTERNS)) {
-    if (patterns.some((pattern) => pattern.test(normalizedTitle))) {
-      matches.add(language);
-    }
-  }
-  return Array.from(matches);
-}
+/**
+ * @typedef {Object} ParsedResult
+ * @property {string[]} [audio]
+ * @property {string} [bitDepth]
+ * @property {string} [codec]
+ * @property {boolean} [complete]
+ * @property {string} [container]
+ * @property {string} [date]
+ * @property {boolean} [documentary]
+ * @property {boolean} [dubbed]
+ * @property {number[]} [episodes]
+ * @property {boolean} [extended]
+ * @property {string} [group]
+ * @property {string[]} [hdr]
+ * @property {boolean} [hardcoded]
+ * @property {string[]} [languages]
+ * @property {boolean} [proper]
+ * @property {string} [quality] - e.g. "WEBRip"
+ * @property {boolean} [remastered]
+ * @property {boolean} [repack]
+ * @property {string} [resolution] - e.g. "1080p"
+ * @property {boolean} [retail]
+ * @property {number[]} [seasons]
+ * @property {string} [size]
+ * @property {string} [title]
+ * @property {string} [year]
+ * @property {boolean} [remux]
+ * @property {boolean} [unrated]
+ * @property {string} [source]
+ * @property {boolean} [upscaled]
+ * @property {boolean} [convert]
+ * @property {string} [region]
+ */
 
-function detectResolution(rawTitle, parsed) {
-  if (parsed?.resolution) {
-    const normalized = normalizeResolutionLabel(parsed.resolution);
-    if (normalized) return normalized;
-  }
-  const title = rawTitle || '';
-  for (const entry of RESOLUTION_NUMERIC_PATTERNS) {
-    if (entry.regex.test(title)) {
-      return entry.label;
-    }
-  }
-  if (parsed?.quality) {
-    const normalized = normalizeResolutionLabel(parsed.quality);
-    if (normalized) return normalized;
-  }
-  for (const entry of RESOLUTION_SYNONYM_PATTERNS) {
-    if (entry.regex.test(title)) {
-      return entry.label;
-    }
-  }
-  return null;
-}
-
-function normalizeResolutionLabel(label) {
-  if (label === undefined || label === null) return null;
-  const value = label.toString().toLowerCase();
-  if (!value) return null;
-  if (value.includes('4320') || value.includes('8k')) return '4320p';
-  if (value.includes('2160') || value.includes('4k') || value.includes('uhd')) return '2160p';
-  if (value.includes('1440')) return '1440p';
-  if (value.includes('1080')) return '1080p';
-  if (value.includes('720')) return '720p';
-  if (value.includes('576')) return '576p';
-  if (value.includes('540')) return '540p';
-  if (value.includes('480')) return '480p';
-  if (value.includes('360')) return '360p';
-  if (value.includes('240')) return '240p';
-  return null;
-}
-
+/**
+ * Parses release title using @viren070/parse-torrent-title
+ * @param {string} title
+ * @returns {import('../../utils/helpers').AnnotatedMetadata}
+ */
 function parseReleaseMetadata(title) {
   const rawTitle = typeof title === 'string' ? title : '';
+
+  /** @type {ParsedResult} */
   const parsed = (() => {
     try {
       return parseTorrentTitle(rawTitle) || {};
@@ -220,16 +193,37 @@ function parseReleaseMetadata(title) {
       return {};
     }
   })();
-  const resolution = detectResolution(rawTitle, parsed);
-  const languages = detectLanguages(rawTitle);
-  const qualityLabel = parsed.quality || parsed.source || parsed.codec || null;
+
+  // Trust the library output directly
+  const resolution = parsed.resolution || null;
   const qualityScore = QUALITY_SCORE_MAP[resolution] || 0;
 
+  // Map library fields to internal schema
   return {
+    // title: parsed.title || null, // Parsed title (stripped of metadata)
     resolution,
-    languages,
-    qualityLabel,
+    languages: Array.isArray(parsed.languages) ? parsed.languages : [],
+    qualityLabel: parsed.quality || parsed.source || parsed.codec || null,
     qualityScore,
+    codec: parsed.codec || null,
+    source: parsed.source || null,
+    group: parsed.group || null,
+    season: Array.isArray(parsed.seasons) ? parsed.seasons[0] || null : null,
+    episode: Array.isArray(parsed.episodes) ? parsed.episodes[0] || null : null,
+    year: parsed.year ? parseInt(parsed.year, 10) || null : null,
+    complete: parsed.complete || false,
+    proper: parsed.proper || false,
+    repack: parsed.repack || false,
+    container: parsed.container || null,
+    audio: Array.isArray(parsed.audio) ? parsed.audio[0] : null,
+    extended: parsed.extended || false,
+    hardcoded: parsed.hardcoded || false,
+    hdr: Array.isArray(parsed.hdr) && parsed.hdr.length > 0,
+    remastered: parsed.remastered || false,
+    unrated: parsed.unrated || false,
+    remux: parsed.remux || false,
+    retail: parsed.retail || false,
+    region: parsed.region || null,
   };
 }
 

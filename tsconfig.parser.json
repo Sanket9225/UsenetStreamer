@@ -1,0 +1,21 @@
+{
+    "compilerOptions": {
+        "target": "ES2020",
+        "module": "CommonJS",
+        "moduleResolution": "node",
+        "declaration": true,
+        "outDir": "./src/utils/lib/parse-torrent-title",
+        "esModuleInterop": true,
+        "forceConsistentCasingInFileNames": true,
+        "strict": true,
+        "skipLibCheck": true
+    },
+    "include": [
+        "src/utils/vendor/parse-torrent-title/src/**/*"
+    ],
+    "exclude": [
+        "**/__tests__/**/*",
+        "**/*.test.ts",
+        "**/*.spec.ts"
+    ]
+}

@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
+    "build:parser": "tsc -p tsconfig.parser.json",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -18,11 +19,13 @@
     "form-data": "^4.0.1",
     "morgan": "^1.10.0",
     "nntp": "^0.3.1",
-    "parse-torrent-title": "^2.1.0",
     "streamsearch": "^0.1.2",
     "stremio-addon-sdk": "^1.6.10",
     "user-agents": "^1.1.314",
     "webdav": "^5.6.0",
     "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   }
 }

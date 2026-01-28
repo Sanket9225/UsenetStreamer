@@ -34,7 +34,7 @@ const { ensureSharedSecret } = require('./src/middleware/auth');
 const newznabService = require('./src/services/newznab');
 const easynewsService = require('./src/services/easynews');
 const { toFiniteNumber, toPositiveInt, toBoolean, parseCommaList, parsePathList, normalizeSortMode, resolvePreferredLanguages, toSizeBytesFromGb, collectConfigValues, computeManifestUrl, stripTrailingSlashes, decodeBase64Value } = require('./src/utils/config');
-const { normalizeReleaseTitle, parseRequestedEpisode, isVideoFileName, fileMatchesEpisode, normalizeNzbdavPath, inferMimeType, normalizeIndexerToken, nzbMatchesIndexer, cleanSpecialSearchTitle } = require('./src/utils/parsers');
+const { normalizeReleaseTitle, parseRequestedEpisode, isVideoFileName, fileMatchesEpisode, normalizeNzbdavPath, inferMimeType, normalizeIndexerToken, nzbMatchesIndexer, cleanSpecialSearchTitle, parseFilterList, normalizeResolutionToken } = require('./src/utils/parsers');
 const { sleep, annotateNzbResult, applyMaxSizeFilter, prepareSortedResults, getPreferredLanguageMatch, getPreferredLanguageMatches, triageStatusRank, buildTriageTitleMap, prioritizeTriageCandidates, triageDecisionsMatchStatuses, sanitizeDecisionForCache, serializeFinalNzbResults, restoreFinalNzbResults, safeStat } = require('./src/utils/helpers');
 const indexerService = require('./src/services/indexer');
 const nzbdavService = require('./src/services/nzbdav');
@@ -109,11 +109,10 @@ async function resolvePrefetchedNzbdavJob(downloadUrl) {
 function formatResolutionBadge(resolution) {
   if (!resolution) return null;
   const normalized = resolution.toLowerCase();
-  if (normalized === '4320p') return '8K';
-  if (normalized === '2160p') return '4K';
-  if (normalized === '8k') return '8K';
-  if (normalized === '4k') return '4K';
-  if (normalized === 'uhd') return 'UHD';
+
+  if (normalized === '8k' || normalized === '4320p') return '8K';
+  if (normalized === '4k' || normalized === '2160p' || normalized === 'uhd') return '4K';
+
   if (normalized.endsWith('p')) return normalized.toUpperCase();
   return resolution;
 }
@@ -242,10 +241,10 @@ adminApiRouter.post('/config', async (req, res) => {
   try {
     runtimeEnv.updateRuntimeEnv(updates);
     runtimeEnv.applyRuntimeEnv();
-    
+
     // Debug: check process.env after apply
     console.log('[ADMIN] process.env.TMDB_API_KEY after apply:', process.env.TMDB_API_KEY ? `(${process.env.TMDB_API_KEY.length} chars)` : '(empty)');
-    
+
     indexerService.reloadConfig();
     nzbdavService.reloadConfig();
     tmdbService.reloadConfig();
@@ -426,11 +425,7 @@ function logNewznabDebug(message, context = null) {
   }
 }
 
-function normalizeResolutionToken(value) {
-  if (value === undefined || value === null) return null;
-  const token = String(value).trim().toLowerCase();
-  return token || null;
-}
+
 
 function parseAllowedResolutionList(rawValue) {
   const entries = parseCommaList(rawValue);
@@ -560,17 +555,17 @@ function buildTriageNntpConfig() {
 function buildNntpServersArray() {
   const host = (process.env.NZB_TRIAGE_NNTP_HOST || '').trim();
   if (!host) return [];
-  
+
   const port = toPositiveInt(process.env.NZB_TRIAGE_NNTP_PORT, 119);
   const user = (process.env.NZB_TRIAGE_NNTP_USER || '').trim();
   const pass = (process.env.NZB_TRIAGE_NNTP_PASS || '').trim();
   const useTLS = toBoolean(process.env.NZB_TRIAGE_NNTP_TLS, false);
   const connections = toPositiveInt(process.env.NZB_TRIAGE_NNTP_MAX_CONNECTIONS, 12);
-  
+
   const protocol = useTLS ? 'nntps' : 'nntp';
   const auth = user && pass ? `${encodeURIComponent(user)}:${encodeURIComponent(pass)}@` : '';
   const serverUrl = `${protocol}://${auth}${host}:${port}/${connections}`;
-  
+
   return [serverUrl];
 }
 
@@ -584,6 +579,7 @@ let INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
     : DEFAULT_MAX_RESULT_SIZE_GB
 );
 let ALLOWED_RESOLUTIONS = parseAllowedResolutionList(process.env.NZB_ALLOWED_RESOLUTIONS);
+let RELEASE_EXCLUSIONS = parseCommaList(process.env.NZB_RELEASE_EXCLUSIONS);
 let RESOLUTION_LIMIT_PER_QUALITY = parseResolutionLimitValue(process.env.NZB_RESOLUTION_LIMIT_PER_QUALITY);
 let TRIAGE_ENABLED = toBoolean(process.env.NZB_TRIAGE_ENABLED, false);
 let TRIAGE_TIME_BUDGET_MS = toPositiveInt(process.env.NZB_TRIAGE_TIME_BUDGET_MS, 35000);
@@ -737,6 +733,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
       : DEFAULT_MAX_RESULT_SIZE_GB
   );
   ALLOWED_RESOLUTIONS = parseAllowedResolutionList(process.env.NZB_ALLOWED_RESOLUTIONS);
+  RELEASE_EXCLUSIONS = parseCommaList(process.env.NZB_RELEASE_EXCLUSIONS);
   RESOLUTION_LIMIT_PER_QUALITY = parseResolutionLimitValue(process.env.NZB_RESOLUTION_LIMIT_PER_QUALITY);
 
   TRIAGE_ENABLED = toBoolean(process.env.NZB_TRIAGE_ENABLED, false);
@@ -811,6 +808,7 @@ const ADMIN_CONFIG_KEYS = [
   'NZB_HIDE_BLOCKED_RESULTS',
   'NZB_ALLOWED_RESOLUTIONS',
   'NZB_RESOLUTION_LIMIT_PER_QUALITY',
+  'NZB_RELEASE_EXCLUSIONS',
   'NZBDAV_URL',
   'NZBDAV_API_KEY',
   'NZBDAV_WEBDAV_URL',
@@ -1008,9 +1006,9 @@ function buildStreamCacheKey({ type, id, query = {}, requestedEpisode = null }) 
     });
   const normalizedEpisode = requestedEpisode
     ? {
-        season: Number.isFinite(requestedEpisode.season) ? requestedEpisode.season : null,
-        episode: Number.isFinite(requestedEpisode.episode) ? requestedEpisode.episode : null,
-      }
+      season: Number.isFinite(requestedEpisode.season) ? requestedEpisode.season : null,
+      episode: Number.isFinite(requestedEpisode.episode) ? requestedEpisode.episode : null,
+    }
     : null;
   return JSON.stringify({ type, id, requestedEpisode: normalizedEpisode, query: normalizedQuery });
 }
@@ -1073,7 +1071,7 @@ function matchesStrictSearch(title, strictPhrase) {
   const candidateTokens = candidate.split(' ').filter(Boolean);
   const phraseTokens = strictPhrase.split(' ').filter(Boolean);
   if (phraseTokens.length === 0) return true;
-  
+
   // Relaxed matching: all phrase tokens must appear in order, but gaps allowed
   let candidateIdx = 0;
   for (const token of phraseTokens) {
@@ -1326,10 +1324,10 @@ async function streamHandler(req, res) {
     const tmdbConfig = tmdbService.getConfig();
     const shouldUseTmdb = tmdbService.isConfigured() && incomingImdbId;
     const skipMetadataFetch = Boolean(cachedSearchMeta?.triageComplete);
-    
+
     let tmdbMetadata = null;
     let tmdbMetadataPromise = null;
-    
+
     // Start TMDb fetch in background (don't await yet)
     if (shouldUseTmdb && !skipMetadataFetch) {
       console.log('[TMDB] Starting TMDb metadata fetch in background');
@@ -1358,7 +1356,7 @@ async function streamHandler(req, res) {
       || needsRelaxedMetadata
       || easynewsService.requiresCinemetaMetadata(isSpecialRequest)
     );
-    
+
     let cinemetaPromise = null;
     if (needsCinemeta) {
       const cinemetaPath = type === 'series' ? `series/${baseIdentifier}.json` : `${type}/${baseIdentifier}.json`;
@@ -1757,7 +1755,7 @@ async function streamHandler(req, res) {
       if (easynewsService.isEasynewsEnabled()) {
         const easynewsStrictMode = !isSpecialRequest && (type === 'movie' || type === 'series');
         let easynewsRawQuery = null;
-        
+
         // Check if we have TMDb titles - prefer English titles for Easynews
         const tmdbTitles = metaSources.find(s => s?._tmdbTitles)?._tmdbTitles;
         if (tmdbTitles && tmdbTitles.length > 0) {
@@ -1785,7 +1783,7 @@ async function streamHandler(req, res) {
             }
           }
         }
-        
+
         // Fallback to old logic if no TMDb titles
         if (!easynewsRawQuery) {
           if (isSpecialRequest) {
@@ -1804,7 +1802,7 @@ async function streamHandler(req, res) {
           if (!easynewsRawQuery && baseIdentifier) {
             easynewsRawQuery = baseIdentifier;
           }
-          
+
           // Skip Easynews if final query contains non-ASCII characters
           if (easynewsRawQuery && /[^\x00-\x7F]/.test(easynewsRawQuery)) {
             console.log('[EASYNEWS] Skipping search - query contains non-ASCII characters:', easynewsRawQuery);
@@ -1828,7 +1826,7 @@ async function streamHandler(req, res) {
             easynewsRawQuery = baseIdentifier || null;
           }
         }
-        
+
         if (easynewsRawQuery) {
           easynewsSearchParams = {
             rawQuery: easynewsRawQuery,
@@ -1869,7 +1867,7 @@ async function streamHandler(req, res) {
         const indexer = result.indexer || result.Indexer || '';
         const title = (result.title || result.Title || '').trim();
         const size = result.size || result.Size || 0;
-        
+
         // Use title + indexer info + size as unique key for better deduplication
         return `${indexerId}|${indexer}|${title}|${size}`;
       };
@@ -1892,7 +1890,7 @@ async function streamHandler(req, res) {
       const idPlanResults = await Promise.all(idSearchPromises);
       console.log(`${INDEXER_LOG_PREFIX} ID-based searches completed in ${Date.now() - idSearchStartTs} ms total`);
       const processedIdPlans = new Set();
-      
+
       for (const { plan, settled, startTs, endTs } of idPlanResults) {
         console.log(`${INDEXER_LOG_PREFIX} ID plan execution time: ${endTs - startTs} ms for "${plan.query}"`);
         processedIdPlans.add(`${plan.type}|${plan.query}`);
@@ -1916,13 +1914,13 @@ async function streamHandler(req, res) {
         } else if (Array.isArray(newznabSet?.value?.errors) && newznabSet.value.errors.length) {
           newznabSet.value.errors.forEach((err) => errors.push(`newznab: ${err}`));
         }
-        
+
         console.log(`${INDEXER_LOG_PREFIX} ✅ ${plan.type} returned ${combinedResults.length} total results for query "${plan.query}"`, {
           managerCount: managerResults.length || 0,
           newznabCount: newznabResults.length || 0,
           errors: errors.length ? errors : undefined,
         });
-        
+
         const filteredResults = combinedResults.filter((item) =>
           item && typeof item === 'object' && item.downloadUrl && resultMatchesStrictPlan(plan, item)
         );
@@ -1941,7 +1939,7 @@ async function streamHandler(req, res) {
             }
           }
         }
-        
+
         planSummaries.push({
           planType: plan.type,
           query: plan.query,
@@ -2176,6 +2174,7 @@ async function streamHandler(req, res) {
       sortMode: activeSortMode,
       preferredLanguages: resolvedPreferredLanguages,
       maxSizeBytes: effectiveMaxSizeBytes,
+      releaseExclusions: RELEASE_EXCLUSIONS,
       allowedResolutions: ALLOWED_RESOLUTIONS,
       resolutionLimitPerQuality: RESOLUTION_LIMIT_PER_QUALITY,
     });
@@ -2236,20 +2235,20 @@ async function streamHandler(req, res) {
       : combinedHealthTokens;
     const healthIndexerSet = new Set((combinedHealthTokens || []).map((token) => normalizeIndexerToken(token)).filter(Boolean));
     console.log(`[NZB TRIAGE] Easynews health check mode: ${EASYNEWS_TREAT_AS_INDEXER ? 'ENABLED' : 'DISABLED'}`);
-    
+
     const triagePool = healthIndexerSet.size > 0
       ? finalNzbResults.filter((result) => {
-          // Include regular indexer matches
-          if (nzbMatchesIndexer(result, healthIndexerSet)) {
-            return true;
-          }
-          // Include Easynews if flag is enabled
-          if (EASYNEWS_TREAT_AS_INDEXER && result._sourceType === 'easynews') {
-            console.log(`[NZB TRIAGE] Including Easynews result in triage pool: ${result.title}`);
-            return true;
-          }
-          return false;
-        })
+        // Include regular indexer matches
+        if (nzbMatchesIndexer(result, healthIndexerSet)) {
+          return true;
+        }
+        // Include Easynews if flag is enabled
+        if (EASYNEWS_TREAT_AS_INDEXER && result._sourceType === 'easynews') {
+          console.log(`[NZB TRIAGE] Including Easynews result in triage pool: ${result.title}`);
+          return true;
+        }
+        return false;
+      })
       : [];
     console.log(`[NZB TRIAGE] Triage pool size: ${triagePool.length} (from ${finalNzbResults.length} total results)`);
     const getDecisionStatus = (candidate) => {
@@ -2384,14 +2383,14 @@ async function streamHandler(req, res) {
             size: candidate.size,
             fileName: candidate.title,
           });
-            if (!prefetchCandidate && STREAMING_MODE !== 'native') {
-              prefetchCandidate = {
-                downloadUrl: candidate.downloadUrl,
-                title: candidate.title,
-                category: categoryForType,
-                requestedEpisode,
-              };
-            }
+          if (!prefetchCandidate && STREAMING_MODE !== 'native') {
+            prefetchCandidate = {
+              downloadUrl: candidate.downloadUrl,
+              title: candidate.title,
+              category: categoryForType,
+              requestedEpisode,
+            };
+          }
         }
         if (decision && decision.nzbPayload) {
           delete decision.nzbPayload;
@@ -2405,28 +2404,28 @@ async function streamHandler(req, res) {
       });
     }
 
-      // If prefetch is enabled, capture first verified NZB payload even when triage cache completion criteria aren’t met
-      if (TRIAGE_PREFETCH_FIRST_VERIFIED && STREAMING_MODE !== 'native' && !prefetchCandidate && triageDecisions && triageDecisions.size > 0) {
-        for (const candidate of triageEligibleResults) {
-          const decision = triageDecisions.get(candidate.downloadUrl);
-          if (decision && decision.status === 'verified' && typeof decision.nzbPayload === 'string') {
-            prefetchCandidate = {
-              downloadUrl: candidate.downloadUrl,
-              title: candidate.title,
-              category: categoryForType,
-              requestedEpisode,
-            };
-            prefetchNzbPayload = decision.nzbPayload;
-            cache.cacheVerifiedNzbPayload(candidate.downloadUrl, decision.nzbPayload, {
-              title: decision.title || candidate.title,
-              size: candidate.size,
-              fileName: candidate.title,
-            });
-            delete decision.nzbPayload;
-            break;
-          }
+    // If prefetch is enabled, capture first verified NZB payload even when triage cache completion criteria aren’t met
+    if (TRIAGE_PREFETCH_FIRST_VERIFIED && STREAMING_MODE !== 'native' && !prefetchCandidate && triageDecisions && triageDecisions.size > 0) {
+      for (const candidate of triageEligibleResults) {
+        const decision = triageDecisions.get(candidate.downloadUrl);
+        if (decision && decision.status === 'verified' && typeof decision.nzbPayload === 'string') {
+          prefetchCandidate = {
+            downloadUrl: candidate.downloadUrl,
+            title: candidate.title,
+            category: categoryForType,
+            requestedEpisode,
+          };
+          prefetchNzbPayload = decision.nzbPayload;
+          cache.cacheVerifiedNzbPayload(candidate.downloadUrl, decision.nzbPayload, {
+            title: decision.title || candidate.title,
+            size: candidate.size,
+            fileName: candidate.title,
+          });
+          delete decision.nzbPayload;
+          break;
         }
       }
+    }
 
     // NZBDav cache cleanup is now handled automatically by the cache module
 
@@ -2441,13 +2440,13 @@ async function streamHandler(req, res) {
       .filter(Boolean);
     const cacheMeta = streamCacheKey
       ? {
-          version: 1,
-          storedAt: Date.now(),
-          triageComplete: !triageOutcome?.timedOut && triagePendingDownloadUrls.length === 0,
-          triagePendingDownloadUrls,
-          finalNzbResults: serializeFinalNzbResults(finalNzbResults),
-          triageDecisionsSnapshot: cacheReadyDecisionEntries,
-        }
+        version: 1,
+        storedAt: Date.now(),
+        triageComplete: !triageOutcome?.timedOut && triagePendingDownloadUrls.length === 0,
+        triagePendingDownloadUrls,
+        finalNzbResults: serializeFinalNzbResults(finalNzbResults),
+        triageDecisionsSnapshot: cacheReadyDecisionEntries,
+      }
       : null;
 
     // Skip NZBDav history fetching in native streaming mode
@@ -2473,335 +2472,335 @@ async function streamHandler(req, res) {
     const regularStreams = [];
 
     finalNzbResults.forEach((result) => {
-        // Skip releases matching blocklist (ISO, sample, exe, etc.)
-        if (result.title && RELEASE_BLOCKLIST_REGEX.test(result.title)) {
-          return;
+      // Skip releases matching blocklist (ISO, sample, exe, etc.)
+      if (result.title && RELEASE_BLOCKLIST_REGEX.test(result.title)) {
+        return;
+      }
+
+      const sizeInGB = result.size ? (result.size / 1073741824).toFixed(2) : null;
+      const sizeString = sizeInGB ? `${sizeInGB} GB` : 'Size Unknown';
+      const releaseInfo = result.release || {};
+      const releaseLanguages = Array.isArray(releaseInfo.languages) ? releaseInfo.languages : [];
+      const sourceLanguage = result.language || null;
+      const qualityMatch = result.title?.match(/(4320p|2160p|1440p|1080p|720p|576p|540p|480p|360p|240p|8k|4k|uhd)/i);
+      const detectedResolutionToken = releaseInfo.resolution
+        || (qualityMatch ? normalizeResolutionToken(qualityMatch[0]) : null);
+      const resolutionBadge = formatResolutionBadge(detectedResolutionToken);
+      const qualityLabel = releaseInfo.qualityLabel && releaseInfo.qualityLabel !== detectedResolutionToken
+        ? releaseInfo.qualityLabel
+        : null;
+      const featureBadges = extractQualityFeatureBadges(result.title || '');
+      const qualityParts = [];
+      if (resolutionBadge) qualityParts.push(resolutionBadge);
+      if (qualityLabel) qualityParts.push(qualityLabel);
+      featureBadges.forEach((badge) => {
+        if (!qualityParts.includes(badge)) qualityParts.push(badge);
+      });
+      const qualitySummary = qualityParts.join(' ');
+      const quality = resolutionBadge || qualityLabel || '';
+      const languageLabel = releaseLanguages.length > 0 ? releaseLanguages.join(', ') : null;
+      const preferredLanguageMatches = activePreferredLanguages.length > 0
+        ? getPreferredLanguageMatches(result, activePreferredLanguages)
+        : [];
+      const matchedPreferredLanguage = preferredLanguageMatches.length > 0 ? preferredLanguageMatches[0] : null;
+      const preferredLanguageHit = preferredLanguageMatches.length > 0;
+
+      const baseParams = new URLSearchParams({
+        indexerId: String(result.indexerId),
+        type,
+        id
+      });
+
+      baseParams.set('downloadUrl', result.downloadUrl);
+      if (result.guid) baseParams.set('guid', result.guid);
+      if (result.size) baseParams.set('size', String(result.size));
+      if (result.title) baseParams.set('title', result.title);
+      if (result.easynewsPayload) baseParams.set('easynewsPayload', result.easynewsPayload);
+      if (result._sourceType) baseParams.set('sourceType', result._sourceType);
+
+      const cacheKey = nzbdavService.buildNzbdavCacheKey(result.downloadUrl, categoryForType, requestedEpisode);
+      // Cache entries are managed internally by the cache module
+      const normalizedTitle = normalizeReleaseTitle(result.title);
+      const historySlot = normalizedTitle ? historyByTitle.get(normalizedTitle) : null;
+      const isInstant = Boolean(historySlot); // Instant playback if found in history
+
+      const directTriageInfo = triageDecisions.get(result.downloadUrl);
+      const fallbackTitleKey = normalizedTitle;
+      const fallbackTriageInfo = !directTriageInfo && fallbackTitleKey ? triageTitleMap.get(fallbackTitleKey) : null;
+      const fallbackAllowed = fallbackTriageInfo
+        ? indexerService.canShareDecision(fallbackTriageInfo.publishDateMs, result.publishDateMs)
+        : false;
+      const triageInfo = directTriageInfo || (fallbackAllowed ? fallbackTriageInfo : null);
+      const triageApplied = Boolean(directTriageInfo);
+      const triageDerivedFromTitle = Boolean(!directTriageInfo && fallbackAllowed && fallbackTriageInfo);
+      const triageStatus = triageInfo?.status || (triageApplied ? 'unknown' : 'not-run');
+      if (INDEXER_HIDE_BLOCKED_RESULTS && triageStatus === 'blocked') {
+        if (triageInfo) {
+          // console.log('[STREMIO][TRIAGE] Hiding blocked stream', {
+          //   title: result.title,
+          //   downloadUrl: result.downloadUrl,
+          //   indexer: result.indexer,
+          //   blockers: triageInfo.blockers || [],
+          //   warnings: triageInfo.warnings || [],
+          //   archiveFindings: triageInfo.archiveFindings || [],
+          // });
+        } else {
+          // console.log('[STREMIO][TRIAGE] Hiding blocked stream with missing triageInfo', {
+          //   title: result.title,
+          //   downloadUrl: result.downloadUrl,
+          //   indexer: result.indexer,
+          // });
         }
+        return;
+      }
+      let triagePriority = 1;
+      let triageTag = null;
 
-        const sizeInGB = result.size ? (result.size / 1073741824).toFixed(2) : null;
-        const sizeString = sizeInGB ? `${sizeInGB} GB` : 'Size Unknown';
-        const releaseInfo = result.release || {};
-        const releaseLanguages = Array.isArray(releaseInfo.languages) ? releaseInfo.languages : [];
-        const sourceLanguage = result.language || null;
-        const qualityMatch = result.title?.match(/(4320p|2160p|1440p|1080p|720p|576p|540p|480p|360p|240p|8k|4k|uhd)/i);
-        const detectedResolutionToken = releaseInfo.resolution
-          || (qualityMatch ? normalizeResolutionToken(qualityMatch[0]) : null);
-        const resolutionBadge = formatResolutionBadge(detectedResolutionToken);
-        const qualityLabel = releaseInfo.qualityLabel && releaseInfo.qualityLabel !== detectedResolutionToken
-          ? releaseInfo.qualityLabel
-          : null;
-        const featureBadges = extractQualityFeatureBadges(result.title || '');
-        const qualityParts = [];
-        if (resolutionBadge) qualityParts.push(resolutionBadge);
-        if (qualityLabel) qualityParts.push(qualityLabel);
-        featureBadges.forEach((badge) => {
-          if (!qualityParts.includes(badge)) qualityParts.push(badge);
-        });
-        const qualitySummary = qualityParts.join(' ');
-        const quality = resolutionBadge || qualityLabel || '';
-        const languageLabel = releaseLanguages.length > 0 ? releaseLanguages.join(', ') : null;
-        const preferredLanguageMatches = activePreferredLanguages.length > 0
-          ? getPreferredLanguageMatches(result, activePreferredLanguages)
-          : [];
-        const matchedPreferredLanguage = preferredLanguageMatches.length > 0 ? preferredLanguageMatches[0] : null;
-        const preferredLanguageHit = preferredLanguageMatches.length > 0;
-
-        const baseParams = new URLSearchParams({
-          indexerId: String(result.indexerId),
-          type,
-          id
-        });
-
-        baseParams.set('downloadUrl', result.downloadUrl);
-        if (result.guid) baseParams.set('guid', result.guid);
-        if (result.size) baseParams.set('size', String(result.size));
-        if (result.title) baseParams.set('title', result.title);
-        if (result.easynewsPayload) baseParams.set('easynewsPayload', result.easynewsPayload);
-        if (result._sourceType) baseParams.set('sourceType', result._sourceType);
-
-        const cacheKey = nzbdavService.buildNzbdavCacheKey(result.downloadUrl, categoryForType, requestedEpisode);
-        // Cache entries are managed internally by the cache module
-        const normalizedTitle = normalizeReleaseTitle(result.title);
-        const historySlot = normalizedTitle ? historyByTitle.get(normalizedTitle) : null;
-        const isInstant = Boolean(historySlot); // Instant playback if found in history
-
-        const directTriageInfo = triageDecisions.get(result.downloadUrl);
-        const fallbackTitleKey = normalizedTitle;
-        const fallbackTriageInfo = !directTriageInfo && fallbackTitleKey ? triageTitleMap.get(fallbackTitleKey) : null;
-        const fallbackAllowed = fallbackTriageInfo
-          ? indexerService.canShareDecision(fallbackTriageInfo.publishDateMs, result.publishDateMs)
-          : false;
-        const triageInfo = directTriageInfo || (fallbackAllowed ? fallbackTriageInfo : null);
-        const triageApplied = Boolean(directTriageInfo);
-        const triageDerivedFromTitle = Boolean(!directTriageInfo && fallbackAllowed && fallbackTriageInfo);
-        const triageStatus = triageInfo?.status || (triageApplied ? 'unknown' : 'not-run');
-        if (INDEXER_HIDE_BLOCKED_RESULTS && triageStatus === 'blocked') {
-          if (triageInfo) {
-            // console.log('[STREMIO][TRIAGE] Hiding blocked stream', {
-            //   title: result.title,
-            //   downloadUrl: result.downloadUrl,
-            //   indexer: result.indexer,
-            //   blockers: triageInfo.blockers || [],
-            //   warnings: triageInfo.warnings || [],
-            //   archiveFindings: triageInfo.archiveFindings || [],
-            // });
-          } else {
-            // console.log('[STREMIO][TRIAGE] Hiding blocked stream with missing triageInfo', {
-            //   title: result.title,
-            //   downloadUrl: result.downloadUrl,
-            //   indexer: result.indexer,
-            // });
-          }
-          return;
-        }
-        let triagePriority = 1;
-        let triageTag = null;
-
-        if (triageStatus === 'verified') {
-          triagePriority = 0;
-          triageTag = '✅';
-        } else if (triageStatus === 'unverified' || triageStatus === 'unverified_7z') {
-          triageTag = '⚠️';
-        } else if (triageStatus === 'blocked') {
-          triagePriority = 2;
-          triageTag = '🚫';
-        } else if (triageStatus === 'fetch-error') {
-          triagePriority = 2;
-          triageTag = '⚠️';
-        } else if (triageStatus === 'error') {
-          triagePriority = 2;
-          triageTag = '⚠️';
-        } else if (triageStatus === 'pending' || triageStatus === 'skipped') {
-          if (triageOutcome?.timedOut) triageTag = '⏱️';
-        }
+      if (triageStatus === 'verified') {
+        triagePriority = 0;
+        triageTag = '✅';
+      } else if (triageStatus === 'unverified' || triageStatus === 'unverified_7z') {
+        triageTag = '⚠️';
+      } else if (triageStatus === 'blocked') {
+        triagePriority = 2;
+        triageTag = '🚫';
+      } else if (triageStatus === 'fetch-error') {
+        triagePriority = 2;
+        triageTag = '⚠️';
+      } else if (triageStatus === 'error') {
+        triagePriority = 2;
+        triageTag = '⚠️';
+      } else if (triageStatus === 'pending' || triageStatus === 'skipped') {
+        if (triageOutcome?.timedOut) triageTag = '⏱️';
+      }
 
       const archiveFindings = triageInfo?.archiveFindings || [];
-        const archiveStatuses = archiveFindings.map((finding) => String(finding?.status || '').toLowerCase());
-        const archiveFailureTokens = new Set([
-          'rar-compressed',
-          'rar-encrypted',
-          'rar-solid',
-          'rar5-unsupported',
-          'sevenzip-unsupported',
-          'archive-not-found',
-          'archive-no-segments',
-          'rar-insufficient-data',
-          'rar-header-not-found',
-        ]);
-        const passedArchiveCheck = archiveStatuses.some((status) => status === 'rar-stored' || status === 'sevenzip-stored');
-        const failedArchiveCheck = (triageInfo?.blockers || []).some((blocker) => archiveFailureTokens.has(blocker))
-          || archiveStatuses.some((status) => archiveFailureTokens.has(status));
-        let archiveCheckStatus = 'not-run';
-        if (triageInfo) {
-          if (failedArchiveCheck) archiveCheckStatus = 'failed';
-          else if (passedArchiveCheck) archiveCheckStatus = 'passed';
-          else if (archiveFindings.length > 0) archiveCheckStatus = 'inconclusive';
-        }
+      const archiveStatuses = archiveFindings.map((finding) => String(finding?.status || '').toLowerCase());
+      const archiveFailureTokens = new Set([
+        'rar-compressed',
+        'rar-encrypted',
+        'rar-solid',
+        'rar5-unsupported',
+        'sevenzip-unsupported',
+        'archive-not-found',
+        'archive-no-segments',
+        'rar-insufficient-data',
+        'rar-header-not-found',
+      ]);
+      const passedArchiveCheck = archiveStatuses.some((status) => status === 'rar-stored' || status === 'sevenzip-stored');
+      const failedArchiveCheck = (triageInfo?.blockers || []).some((blocker) => archiveFailureTokens.has(blocker))
+        || archiveStatuses.some((status) => archiveFailureTokens.has(status));
+      let archiveCheckStatus = 'not-run';
+      if (triageInfo) {
+        if (failedArchiveCheck) archiveCheckStatus = 'failed';
+        else if (passedArchiveCheck) archiveCheckStatus = 'passed';
+        else if (archiveFindings.length > 0) archiveCheckStatus = 'inconclusive';
+      }
 
-        const missingArticlesFailure = (triageInfo?.blockers || []).includes('missing-articles')
-          || archiveStatuses.includes('segment-missing');
-        const missingArticlesSuccess = archiveStatuses.includes('segment-ok')
-          || archiveStatuses.includes('sevenzip-untested');
-        let missingArticlesStatus = 'not-run';
-        if (triageInfo) {
-          if (missingArticlesFailure) missingArticlesStatus = 'failed';
-          else if (missingArticlesSuccess) missingArticlesStatus = 'passed';
-          else if (archiveFindings.length > 0) missingArticlesStatus = 'inconclusive';
-        }
+      const missingArticlesFailure = (triageInfo?.blockers || []).includes('missing-articles')
+        || archiveStatuses.includes('segment-missing');
+      const missingArticlesSuccess = archiveStatuses.includes('segment-ok')
+        || archiveStatuses.includes('sevenzip-untested');
+      let missingArticlesStatus = 'not-run';
+      if (triageInfo) {
+        if (missingArticlesFailure) missingArticlesStatus = 'failed';
+        else if (missingArticlesSuccess) missingArticlesStatus = 'passed';
+        else if (archiveFindings.length > 0) missingArticlesStatus = 'inconclusive';
+      }
 
-        if (triageApplied || triageDerivedFromTitle) {
-          // console.log('[STREMIO][TRIAGE] Stream decision', {
-          //   title: result.title,
-          //   downloadUrl: result.downloadUrl,
-          //   indexer: result.indexer,
-          //   triageStatus,
-          //   triageApplied,
-          //   triageDerivedFromTitle,
-          //   blockers: triageInfo?.blockers || [],
-          //   warnings: triageInfo?.warnings || [],
-          //   archiveFindings,
-          //   archiveCheckStatus,
-          //   missingArticlesStatus,
-          //   timedOut: Boolean(triageOutcome?.timedOut),
-          //   decisionSource: triageApplied ? 'direct' : 'title-fallback',
-          // });
-        }
+      if (triageApplied || triageDerivedFromTitle) {
+        // console.log('[STREMIO][TRIAGE] Stream decision', {
+        //   title: result.title,
+        //   downloadUrl: result.downloadUrl,
+        //   indexer: result.indexer,
+        //   triageStatus,
+        //   triageApplied,
+        //   triageDerivedFromTitle,
+        //   blockers: triageInfo?.blockers || [],
+        //   warnings: triageInfo?.warnings || [],
+        //   archiveFindings,
+        //   archiveCheckStatus,
+        //   missingArticlesStatus,
+        //   timedOut: Boolean(triageOutcome?.timedOut),
+        //   decisionSource: triageApplied ? 'direct' : 'title-fallback',
+        // });
+      }
 
-        if (historySlot?.nzoId) {
-          baseParams.set('historyNzoId', historySlot.nzoId);
-          if (historySlot.jobName) {
-            baseParams.set('historyJobName', historySlot.jobName);
-          }
-          if (historySlot.category) {
-            baseParams.set('historyCategory', historySlot.category);
-          }
+      if (historySlot?.nzoId) {
+        baseParams.set('historyNzoId', historySlot.nzoId);
+        if (historySlot.jobName) {
+          baseParams.set('historyJobName', historySlot.jobName);
         }
+        if (historySlot.category) {
+          baseParams.set('historyCategory', historySlot.category);
+        }
+      }
 
-        const tokenSegment = ADDON_SHARED_SECRET ? `/${ADDON_SHARED_SECRET}` : '';
-        const rawFilename = (result.title || 'stream').toString().trim();
-        const normalizedFilename = rawFilename
-          .replace(/[\\/:*?"<>|]+/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        const fileBase = normalizedFilename || 'stream';
-        const hasVideoExt = /\.(mkv|mp4|m4v|avi|mov|wmv|mpg|mpeg|ts|webm)$/i.test(fileBase);
-        const fileWithExt = hasVideoExt ? fileBase : `${fileBase}.mkv`;
-        const encodedFilename = encodeURIComponent(fileWithExt);
-        const streamUrl = `${addonBaseUrl}${tokenSegment}/nzb/stream/${encodedFilename}?${baseParams.toString()}`;
-        const tags = [];
-        if (triageTag) tags.push(triageTag);
-        if (isInstant && STREAMING_MODE !== 'native') tags.push('⚡ Instant');
-        if (preferredLanguageMatches.length > 0) {
-          preferredLanguageMatches.forEach((language) => tags.push(language));
-        }
-        // quality summary now part of name; keep tags focused on status/language/size
-        if (languageLabel) tags.push(`🌐 ${languageLabel}`);
-        if (sizeString) tags.push(sizeString);
-        const addonLabel = ADDON_NAME || DEFAULT_ADDON_NAME;
-        const name = qualitySummary ? `${addonLabel} ${qualitySummary}` : addonLabel;
-        
-        // Build behavior hints based on streaming mode
-        let behaviorHints;
-        if (STREAMING_MODE === 'native') {
-          // Native mode: minimal behaviorHints for Stremio v5 native NZB streaming
-          behaviorHints = {
-            bingeGroup: `usenetstreamer-${detectedResolutionToken || 'unknown'}`,
-            videoSize: result.size || undefined,
-            filename: result.title || undefined,
-          };
-        } else {
-          // NZBDav mode: WebDAV-based streaming
-          behaviorHints = {
-            notWebReady: true,
-            filename: result.title || undefined,
-          };
-          if (isInstant) {
-            behaviorHints.cached = true;
-            if (historySlot) {
-              behaviorHints.cachedFromHistory = true;
-            }
-          }
-        }
+      const tokenSegment = ADDON_SHARED_SECRET ? `/${ADDON_SHARED_SECRET}` : '';
+      const rawFilename = (result.title || 'stream').toString().trim();
+      const normalizedFilename = rawFilename
+        .replace(/[\\/:*?"<>|]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const fileBase = normalizedFilename || 'stream';
+      const hasVideoExt = /\.(mkv|mp4|m4v|avi|mov|wmv|mpg|mpeg|ts|webm)$/i.test(fileBase);
+      const fileWithExt = hasVideoExt ? fileBase : `${fileBase}.mkv`;
+      const encodedFilename = encodeURIComponent(fileWithExt);
+      const streamUrl = `${addonBaseUrl}${tokenSegment}/nzb/stream/${encodedFilename}?${baseParams.toString()}`;
+      const tags = [];
+      if (triageTag) tags.push(triageTag);
+      if (isInstant && STREAMING_MODE !== 'native') tags.push('⚡ Instant');
+      if (preferredLanguageMatches.length > 0) {
+        preferredLanguageMatches.forEach((language) => tags.push(language));
+      }
+      // quality summary now part of name; keep tags focused on status/language/size
+      if (languageLabel) tags.push(`🌐 ${languageLabel}`);
+      if (sizeString) tags.push(sizeString);
+      const addonLabel = ADDON_NAME || DEFAULT_ADDON_NAME;
+      const name = qualitySummary ? `${addonLabel} ${qualitySummary}` : addonLabel;
 
-        if (triageApplied && triageLogCount < 10) {
-          const archiveSampleEntries = [];
-          (triageInfo?.archiveFindings || []).forEach((finding) => {
-            const samples = finding?.details?.sampleEntries;
-            if (Array.isArray(samples)) {
-              samples.forEach((entry) => {
-                if (entry && !archiveSampleEntries.includes(entry)) {
-                  archiveSampleEntries.push(entry);
-                }
-              });
-            } else if (finding?.details?.name && !archiveSampleEntries.includes(finding.details.name)) {
-              archiveSampleEntries.push(finding.details.name);
-            }
-          });
-          // console.log('[NZB TRIAGE] Stream candidate status', {
-          //   title: result.title,
-          //   downloadUrl: result.downloadUrl,
-          //   status: triageStatus,
-          //   triageApplied,
-          //   triagePriority,
-          //   blockers: triageInfo?.blockers || [],
-          //   warnings: triageInfo?.warnings || [],
-          //   archiveFindings: triageInfo?.archiveFindings || [],
-          //   archiveSampleEntries,
-          //   archiveCheckStatus,
-          //   missingArticlesStatus,
-          //   timedOut: Boolean(triageOutcome?.timedOut)
-          // });
-          triageLogCount += 1;
-        } else if (!triageApplied) {
-          // Skip logging for streams that were never part of the triage batch
-        } else if (!triageLogSuppressed) {
-          console.log('[NZB TRIAGE] Additional stream triage logs suppressed');
-          triageLogSuppressed = true;
-        }
-
-        // Build the stream object based on streaming mode
-        let stream;
-        if (STREAMING_MODE === 'native') {
-          // Native mode: Stremio v5 native NZB streaming
-          const nntpServers = buildNntpServersArray();
-          stream = {
-            name,
-            description: `${result.title}\n${result.indexer} • ${sizeString}\n${tags.filter(Boolean).join(' • ')}`,
-            nzbUrl: result.downloadUrl,
-            servers: nntpServers.length > 0 ? nntpServers : undefined,
-            url: undefined,
-            infoHash: undefined,
-            behaviorHints,
-          };
-        } else {
-          // NZBDav mode: WebDAV-based streaming
-          stream = {
-            title: `${result.title}\n${tags.filter(Boolean).join(' • ')}\n${result.indexer}`,
-            name,
-            url: streamUrl,
-            behaviorHints,
-            meta: {
-              originalTitle: result.title,
-              indexer: result.indexer,
-              size: result.size,
-              quality,
-              age: result.age,
-              type: 'nzb',
-              cached: Boolean(isInstant),
-              cachedFromHistory: Boolean(historySlot),
-              languages: releaseLanguages,
-              indexerLanguage: sourceLanguage,
-              resolution: detectedResolutionToken || null,
-              preferredLanguageMatch: preferredLanguageHit,
-              preferredLanguageName: matchedPreferredLanguage,
-              preferredLanguageNames: preferredLanguageMatches,
-            }
-          };
-          
-          // Add health check metadata for NZBDav mode
-          if (triageTag || triageInfo || triageOutcome?.timedOut || !triageApplied) {
-            if (triageInfo) {
-              stream.meta.healthCheck = {
-                status: triageStatus,
-                blockers: triageInfo.blockers || [],
-                warnings: triageInfo.warnings || [],
-                fileCount: triageInfo.fileCount,
-                archiveCheck: archiveCheckStatus,
-                missingArticlesCheck: missingArticlesStatus,
-                applied: triageApplied,
-                inheritedFromTitle: triageDerivedFromTitle,
-              };
-              stream.meta.healthCheck.archiveFindings = archiveFindings;
-              if (triageInfo.sourceDownloadUrl) {
-                stream.meta.healthCheck.sourceDownloadUrl = triageInfo.sourceDownloadUrl;
-              }
-            } else {
-              stream.meta.healthCheck = {
-                status: triageOutcome?.timedOut ? 'pending' : 'not-run',
-                applied: false,
-              };
-            }
-          }
-        }
-
+      // Build behavior hints based on streaming mode
+      let behaviorHints;
+      if (STREAMING_MODE === 'native') {
+        // Native mode: minimal behaviorHints for Stremio v5 native NZB streaming
+        behaviorHints = {
+          bingeGroup: `usenetstreamer-${detectedResolutionToken || 'unknown'}`,
+          videoSize: result.size || undefined,
+          filename: result.title || undefined,
+        };
+      } else {
+        // NZBDav mode: WebDAV-based streaming
+        behaviorHints = {
+          notWebReady: true,
+          filename: result.title || undefined,
+        };
         if (isInstant) {
-          instantStreams.push(stream);
-        } else {
-          regularStreams.push(stream);
+          behaviorHints.cached = true;
+          if (historySlot) {
+            behaviorHints.cachedFromHistory = true;
+          }
         }
+      }
 
-        if (preferredLanguageMatches.length > 0 || sourceLanguage || releaseLanguages.length > 0) {
-          // console.log('[LANGUAGE] Stream classification', {
-          //   title: result.title,
-          //   preferredLanguageMatches,
-          //   parserLanguages: releaseLanguages,
-          //   indexerLanguage: sourceLanguage,
-          //   indexer: result.indexer,
-          //   indexerId: result.indexerId,
-          //   preferredLanguageHit,
-          // });
+      if (triageApplied && triageLogCount < 10) {
+        const archiveSampleEntries = [];
+        (triageInfo?.archiveFindings || []).forEach((finding) => {
+          const samples = finding?.details?.sampleEntries;
+          if (Array.isArray(samples)) {
+            samples.forEach((entry) => {
+              if (entry && !archiveSampleEntries.includes(entry)) {
+                archiveSampleEntries.push(entry);
+              }
+            });
+          } else if (finding?.details?.name && !archiveSampleEntries.includes(finding.details.name)) {
+            archiveSampleEntries.push(finding.details.name);
+          }
+        });
+        // console.log('[NZB TRIAGE] Stream candidate status', {
+        //   title: result.title,
+        //   downloadUrl: result.downloadUrl,
+        //   status: triageStatus,
+        //   triageApplied,
+        //   triagePriority,
+        //   blockers: triageInfo?.blockers || [],
+        //   warnings: triageInfo?.warnings || [],
+        //   archiveFindings: triageInfo?.archiveFindings || [],
+        //   archiveSampleEntries,
+        //   archiveCheckStatus,
+        //   missingArticlesStatus,
+        //   timedOut: Boolean(triageOutcome?.timedOut)
+        // });
+        triageLogCount += 1;
+      } else if (!triageApplied) {
+        // Skip logging for streams that were never part of the triage batch
+      } else if (!triageLogSuppressed) {
+        console.log('[NZB TRIAGE] Additional stream triage logs suppressed');
+        triageLogSuppressed = true;
+      }
+
+      // Build the stream object based on streaming mode
+      let stream;
+      if (STREAMING_MODE === 'native') {
+        // Native mode: Stremio v5 native NZB streaming
+        const nntpServers = buildNntpServersArray();
+        stream = {
+          name,
+          description: `${result.title}\n${result.indexer} • ${sizeString}\n${tags.filter(Boolean).join(' • ')}`,
+          nzbUrl: result.downloadUrl,
+          servers: nntpServers.length > 0 ? nntpServers : undefined,
+          url: undefined,
+          infoHash: undefined,
+          behaviorHints,
+        };
+      } else {
+        // NZBDav mode: WebDAV-based streaming
+        stream = {
+          title: `${result.title}\n${tags.filter(Boolean).join(' • ')}\n${result.indexer}`,
+          name,
+          url: streamUrl,
+          behaviorHints,
+          meta: {
+            originalTitle: result.title,
+            indexer: result.indexer,
+            size: result.size,
+            quality,
+            age: result.age,
+            type: 'nzb',
+            cached: Boolean(isInstant),
+            cachedFromHistory: Boolean(historySlot),
+            languages: releaseLanguages,
+            indexerLanguage: sourceLanguage,
+            resolution: detectedResolutionToken || null,
+            preferredLanguageMatch: preferredLanguageHit,
+            preferredLanguageName: matchedPreferredLanguage,
+            preferredLanguageNames: preferredLanguageMatches,
+          }
+        };
+
+        // Add health check metadata for NZBDav mode
+        if (triageTag || triageInfo || triageOutcome?.timedOut || !triageApplied) {
+          if (triageInfo) {
+            stream.meta.healthCheck = {
+              status: triageStatus,
+              blockers: triageInfo.blockers || [],
+              warnings: triageInfo.warnings || [],
+              fileCount: triageInfo.fileCount,
+              archiveCheck: archiveCheckStatus,
+              missingArticlesCheck: missingArticlesStatus,
+              applied: triageApplied,
+              inheritedFromTitle: triageDerivedFromTitle,
+            };
+            stream.meta.healthCheck.archiveFindings = archiveFindings;
+            if (triageInfo.sourceDownloadUrl) {
+              stream.meta.healthCheck.sourceDownloadUrl = triageInfo.sourceDownloadUrl;
+            }
+          } else {
+            stream.meta.healthCheck = {
+              status: triageOutcome?.timedOut ? 'pending' : 'not-run',
+              applied: false,
+            };
+          }
         }
-      });
+      }
+
+      if (isInstant) {
+        instantStreams.push(stream);
+      } else {
+        regularStreams.push(stream);
+      }
+
+      if (preferredLanguageMatches.length > 0 || sourceLanguage || releaseLanguages.length > 0) {
+        // console.log('[LANGUAGE] Stream classification', {
+        //   title: result.title,
+        //   preferredLanguageMatches,
+        //   parserLanguages: releaseLanguages,
+        //   indexerLanguage: sourceLanguage,
+        //   indexer: result.indexer,
+        //   indexerId: result.indexerId,
+        //   preferredLanguageHit,
+        // });
+      }
+    });
 
     const streams = instantStreams.concat(regularStreams);
 
@@ -2949,10 +2948,10 @@ async function handleNzbdavStream(req, res) {
     const cacheKey = nzbdavService.buildNzbdavCacheKey(downloadUrl, category, requestedEpisode);
     let existingSlotHint = req.query.historyNzoId
       ? {
-          nzoId: req.query.historyNzoId,
-          jobName: req.query.historyJobName,
-          category: req.query.historyCategory
-        }
+        nzoId: req.query.historyNzoId,
+        jobName: req.query.historyJobName,
+        category: req.query.historyCategory
+      }
       : null;
 
     let prefetchedSlotHint = null;

@@ -1,0 +1,3 @@
+[submodule "src/utils/vendor/parse-torrent-title"]
+	path = src/utils/vendor/parse-torrent-title
+	url = https://github.com/Viren070/parse-torrent-title.git

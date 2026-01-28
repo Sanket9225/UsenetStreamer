@@ -131,6 +131,11 @@
         } else {
           element.checked = parseBool(rawValue);
         }
+      } else if (element.multiple) {
+        const selectedValues = rawValue ? rawValue.split(',').map(v => v.trim()).filter(v => v) : [];
+        Array.from(element.options).forEach(option => {
+          option.selected = selectedValues.includes(option.value);
+        });
       } else if (element.type === 'number' && rawValue === '') {
         element.value = '';
       } else {
@@ -147,6 +152,9 @@
       if (!key) return;
       if (element.type === 'checkbox') {
         payload[key] = element.checked ? 'true' : 'false';
+      } else if (element.multiple) {
+        const selected = Array.from(element.selectedOptions).map(opt => opt.value);
+        payload[key] = selected.join(',');
       } else {
         payload[key] = element.value != null ? element.value.toString() : '';
       }
@@ -451,15 +459,15 @@
       </div>
     `;
 
-  const moveUpButton = row.querySelector('[data-row-action="move-up"]');
-  const moveDownButton = row.querySelector('[data-row-action="move-down"]');
-  const removeButton = row.querySelector('[data-row-action="remove"]');
-  const testButton = row.querySelector('[data-row-action="test"]');
-  const enabledToggle = row.querySelector('[data-field="INDEXER_ENABLED"]');
-  const paidToggle = row.querySelector('[data-field="PAID"]');
-  const apiKeyInput = row.querySelector('[data-field="API_KEY"]');
-  const apiKeyToggle = row.querySelector('[data-role="api-key-toggle"]');
-  const endpointInput = row.querySelector('[data-field="ENDPOINT"]');
+    const moveUpButton = row.querySelector('[data-row-action="move-up"]');
+    const moveDownButton = row.querySelector('[data-row-action="move-down"]');
+    const removeButton = row.querySelector('[data-row-action="remove"]');
+    const testButton = row.querySelector('[data-row-action="test"]');
+    const enabledToggle = row.querySelector('[data-field="INDEXER_ENABLED"]');
+    const paidToggle = row.querySelector('[data-field="PAID"]');
+    const apiKeyInput = row.querySelector('[data-field="API_KEY"]');
+    const apiKeyToggle = row.querySelector('[data-role="api-key-toggle"]');
+    const endpointInput = row.querySelector('[data-field="ENDPOINT"]');
 
     if (moveUpButton) moveUpButton.addEventListener('click', () => moveNewznabRow(row, -1));
     if (moveDownButton) moveDownButton.addEventListener('click', () => moveNewznabRow(row, 1));
@@ -741,9 +749,9 @@
     saveStatus.textContent = '';
 
     try {
-  const data = await apiRequest('/admin/api/config');
-  const values = data.values || {};
-  setAvailableNewznabPresets(data?.newznabPresets || []);
+      const data = await apiRequest('/admin/api/config');
+      const values = data.values || {};
+      setAvailableNewznabPresets(data?.newznabPresets || []);
       updateVersionBadge(data?.addonVersion);
       allowNewznabTestSearch = Boolean(data?.debugNewznabSearch);
       setupNewznabRowsFromValues(values);
@@ -758,10 +766,10 @@
       syncManagerControls();
       syncNewznabControls();
       configSection.classList.remove('hidden');
-  updateManifestLink(data.manifestUrl || '');
+      updateManifestLink(data.manifestUrl || '');
       runtimeEnvPath = data.runtimeEnvPath || null;
-  const baseMessage = 'Use the install buttons once HTTPS and your shared token are set.';
-  manifestDescription.textContent = baseMessage;
+      const baseMessage = 'Use the install buttons once HTTPS and your shared token are set.';
+      manifestDescription.textContent = baseMessage;
     } catch (error) {
       authError.textContent = error.message;
       authError.classList.remove('hidden');
@@ -922,7 +930,7 @@
     const streamingMode = streamingModeSelect?.value || 'nzbdav';
     const managerValue = managerSelect.value || 'none';
     const managerFields = configForm.querySelectorAll('[data-manager-field]');
-    
+
     // In native mode, force manager to 'none' and hide manager options
     if (streamingMode === 'native') {
       managerFields.forEach((field) => field.classList.add('hidden'));
@@ -940,7 +948,7 @@
   function syncStreamingModeControls() {
     const mode = streamingModeSelect?.value || 'nzbdav';
     const isNativeMode = mode === 'native';
-    
+
     // Show/hide native mode notice
     if (nativeModeNotice) {
       nativeModeNotice.classList.toggle('hidden', !isNativeMode);
@@ -949,12 +957,12 @@
     if (easynewsHttpsWarning) {
       easynewsHttpsWarning.classList.toggle('hidden', !isNativeMode);
     }
-    
+
     // Hide NZBDav section in native mode
     if (nzbdavGroup) {
       nzbdavGroup.classList.toggle('hidden', isNativeMode);
     }
-    
+
     // In native mode, force manager to 'none' and disable the select
     if (indexerManagerGroup && managerSelect) {
       if (isNativeMode) {
@@ -976,7 +984,7 @@
         if (existingHint) existingHint.remove();
       }
     }
-    
+
     syncManagerControls();
   }
 
@@ -1046,7 +1054,7 @@
         method: 'POST',
         body: JSON.stringify({ values }),
       });
-  const manifestUrl = result?.manifestUrl || currentManifestUrl || '';
+      const manifestUrl = result?.manifestUrl || currentManifestUrl || '';
       if (manifestUrl) updateManifestLink(manifestUrl);
       const portChanged = Boolean(result?.portChanged);
       const manifestNote = manifestUrl ? `Manifest URL: ${manifestUrl}. ` : '';
@@ -1105,6 +1113,29 @@
       syncSaveGuard();
     });
   });
+
+  const languageSearch = configForm.querySelector('input[data-search-target="nzb"]');
+  const tmdbLanguageSearch = configForm.querySelector('input[data-search-target="tmdb"]');
+
+  function setupLanguageSearch(searchInput, checkboxList) {
+    if (!searchInput || !checkboxList) return;
+    searchInput.addEventListener('input', () => {
+      const query = (searchInput.value || '').trim().toLowerCase();
+      checkboxList.forEach((input) => {
+        const label = input.closest('label');
+        if (!label) return;
+        const text = (label.textContent || '').trim().toLowerCase();
+        if (!query) {
+          label.style.display = '';
+        } else {
+          label.style.display = text.includes(query) ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  setupLanguageSearch(languageSearch, languageCheckboxes);
+  setupLanguageSearch(tmdbLanguageSearch, tmdbLanguageCheckboxes);
 
   const managerPaidInputs = configForm.querySelectorAll('[name="NZB_TRIAGE_PRIORITY_INDEXERS"], [name="NZB_TRIAGE_HEALTH_INDEXERS"]');
   managerPaidInputs.forEach((input) => {
@@ -1177,6 +1208,52 @@
       loadConfiguration();
     }
   }
+  function setupReleaseExclusions() {
+    const textarea = configForm.querySelector('textarea[name="NZB_RELEASE_EXCLUSIONS"]');
+    const exampleCategories = document.querySelectorAll('.example-category');
+
+    if (!textarea || exampleCategories.length === 0) return;
+
+    exampleCategories.forEach((category) => {
+      const codeBlock = category.querySelector('code');
+      if (!codeBlock) return;
+
+      const rawText = codeBlock.textContent || '';
+      const items = rawText.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+
+      // clear the code block and replace with clickable spans
+      codeBlock.innerHTML = '';
+      codeBlock.style.display = 'block'; // ensure it behaves like a container
+
+      items.forEach((item) => {
+        const span = document.createElement('span');
+        span.className = 'clickable-example';
+        span.textContent = item;
+        span.title = 'Click to add to exclusions';
+        span.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation(); // prevent closing details if inside one
+
+          const currentVal = textarea.value;
+          const currentItems = currentVal.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+
+          if (!currentItems.includes(item)) {
+            currentItems.push(item);
+            textarea.value = currentItems.join(', ');
+            // Trigger a visual feedback or flash the textarea
+            textarea.focus();
+            textarea.style.transition = 'box-shadow 0.2s ease';
+            textarea.style.boxShadow = '0 0 0 4px rgba(62, 180, 255, 0.3)';
+            setTimeout(() => {
+              textarea.style.boxShadow = '';
+            }, 300);
+          }
+        });
+        codeBlock.appendChild(span);
+      });
+    });
+  }
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {
@@ -1184,6 +1261,7 @@
       });
     });
   }
+  setupReleaseExclusions();
   syncHealthControls();
   syncSortingControls();
   syncStreamingModeControls();

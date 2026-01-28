@@ -174,16 +174,22 @@ function coerceDate(value) {
 function extractQuality(text) {
   if (!text) return null;
   const normalized = text.toLowerCase();
-  if (normalized.includes('8k')) return '4320p';
-  if (normalized.includes('4k')) return '2160p';
+
+  // Prefer 4k/8k keys
+  if (normalized.includes('8k') || normalized.includes('4320p')) return '8k';
+  if (normalized.includes('4k') || normalized.includes('2160p') || normalized.includes('uhd')) return '4k';
+
   const match = QUALITY_REGEX.exec(normalized);
   if (match) {
     const value = match[1];
     const suffix = match[2] || 'p';
-    return `${value}${suffix.toLowerCase()}`;
-  }
-  if (UHD_REGEX.test(normalized)) {
-    return normalized.includes('8k') ? '4320p' : '2160p';
+    const resolution = `${value}${suffix.toLowerCase()}`;
+
+    // Normalize numeric to new keys
+    if (resolution === '2160p') return '4k';
+    if (resolution === '4320p') return '8k';
+
+    return resolution;
   }
   return null;
 }

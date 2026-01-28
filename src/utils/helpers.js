@@ -33,6 +33,54 @@ function applyMaxSizeFilter(results, maxSizeBytes) {
   });
 }
 
+function filterByReleaseExclusions(results, exclusionTokens) {
+  if (!Array.isArray(results) || !exclusionTokens || exclusionTokens.length === 0) {
+    return results;
+  }
+  const normalizedTokens = exclusionTokens
+    .map((value) => (value === undefined || value === null ? null : String(value).trim().toLowerCase()))
+    .filter((token) => token && token.length > 0);
+
+  if (normalizedTokens.length === 0) {
+    return results;
+  }
+
+  const matchesToken = (value, token) => {
+    if (!value) return false;
+    return String(value).toLowerCase().includes(token);
+  };
+
+  return results.filter((result) => {
+    const fieldsToCheck = [
+      result.resolution,
+      result.qualityLabel,
+      result.codec,
+      result.source,
+      result.audio,
+      result.group,
+      result.container,
+    ];
+
+    // Check flags explicitly
+    if (result.hardcoded) fieldsToCheck.push('hardcoded');
+    if (result.proper) fieldsToCheck.push('proper');
+    if (result.repack) fieldsToCheck.push('repack');
+    if (result.hdr) fieldsToCheck.push('hdr');
+    if (result.extended) fieldsToCheck.push('extended');
+    if (result.remastered) fieldsToCheck.push('remastered');
+    if (result.unrated) fieldsToCheck.push('unrated');
+    if (result.remux) fieldsToCheck.push('remux');
+    if (result.retail) fieldsToCheck.push('retail');
+
+    for (const token of normalizedTokens) {
+      for (const field of fieldsToCheck) {
+        if (field && matchesToken(field, token)) return false;
+      }
+    }
+    return true;
+  });
+}
+
 function filterByAllowedResolutions(results, allowedResolutions) {
   if (!Array.isArray(results) || !allowedResolutions || allowedResolutions.length === 0) {
     return results;
@@ -40,6 +88,7 @@ function filterByAllowedResolutions(results, allowedResolutions) {
   const normalizedTokens = allowedResolutions
     .map((value) => (value === undefined || value === null ? null : String(value).trim().toLowerCase()))
     .filter((token) => token && token.length > 0);
+
   if (normalizedTokens.length === 0) {
     return results;
   }
@@ -166,9 +215,17 @@ function sortAnnotatedResults(results, sortMode, preferredLanguages) {
 }
 
 function prepareSortedResults(results, options = {}) {
-  const { maxSizeBytes, sortMode, preferredLanguages, allowedResolutions, resolutionLimitPerQuality } = options;
+  const {
+    maxSizeBytes,
+    sortMode,
+    preferredLanguages,
+    resolutionLimitPerQuality,
+    allowedResolutions,
+    releaseExclusions,
+  } = options;
   let working = Array.isArray(results) ? results.slice() : [];
   working = filterByAllowedResolutions(working, allowedResolutions);
+  working = filterByReleaseExclusions(working, releaseExclusions);
   working = applyMaxSizeFilter(working, maxSizeBytes);
   working = sortAnnotatedResults(working, sortMode, preferredLanguages);
   working = applyResolutionLimits(working, resolutionLimitPerQuality);
@@ -307,6 +364,7 @@ module.exports = {
   annotateNzbResult,
   applyMaxSizeFilter,
   filterByAllowedResolutions,
+  filterByReleaseExclusions,
   applyResolutionLimits,
   resultMatchesPreferredLanguage,
   getPreferredLanguageMatches,

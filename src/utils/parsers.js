@@ -176,6 +176,19 @@ function stripTrailingSlashes(url) {
   return url.replace(/\/+$/, '');
 }
 
+function parseFilterList(value) {
+  if (!value) return [];
+  const list = typeof value === 'string' ? value.split(',') : Array.isArray(value) ? value : [];
+  return list
+    .map((item) => (item === undefined || item === null ? '' : String(item).trim()))
+    .filter((item) => item.length > 0);
+}
+
+function parseFilterSet(value) {
+  const list = parseFilterList(value);
+  return new Set(list.map((item) => item.toLowerCase()));
+}
+
 module.exports = {
   normalizeReleaseTitle,
   parseRequestedEpisode,
@@ -187,4 +200,15 @@ module.exports = {
   nzbMatchesIndexer,
   cleanSpecialSearchTitle,
   stripTrailingSlashes,
+  parseFilterList,
+  parseFilterSet,
+  normalizeResolutionToken,
 };
+
+function normalizeResolutionToken(token) {
+  if (!token) return null;
+  const lower = token.toLowerCase();
+  if (lower === '4k' || lower === 'uhd' || lower === '2160p') return '4k';
+  if (lower === '8k' || lower === '4320p') return '8k';
+  return lower;
+}
