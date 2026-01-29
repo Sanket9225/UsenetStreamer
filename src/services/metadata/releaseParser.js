@@ -1,5 +1,13 @@
 const { parseTorrentTitle } = require('../../utils/lib/parse-torrent-title/index.js');
 
+const QUALITY_FEATURE_PATTERNS = [
+  { label: 'DV', regex: /\b(dolby\s*vision|dolbyvision|dv)\b/i },
+  { label: 'HDR10+', regex: /hdr10\+/i },
+  { label: 'HDR10', regex: /hdr10(?!\+)/i },
+  { label: 'HDR', regex: /\bhdr\b/i },
+  { label: 'SDR', regex: /\bsdr\b/i },
+];
+
 const LANGUAGE_FILTERS = [
   'English',
   'Tamil',
@@ -174,7 +182,16 @@ function buildLanguagePattern(token) {
  * @property {string} [source]
  * @property {boolean} [upscaled]
  * @property {boolean} [convert]
+ * @property {boolean} [upscaled]
+ * @property {boolean} [convert]
+ * @property {boolean} [documentary]
+ * @property {boolean} [dubbed]
+ * @property {boolean} [subbed]
+ * @property {string} [edition]
+ * @property {string[]} [releaseTypes]
  * @property {string} [region]
+ * @property {string} [threeD]
+ * @property {string[]} [visualTags]
  */
 
 /**
@@ -225,12 +242,25 @@ function parseReleaseMetadata(title) {
     unrated: parsed.unrated || false,
     remux: parsed.remux || false,
     retail: parsed.retail || false,
+    upscaled: parsed.upscaled || false,
+    convert: parsed.convert || false,
+    documentary: parsed.documentary || false,
+    dubbed: parsed.dubbed || false,
+    subbed: parsed.subbed || false,
+    edition: parsed.edition || null,
+    releaseTypes: Array.isArray(parsed.releaseTypes) ? parsed.releaseTypes : [],
     region: parsed.region || null,
+    threeD: parsed.threeD || null,
+    bitDepth: parsed.bitDepth || null,
+    visualTags: QUALITY_FEATURE_PATTERNS
+      .filter(({ regex }) => regex.test(rawTitle))
+      .map(({ label }) => label),
   };
 }
 
 module.exports = {
   LANGUAGE_FILTERS,
   LANGUAGE_SYNONYMS,
+  QUALITY_FEATURE_PATTERNS,
   parseReleaseMetadata,
 };

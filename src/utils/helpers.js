@@ -59,7 +59,13 @@ function filterByReleaseExclusions(results, exclusionTokens) {
       result.audio,
       result.group,
       result.container,
+      result.threeD,
+      result.bitDepth,
     ];
+
+    if (Array.isArray(result.hdrList)) fieldsToCheck.push(...result.hdrList);
+    if (Array.isArray(result.audioList)) fieldsToCheck.push(...result.audioList);
+    if (Array.isArray(result.visualTags)) fieldsToCheck.push(...result.visualTags);
 
     // Check flags explicitly
     if (result.hardcoded) fieldsToCheck.push('hardcoded');
@@ -71,6 +77,13 @@ function filterByReleaseExclusions(results, exclusionTokens) {
     if (result.unrated) fieldsToCheck.push('unrated');
     if (result.remux) fieldsToCheck.push('remux');
     if (result.retail) fieldsToCheck.push('retail');
+    if (result.upscaled) fieldsToCheck.push('upscaled');
+    if (result.convert) fieldsToCheck.push('convert');
+    if (result.documentary) fieldsToCheck.push('documentary');
+    if (result.dubbed) fieldsToCheck.push('dubbed');
+    if (result.subbed) fieldsToCheck.push('subbed');
+    if (result.edition) fieldsToCheck.push(result.edition);
+    if (Array.isArray(result.releaseTypes)) fieldsToCheck.push(...result.releaseTypes);
 
     for (const token of normalizedTokens) {
       for (const field of fieldsToCheck) {

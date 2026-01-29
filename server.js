@@ -28,7 +28,7 @@ const {
   getPublishMetadataFromResult,
   areReleasesWithinDays,
 } = require('./src/utils/publishInfo');
-const { parseReleaseMetadata, LANGUAGE_FILTERS, LANGUAGE_SYNONYMS } = require('./src/services/metadata/releaseParser');
+const { parseReleaseMetadata, LANGUAGE_FILTERS, LANGUAGE_SYNONYMS, QUALITY_FEATURE_PATTERNS } = require('./src/services/metadata/releaseParser');
 const cache = require('./src/cache');
 const { ensureSharedSecret } = require('./src/middleware/auth');
 const newznabService = require('./src/services/newznab');
@@ -50,13 +50,6 @@ const SERVER_HOST = '0.0.0.0';
 const DEDUPE_MAX_PUBLISH_DIFF_DAYS = 14;
 let PAID_INDEXER_TOKENS = new Set();
 
-const QUALITY_FEATURE_PATTERNS = [
-  { label: 'DV', regex: /\b(dolby\s*vision|dolbyvision|dv)\b/i },
-  { label: 'HDR10+', regex: /hdr10\+/i },
-  { label: 'HDR10', regex: /hdr10(?!\+)/i },
-  { label: 'HDR', regex: /\bhdr\b/i },
-  { label: 'SDR', regex: /\bsdr\b/i },
-];
 
 // Blocklist patterns for unplayable/unwanted release types
 // Matches standalone tokens: .iso, -iso-, (iso), space-delimited, etc.
