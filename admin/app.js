@@ -756,6 +756,7 @@
       allowNewznabTestSearch = Boolean(data?.debugNewznabSearch);
       setupNewznabRowsFromValues(values);
       populateForm(values);
+      setupPatternPreview(); // Initialize preview with loaded values
       applyLanguageSelectionsFromHidden();
       applyQualitySelectionsFromHidden();
       applyTmdbLanguageSelectionsFromHidden();
@@ -788,6 +789,47 @@
       copyManifestStatus.textContent = '';
     }
   }
+
+  // ... (existing functions)
+
+
+  // Initialization
+  function init() {
+    const storedToken = getStoredToken();
+    if (storedToken) {
+      tokenInput.value = storedToken;
+    }
+
+    if (loadButton) {
+      loadButton.addEventListener('click', () => {
+        setStoredToken(tokenInput.value);
+        loadConfiguration().then(() => {
+          setupPatternPreview(); // Init preview after load
+        });
+      });
+    }
+
+    // ... other listeners ...
+    if (saveButton) saveButton.addEventListener('click', handleSave);
+
+    // If we have token, auto-load? No, explicit action is better for security awareness (or per existing logic).
+    // The existing logic doesn't auto-load.
+  }
+
+  // Hook into init
+  // To avoid rewriting init completely, I will just call init() at the end wrapped in existing logic?
+  // Wait, the file ends with `init(); })();`.
+  // I need to find the `init` function definition and append `setupPatternPreview` call inside `loadConfiguration` success path, OR just append `setupPatternPreview` elsewhere.
+  // Actually, I can just append `setupPatternPreview` logic and hook it up.
+
+  // Let's modify `loadConfiguration` to call `setupPatternPreview`?
+  // Or just call it.
+  // The easiest way is to rewrite `init` at the end of the file.
+  // Or better, since `loadConfiguration` populates the form, I should call it there.
+
+  // Actually, I will replace the end of the file.
+
+  // Let's find where `init` is defined. It is likely near the end.
 
   function setCopyButtonState(enabled) {
     if (!copyManifestButton) return;
@@ -1261,6 +1303,77 @@
       });
     });
   }
+
+
+  function setupPatternPreview() {
+    const previewShortEl = document.getElementById('previewShortName');
+    const previewDescEl = document.getElementById('previewDescription');
+    const shortInput = configForm.querySelector('[name="NZB_DISPLAY_NAME_PATTERN"]');
+    const descInput = configForm.querySelector('textarea[name="NZB_NAMING_PATTERN"]');
+
+    if (!previewShortEl || !previewDescEl) return;
+
+    // Mixed Context: Flat keys + Nested objects
+    const mockData = {
+      // Nested (AIOStreams)
+      stream: {
+        proxied: true,
+        private: false,
+        resolution: '2160p',
+        upscaled: false,
+        quality: '4K',
+        encode: 'x265',
+        type: 'movie',
+        visualTags: ['HDR', 'DV'],
+        audioTags: ['Atmos', 'DDP5.1'],
+        audioChannels: ['5.1'],
+        seeders: 0,
+        size: 16535624089.6, // 15.4 GB in bytes
+        folderSize: 0,
+        indexer: 'NZBGeek',
+        languages: ['English'],
+        network: '',
+        filename: 'Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR10.H.265-FLUX.mkv',
+        message: 'I like turtles',
+        releaseGroup: 'FLUX',
+        shortName: 'NZBGeek',
+        cached: true
+      },
+      service: {
+        shortName: 'Usenet',
+        cached: true
+      },
+      addon: {
+        name: 'UsenetStreamer'
+      }
+    };
+
+    const defaultShortPattern = '[{addon.name}{service.cached::istrue[" ✅"||""]}] {stream.quality} - {stream.indexer}';
+    // Default AIOStreams template
+    const defaultDescPattern = `{stream.source::exists["🎥 {stream.source} "||""]}{stream.encode::exists["🎞️ {stream.encode}\n"||"\n"]}{stream.visualTags::join(' | ')::exists["📺 {stream.visualTags::join(' | ')}\n"||""]}{stream.audioTags::join(' ')::exists["🎧 {stream.audioTags::join(' ')}\n"||""]}{stream.releaseGroup::exists["👥 {stream.releaseGroup}\n"||""]}{stream.size::>0["📦 {stream.size::bytes}\n"||""]}{stream.languages::join(' ')::exists["🌎 {stream.languages::join(' ')}\n"||""]}{stream.filename::exists["📄 {stream.filename}"||""]}`;
+
+    function runPreview(pattern, defaultPattern) {
+      let effective = (pattern && typeof pattern === 'string' && pattern.trim().length > 0) ? pattern : defaultPattern;
+
+      // Use the advanced TemplateEngine for all patterns
+      const engine = new TemplateEngine(mockData);
+      return engine.render(effective);
+    }
+
+    function updatePreview() {
+      const shortPattern = shortInput?.value || defaultShortPattern;
+      const descPattern = descInput?.value || defaultDescPattern;
+
+      previewShortEl.textContent = runPreview(shortPattern, defaultShortPattern);
+      previewDescEl.textContent = runPreview(descPattern, defaultDescPattern);
+    }
+
+    if (shortInput) shortInput.addEventListener('input', updatePreview);
+    if (descInput) descInput.addEventListener('input', updatePreview);
+    updatePreview();
+  }
+
+  // Final Init Call
   setupReleaseExclusions();
   syncHealthControls();
   syncSortingControls();

@@ -35,7 +35,7 @@ const newznabService = require('./src/services/newznab');
 const easynewsService = require('./src/services/easynews');
 const { toFiniteNumber, toPositiveInt, toBoolean, parseCommaList, parsePathList, normalizeSortMode, resolvePreferredLanguages, toSizeBytesFromGb, collectConfigValues, computeManifestUrl, stripTrailingSlashes, decodeBase64Value } = require('./src/utils/config');
 const { normalizeReleaseTitle, parseRequestedEpisode, isVideoFileName, fileMatchesEpisode, normalizeNzbdavPath, inferMimeType, normalizeIndexerToken, nzbMatchesIndexer, cleanSpecialSearchTitle, parseFilterList, normalizeResolutionToken } = require('./src/utils/parsers');
-const { sleep, annotateNzbResult, applyMaxSizeFilter, prepareSortedResults, getPreferredLanguageMatch, getPreferredLanguageMatches, triageStatusRank, buildTriageTitleMap, prioritizeTriageCandidates, triageDecisionsMatchStatuses, sanitizeDecisionForCache, serializeFinalNzbResults, restoreFinalNzbResults, safeStat } = require('./src/utils/helpers');
+const { sleep, annotateNzbResult, applyMaxSizeFilter, prepareSortedResults, getPreferredLanguageMatch, getPreferredLanguageMatches, triageStatusRank, buildTriageTitleMap, prioritizeTriageCandidates, triageDecisionsMatchStatuses, sanitizeDecisionForCache, serializeFinalNzbResults, restoreFinalNzbResults, safeStat, formatStreamTitle } = require('./src/utils/helpers');
 const indexerService = require('./src/services/indexer');
 const nzbdavService = require('./src/services/nzbdav');
 const specialMetadata = require('./src/services/specialMetadata');
@@ -324,6 +324,11 @@ app.get('/', (req, res) => {
   res.redirect('/admin');
 });
 
+// Serve shared utilities to frontend
+app.get('/utils/templateEngine.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'src/utils/templateEngine.js'));
+});
+
 app.use((req, res, next) => {
   if (req.path.startsWith('/assets/')) return next();
   if (req.path.startsWith('/admin') && !req.path.startsWith('/admin/api')) return next();
@@ -580,6 +585,8 @@ let INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
 );
 let ALLOWED_RESOLUTIONS = parseAllowedResolutionList(process.env.NZB_ALLOWED_RESOLUTIONS);
 let RELEASE_EXCLUSIONS = parseCommaList(process.env.NZB_RELEASE_EXCLUSIONS);
+let NZB_NAMING_PATTERN = process.env.NZB_NAMING_PATTERN || '';
+let NZB_DISPLAY_NAME_PATTERN = process.env.NZB_DISPLAY_NAME_PATTERN || '';
 let RESOLUTION_LIMIT_PER_QUALITY = parseResolutionLimitValue(process.env.NZB_RESOLUTION_LIMIT_PER_QUALITY);
 let TRIAGE_ENABLED = toBoolean(process.env.NZB_TRIAGE_ENABLED, false);
 let TRIAGE_TIME_BUDGET_MS = toPositiveInt(process.env.NZB_TRIAGE_TIME_BUDGET_MS, 35000);
@@ -734,6 +741,8 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   );
   ALLOWED_RESOLUTIONS = parseAllowedResolutionList(process.env.NZB_ALLOWED_RESOLUTIONS);
   RELEASE_EXCLUSIONS = parseCommaList(process.env.NZB_RELEASE_EXCLUSIONS);
+  NZB_NAMING_PATTERN = process.env.NZB_NAMING_PATTERN || '';
+  NZB_DISPLAY_NAME_PATTERN = process.env.NZB_DISPLAY_NAME_PATTERN || '';
   RESOLUTION_LIMIT_PER_QUALITY = parseResolutionLimitValue(process.env.NZB_RESOLUTION_LIMIT_PER_QUALITY);
 
   TRIAGE_ENABLED = toBoolean(process.env.NZB_TRIAGE_ENABLED, false);
@@ -809,6 +818,8 @@ const ADMIN_CONFIG_KEYS = [
   'NZB_ALLOWED_RESOLUTIONS',
   'NZB_RESOLUTION_LIMIT_PER_QUALITY',
   'NZB_RELEASE_EXCLUSIONS',
+  'NZB_NAMING_PATTERN',
+  'NZB_DISPLAY_NAME_PATTERN',
   'NZBDAV_URL',
   'NZBDAV_API_KEY',
   'NZBDAV_WEBDAV_URL',
@@ -2657,7 +2668,74 @@ async function streamHandler(req, res) {
       if (languageLabel) tags.push(`🌐 ${languageLabel}`);
       if (sizeString) tags.push(sizeString);
       const addonLabel = ADDON_NAME || DEFAULT_ADDON_NAME;
-      const name = qualitySummary ? `${addonLabel} ${qualitySummary}` : addonLabel;
+
+      const tagsString = tags.filter(Boolean).join(' • ');
+
+      const namingContext = {
+        addon: addonLabel,
+        title: result.title || '',
+        filename: normalizedFilename || '',
+        indexer: result.indexer || '',
+        size: sizeString || '',
+        quality: qualitySummary || quality || '',
+        source: result.source || releaseInfo.source || '',
+        codec: result.codec || releaseInfo.codec || '',
+        group: result.group || releaseInfo.group || '',
+        health: triageTag || '',
+        languages: languageLabel || '',
+        tags: tagsString,
+        resolution: detectedResolutionToken || result.resolution || releaseInfo.resolution || '',
+        container: result.container || releaseInfo.container || '',
+        hdr: (result.hdrList || releaseInfo.hdrList || []).join(' | '),
+        audio: (result.audioList || releaseInfo.audioList || []).join(' '),
+      };
+
+      // Add nested context for AIOStreams template compatibility
+      // We map our flat properties to the expected 'stream' object
+      namingContext.stream = {
+        proxied: true, // We proxy everything via NZBDav/Stremio
+        private: false, // Public Usenet
+        resolution: namingContext.resolution,
+        upscaled: false, // We don't detect upscaling yet
+        quality: quality || namingContext.resolution,
+        encode: namingContext.codec,
+        type: type || 'movie',
+        visualTags: (result.hdrList || releaseInfo.hdrList || []),
+        audioTags: (result.audioList || releaseInfo.audioList || []),
+        audioChannels: [], // Not strictly parsed yet, usually part of audioTags
+        seeders: 0, // Usenet doesn't have seeders
+        size: result.size || 0, // Raw bytes
+        folderSize: 0,
+        indexer: namingContext.indexer,
+        languages: (result.languages || []),
+        network: '', // Not strictly tracked
+        filename: namingContext.filename,
+        message: namingContext.health, // Map health status to message
+        health: namingContext.health, // Alias for clear naming
+        releaseGroup: namingContext.group, // AIOStreams uses releaseGroup
+        // Additional mappings
+        shortName: namingContext.indexer,
+        cached: isInstant || Boolean(triageTag && triageTag.includes('✅'))
+      };
+
+      // Service context (representing the provider/addon logic)
+      namingContext.service = {
+        shortName: 'Usenet',
+        cached: isInstant || Boolean(triageTag && triageTag.includes('✅'))
+      };
+
+      // Addon context
+      namingContext.addon = {
+        name: addonLabel
+      };
+
+      // Default AIOStreams template
+      const defaultDescriptionPattern = `{stream.source::exists["🎥 {stream.source} "||""]}{stream.encode::exists["🎞️ {stream.encode}\n"||"\n"]}{stream.visualTags::join(' | ')::exists["📺 {stream.visualTags::join(' | ')}\n"||""]}{stream.audioTags::join(' ')::exists["🎧 {stream.audioTags::join(' ')}\n"||""]}{stream.releaseGroup::exists["👥 {stream.releaseGroup}\n"||""]}{stream.size::>0["📦 {stream.size::bytes}\n"||""]}{stream.languages::join(' ')::exists["🌎 {stream.languages::join(' ')}\n"||""]}{stream.filename::exists["📄 {stream.filename}"||""]}`;
+      // Use the fancy default if NZB_NAMING_PATTERN is unset
+      const formattedTitle = formatStreamTitle(NZB_NAMING_PATTERN, namingContext, defaultDescriptionPattern);
+
+      const defaultNamePattern = '[{addon.name}{service.cached::istrue[" ✅"||""]}] {stream.quality} - {stream.indexer}';
+      const formattedName = formatStreamTitle(NZB_DISPLAY_NAME_PATTERN, namingContext, defaultNamePattern);
 
       // Build behavior hints based on streaming mode
       let behaviorHints;
@@ -2724,8 +2802,8 @@ async function streamHandler(req, res) {
         // Native mode: Stremio v5 native NZB streaming
         const nntpServers = buildNntpServersArray();
         stream = {
-          name,
-          description: `${result.title}\n${result.indexer} • ${sizeString}\n${tags.filter(Boolean).join(' • ')}`,
+          name: formattedName,
+          description: formattedTitle,
           nzbUrl: result.downloadUrl,
           servers: nntpServers.length > 0 ? nntpServers : undefined,
           url: undefined,
@@ -2735,8 +2813,8 @@ async function streamHandler(req, res) {
       } else {
         // NZBDav mode: WebDAV-based streaming
         stream = {
-          title: `${result.title}\n${tags.filter(Boolean).join(' • ')}\n${result.indexer}`,
-          name,
+          title: formattedTitle,
+          name: formattedName,
           url: streamUrl,
           behaviorHints,
           meta: {

@@ -380,4 +380,16 @@ module.exports = {
   serializeFinalNzbResults,
   restoreFinalNzbResults,
   safeStat,
+  formatStreamTitle,
 };
+
+const TemplateEngine = require('./templateEngine');
+
+function formatStreamTitle(pattern, data, defaultPattern = '{title}') {
+  let effectivePattern = (pattern && typeof pattern === 'string' && pattern.trim().length > 0)
+    ? pattern
+    : defaultPattern;
+
+  const engine = new TemplateEngine(data);
+  return engine.render(effectivePattern);
+}
