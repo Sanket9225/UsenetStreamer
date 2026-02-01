@@ -508,6 +508,27 @@ button.ghost.danger:hover {
   font-weight: 700;
 }
 
+.newznab-row .inline-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.newznab-row .inline-select .small-select {
+  min-width: 2.6rem;
+  height: 1.2rem;
+  padding: 0 0.25rem;
+  font-size: 0.8rem;
+  line-height: 1;
+  border-radius: 6px;
+}
+
 .row-handle {
   font-size: 1.3rem;
   color: rgba(180, 200, 220, 0.6);

@@ -40,7 +40,7 @@
   let newznabPresets = [];
 
   const MAX_NEWZNAB_INDEXERS = 20;
-  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID'];
+  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT'];
 
   const managerSelect = configForm.querySelector('select[name="INDEXER_MANAGER"]');
   const newznabList = document.getElementById('newznab-indexers-list');
@@ -218,7 +218,8 @@
     if (!qualityHiddenInput || qualityCheckboxes.length === 0) return;
     const selected = qualityCheckboxes
       .filter((checkbox) => checkbox.checked)
-      .map((checkbox) => checkbox.value);
+      .map((checkbox) => normalizeQualityToken(checkbox.value))
+      .filter(Boolean);
     qualityHiddenInput.value = selected.join(',');
   }
 
@@ -237,13 +238,22 @@
       .map((value) => normalizeQualityToken(value))
       .filter(Boolean);
     const allowed = new Set(tokens);
+    const matchesAllowed = (checkboxValue) => {
+      const value = (checkboxValue || '').toLowerCase();
+      if (allowed.has(value)) return true;
+      if (value === '8k' && allowed.has('4320p')) return true;
+      if (value === '4k' && allowed.has('2160p')) return true;
+      if (value === '4320p' && allowed.has('8k')) return true;
+      if (value === '2160p' && allowed.has('4k')) return true;
+      return false;
+    };
     if (allowed.size === 0) {
       qualityCheckboxes.forEach((checkbox) => {
         checkbox.checked = true;
       });
     } else {
       qualityCheckboxes.forEach((checkbox) => {
-        checkbox.checked = allowed.has(checkbox.value.toLowerCase());
+        checkbox.checked = matchesAllowed(checkbox.value);
       });
     }
     syncQualityHiddenInput();
@@ -427,6 +437,16 @@
             <input type="checkbox" data-field="PAID" />
             <span>I have a paid subscription with this indexer (use for health checks)</span>
           </label>
+          <label class="inline-select">
+            <span>Grab limit</span>
+            <select data-field="PAID_LIMIT" class="small-select" disabled>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6" selected>6</option>
+            </select>
+          </label>
         </div>
         <div class="row-controls">
           <button type="button" class="ghost" data-row-action="move-up">Move Up</button>
@@ -472,12 +492,24 @@
     const apiKeyInput = row.querySelector('[data-field="API_KEY"]');
     const apiKeyToggle = row.querySelector('[data-role="api-key-toggle"]');
     const endpointInput = row.querySelector('[data-field="ENDPOINT"]');
+    const paidLimitSelect = row.querySelector('[data-field="PAID_LIMIT"]');
 
     if (moveUpButton) moveUpButton.addEventListener('click', () => moveNewznabRow(row, -1));
     if (moveDownButton) moveDownButton.addEventListener('click', () => moveNewznabRow(row, 1));
     if (removeButton) removeButton.addEventListener('click', () => removeNewznabRow(row));
     if (enabledToggle) enabledToggle.addEventListener('change', () => syncNewznabControls());
-    if (paidToggle) paidToggle.addEventListener('change', () => updateHealthPaidWarning());
+    if (paidToggle) {
+      paidToggle.addEventListener('change', () => {
+        updateHealthPaidWarning();
+        if (paidLimitSelect) {
+          const isPaid = paidToggle.checked;
+          paidLimitSelect.disabled = !isPaid;
+          if (isPaid && !paidLimitSelect.value) {
+            paidLimitSelect.value = '6';
+          }
+        }
+      });
+    }
     if (testButton) testButton.addEventListener('click', () => runNewznabRowTest(row));
     if (apiKeyToggle && apiKeyInput) {
       apiKeyToggle.addEventListener('click', () => {
@@ -490,6 +522,10 @@
     if (endpointInput) {
       endpointInput.addEventListener('input', () => refreshRowApiKeyLink(row));
       endpointInput.addEventListener('blur', () => refreshRowApiKeyLink(row));
+    }
+
+    if (paidLimitSelect && paidToggle && paidToggle.checked) {
+      paidLimitSelect.disabled = false;
     }
 
     return row;

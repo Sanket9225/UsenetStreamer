@@ -4,7 +4,7 @@ const { stripTrailingSlashes } = require('../utils/config');
 const { getRandomUserAgent } = require('../utils/userAgent');
 
 const MAX_NEWZNAB_INDEXERS = 20;
-const NEWZNAB_FIELD_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID'];
+const NEWZNAB_FIELD_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT'];
 const NEWZNAB_NUMBERED_KEYS = [];
 for (let i = 1; i <= MAX_NEWZNAB_INDEXERS; i += 1) {
   const idx = String(i).padStart(2, '0');
@@ -153,6 +153,14 @@ function parseBoolean(value, defaultValue = true) {
   return defaultValue;
 }
 
+function parsePaidLimit(value, fallback = 6) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const numeric = Number(String(value).trim());
+  if (!Number.isFinite(numeric)) return fallback;
+  const clamped = Math.min(6, Math.max(2, Math.floor(numeric)));
+  return clamped;
+}
+
 function normalizeApiPath(raw) {
   let value = toTrimmedString(raw) || '/api';
   if (!value.startsWith('/')) {
@@ -263,6 +271,8 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
   const enabled = parseBoolean(enabledRaw, true);
   const paidRaw = source[`NEWZNAB_PAID_${key}`];
   const isPaid = parseBoolean(paidRaw, false);
+  const paidLimitRaw = source[`NEWZNAB_PAID_LIMIT_${key}`];
+  const paidLimit = isPaid ? parsePaidLimit(paidLimitRaw, 6) : null;
 
   const hasAnyValue = endpoint || apiKey || apiPathRaw || name || enabledRaw !== undefined;
   if (!hasAnyValue && !includeEmpty) {
@@ -283,6 +293,7 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
     displayName,
     enabled,
     isPaid,
+    paidLimit,
     slug,
     dedupeKey: slug || `indexer-${key}`,
     baseUrl: normalizedEndpoint ? `${normalizedEndpoint}${apiPath}` : '',

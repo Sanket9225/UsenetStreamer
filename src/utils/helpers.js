@@ -298,6 +298,9 @@ function buildTriageTitleMap(decisions) {
 function prioritizeTriageCandidates(results, maxCandidates, options = {}) {
   if (!Array.isArray(results) || results.length === 0) return [];
   const seenTitles = new Set();
+  const perIndexerLimitMap = options.perIndexerLimitMap instanceof Map ? options.perIndexerLimitMap : null;
+  const getIndexerKey = typeof options.getIndexerKey === 'function' ? options.getIndexerKey : null;
+  const perIndexerCounts = new Map();
   const selected = [];
   const shouldInclude = typeof options.shouldInclude === 'function' ? options.shouldInclude : null;
   for (const result of results) {
@@ -306,6 +309,17 @@ function prioritizeTriageCandidates(results, maxCandidates, options = {}) {
     if (seenTitles.has(normalizedTitle)) continue;
     if (shouldInclude && !shouldInclude(result)) {
       continue;
+    }
+    if (perIndexerLimitMap && getIndexerKey) {
+      const key = getIndexerKey(result);
+      if (key && perIndexerLimitMap.has(key)) {
+        const current = perIndexerCounts.get(key) || 0;
+        const limit = perIndexerLimitMap.get(key);
+        if (Number.isFinite(limit) && current >= limit) {
+          continue;
+        }
+        perIndexerCounts.set(key, current + 1);
+      }
     }
     seenTitles.add(normalizedTitle);
     selected.push(result);

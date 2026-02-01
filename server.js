@@ -383,6 +383,28 @@ function getPaidDirectIndexerTokens(configs = ACTIVE_NEWZNAB_CONFIGS) {
     .filter(Boolean);
 }
 
+function buildPaidIndexerLimitMap(configs = ACTIVE_NEWZNAB_CONFIGS) {
+  const limitMap = new Map();
+  (configs || []).forEach((config) => {
+    if (!config || !config.isPaid) return;
+    const limit = Number.isFinite(config.paidLimit) ? config.paidLimit : 6;
+    const tokens = [
+      config.slug,
+      config.dedupeKey,
+      config.displayName,
+      config.name,
+      config.id,
+    ].map((token) => normalizeIndexerToken(token)).filter(Boolean);
+    tokens.forEach((token) => {
+      const existing = limitMap.get(token);
+      if (!existing || limit < existing) {
+        limitMap.set(token, limit);
+      }
+    });
+  });
+  return limitMap;
+}
+
 function buildSearchLogPrefix({ manager = INDEXER_MANAGER, managerLabel = INDEXER_MANAGER_LABEL, newznabEnabled = NEWZNAB_ENABLED } = {}) {
   const managerSegment = manager === 'none'
     ? 'mgr=OFF'
@@ -2263,19 +2285,28 @@ async function streamHandler(req, res) {
     const hasPendingRetries = triagePool.some((candidate) => pendingStatuses.has(getDecisionStatus(candidate)));
     const hasVerifiedResult = triagePool.some((candidate) => getDecisionStatus(candidate) === 'verified');
     let triageEligibleResults = [];
+    const paidIndexerLimitMap = buildPaidIndexerLimitMap(ACTIVE_NEWZNAB_CONFIGS);
+    const getIndexerKey = (candidate) => normalizeIndexerToken(candidate?.indexerId || candidate?.indexer);
 
     if (hasPendingRetries) {
       triageEligibleResults = prioritizeTriageCandidates(triagePool, TRIAGE_MAX_CANDIDATES, {
         shouldInclude: (candidate) => pendingStatuses.has(getDecisionStatus(candidate)),
+        perIndexerLimitMap: paidIndexerLimitMap,
+        getIndexerKey,
       });
     } else if (!hasVerifiedResult) {
       triageEligibleResults = prioritizeTriageCandidates(triagePool, TRIAGE_MAX_CANDIDATES, {
         shouldInclude: (candidate) => !getDecisionStatus(candidate),
+        perIndexerLimitMap: paidIndexerLimitMap,
+        getIndexerKey,
       });
     }
 
     if (triageEligibleResults.length === 0 && triageDecisions.size === 0) {
-      triageEligibleResults = prioritizeTriageCandidates(triagePool, TRIAGE_MAX_CANDIDATES);
+      triageEligibleResults = prioritizeTriageCandidates(triagePool, TRIAGE_MAX_CANDIDATES, {
+        perIndexerLimitMap: paidIndexerLimitMap,
+        getIndexerKey,
+      });
     }
     const candidateHasConclusiveDecision = (candidate) => {
       const decision = triageDecisions.get(candidate.downloadUrl);
