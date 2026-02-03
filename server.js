@@ -1142,7 +1142,7 @@ function manifestHandler(req, res) {
 
   const catalogs = [];
   const resources = ['stream'];
-  const idPrefixes = ['tt', 'tvdb', 'pt', specialMetadata.SPECIAL_ID_PREFIX];
+  const idPrefixes = ['tt', 'tvdb', 'tmdb', 'pt', specialMetadata.SPECIAL_ID_PREFIX];
   if (STREAMING_MODE !== 'native' && NZBDAV_HISTORY_CATALOG_LIMIT > 0) {
     const catalogName = ADDON_NAME || DEFAULT_ADDON_NAME;
     catalogs.push(
@@ -1289,11 +1289,18 @@ async function streamHandler(req, res) {
   let incomingImdbId = null;
   let incomingTvdbId = null;
   let incomingSpecialId = null;
+  let incomingTmdbId = null;
   let incomingNzbdavId = null;
 
   if (/^tt\d+$/i.test(baseIdentifier)) {
     incomingImdbId = baseIdentifier.startsWith('tt') ? baseIdentifier : `tt${baseIdentifier}`;
     baseIdentifier = incomingImdbId;
+  } else if (/^tmdb:/i.test(baseIdentifier)) {
+    const tmdbMatch = baseIdentifier.match(/^tmdb:([0-9]+)(?::.*)?$/i);
+    if (tmdbMatch) {
+      incomingTmdbId = tmdbMatch[1];
+      baseIdentifier = `tmdb:${incomingTmdbId}`;
+    }
   } else if (/^tvdb:/i.test(baseIdentifier)) {
     const tvdbMatch = baseIdentifier.match(/^tvdb:([0-9]+)(?::.*)?$/i);
     if (tvdbMatch) {
@@ -1324,7 +1331,7 @@ async function streamHandler(req, res) {
 
   const isSpecialRequest = Boolean(incomingSpecialId);
   const isNzbdavRequest = Boolean(incomingNzbdavId);
-  const requestLacksIdentifiers = !incomingImdbId && !incomingTvdbId && !isSpecialRequest && !isNzbdavRequest;
+  const requestLacksIdentifiers = !incomingImdbId && !incomingTvdbId && !incomingTmdbId && !isSpecialRequest && !isNzbdavRequest;
 
   if (requestLacksIdentifiers && !isSpecialRequest) {
     res.status(400).json({ error: `Unsupported ID prefix for indexer manager search: ${baseIdentifier}` });
@@ -1341,6 +1348,25 @@ async function streamHandler(req, res) {
       nzbdavService.ensureNzbdavConfigured();
     }
     triagePrewarmPromise = triggerRequestTriagePrewarm();
+
+    if (incomingTmdbId && !incomingImdbId && !incomingTvdbId) {
+      if (!tmdbService.isConfigured()) {
+        res.status(400).json({ error: 'TMDb is not configured (enable TMDB and set API key).' });
+        return;
+      }
+      const mediaType = type === 'movie' ? 'movie' : 'series';
+      const externalIds = await tmdbService.getExternalIds(incomingTmdbId, mediaType);
+      if (externalIds?.imdbId) {
+        incomingImdbId = externalIds.imdbId.startsWith('tt') ? externalIds.imdbId : `tt${externalIds.imdbId}`;
+      }
+      if (externalIds?.tvdbId) {
+        incomingTvdbId = externalIds.tvdbId;
+      }
+      if (!incomingImdbId && !incomingTvdbId) {
+        res.status(404).json({ error: 'TMDb ID has no IMDb/TVDB mapping.' });
+        return;
+      }
+    }
 
     if (isNzbdavRequest) {
       if (STREAMING_MODE === 'native') {
@@ -2943,6 +2969,7 @@ async function streamHandler(req, res) {
         if (rawPattern && typeof rawPattern === 'string' && rawPattern.includes('{')) {
           return rawPattern;
         }
+        const hasLineBreaks = /[\r\n]/.test(String(rawPattern || ''));
         const normalizedList = String(rawPattern || '')
           .replace(/\band\b/gi, ',')
           .replace(/[;|]/g, ',');
@@ -2950,7 +2977,7 @@ async function streamHandler(req, res) {
           .split(',')
           .map((token) => token.trim())
           .filter(Boolean);
-        if (tokens.length === 0) return defaultPattern;
+        if (!hasLineBreaks && tokens.length === 0) return defaultPattern;
 
         const shortTokenMap = {
           addon: '{addon.name}',
@@ -2986,12 +3013,33 @@ async function streamHandler(req, res) {
         };
 
         const tokenMap = variant === 'long' ? longTokenMap : shortTokenMap;
+
+        if (hasLineBreaks) {
+          const lines = String(rawPattern || '').split(/\r?\n/);
+          const lineParts = lines.map((line) => {
+            const normalizedLine = String(line || '')
+              .replace(/\band\b/gi, ',')
+              .replace(/[;|]/g, ',');
+            const lineTokens = normalizedLine
+              .split(',')
+              .map((token) => token.trim())
+              .filter(Boolean);
+            return lineTokens
+              .map((token) => tokenMap[token.toLowerCase()] || null)
+              .filter(Boolean)
+              .join(' ');
+          });
+          const joined = lineParts.join('\n');
+          if (joined.replace(/\s/g, '') === '') return defaultPattern;
+          return joined;
+        }
+
         const parts = tokens
           .map((token) => tokenMap[token.toLowerCase()] || null)
           .filter(Boolean);
 
         if (parts.length === 0) return defaultPattern;
-        return variant === 'long' ? parts.join('\n') : parts.join(' ');
+        return parts.join(' ');
       };
 
       // Default AIOStreams template
@@ -2999,7 +3047,7 @@ async function streamHandler(req, res) {
       const effectiveDescriptionPattern = buildPatternFromTokenList(NZB_NAMING_PATTERN, 'long', defaultDescriptionPattern);
       const formattedTitle = formatStreamTitle(effectiveDescriptionPattern, namingContext, defaultDescriptionPattern);
 
-      const defaultNamePattern = '{addon.name}{stream.instant::istrue[" ⚡"||""]}{stream.health::exists[" {stream.health}"||""]} {stream.quality}';
+      const defaultNamePattern = '{addon.name} {stream.quality::exists["{stream.quality}"||""]}{stream.instant::istrue[" ⚡"||""]}{stream.health::exists[" {stream.health}"||""]}';
       const effectiveNamePattern = buildPatternFromTokenList(NZB_DISPLAY_NAME_PATTERN, 'short', defaultNamePattern);
       const formattedName = formatStreamTitle(effectiveNamePattern, namingContext, defaultNamePattern);
 

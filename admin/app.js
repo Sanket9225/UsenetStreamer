@@ -1390,11 +1390,73 @@
       }
     };
 
-    const defaultShortPattern = 'addon, instant, health, quality';
-    const defaultDescPattern = 'filename, source, codec, visual, audio, group, size, languages, indexer';
+    const defaultShortPattern = 'addon, quality, instant, health';
+    const defaultDescPattern = 'filename,\nsource,\ncodec,\nvisual,\naudio,\ngroup,\nsize,\nlanguages,\nindexer';
+
+    if (shortInput && !shortInput.value.trim()) {
+      shortInput.value = defaultShortPattern;
+    }
+    if (descInput && !descInput.value.trim()) {
+      descInput.value = defaultDescPattern;
+    }
 
     function buildPatternFromTokenList(rawPattern, variant, fallbackPattern) {
       if (rawPattern && rawPattern.includes('{')) return rawPattern;
+      const hasLineBreaks = /[\r\n]/.test(String(rawPattern || ''));
+      const lineParts = [];
+      if (hasLineBreaks) {
+        const lines = String(rawPattern || '').split(/\r?\n/);
+        lines.forEach((line) => {
+          const normalizedLine = String(line || '')
+            .replace(/\band\b/gi, ',')
+            .replace(/[;|]/g, ',');
+          const tokens = normalizedLine
+            .split(',')
+            .map((token) => token.trim())
+            .filter(Boolean);
+
+          const shortTokenMap = {
+            addon: '{addon.name}',
+            instant: '{stream.instant::istrue["⚡"||""]}',
+            health: '{stream.health::exists["{stream.health}"||""]}',
+            quality: '{stream.quality::exists["{stream.quality}"||""]}',
+            resolution: '{stream.resolution::exists["{stream.resolution}"||""]}',
+            source: '{stream.source::exists["{stream.source}"||""]}',
+            codec: '{stream.encode::exists["{stream.encode}"||""]}',
+            group: '{stream.releaseGroup::exists["{stream.releaseGroup}"||""]}',
+            size: '{stream.size::>0["{stream.size::bytes}"||""]}',
+            languages: '{stream.languages::join(" ")::exists["{stream.languages::join(\" \")}"||""]}',
+            indexer: '{stream.indexer::exists["{stream.indexer}"||""]}',
+            filename: '{stream.filename::exists["{stream.filename}"||""]}',
+            tags: '{tags::exists["{tags}"||""]}',
+          };
+
+          const longTokenMap = {
+            filename: '{stream.filename::exists["📄 {stream.filename}"||""]}',
+            source: '{stream.source::exists["🎥 {stream.source}"||""]}',
+            codec: '{stream.encode::exists["🎞️ {stream.encode}"||""]}',
+            resolution: '{stream.resolution::exists["🖥️ {stream.resolution}"||""]}',
+            visual: '{stream.visualTags::join(" | ")::exists["📺 {stream.visualTags::join(\" | \")}"||""]}',
+            audio: '{stream.audioTags::join(" ")::exists["🎧 {stream.audioTags::join(\" \")}"||""]}',
+            group: '{stream.releaseGroup::exists["👥 {stream.releaseGroup}"||""]}',
+            size: '{stream.size::>0["📦 {stream.size::bytes}"||""]}',
+            languages: '{stream.languages::join(" ")::exists["🌎 {stream.languages::join(\" \")}"||""]}',
+            indexer: '{stream.indexer::exists["🔎 {stream.indexer}"||""]}',
+            health: '{stream.health::exists["🧪 {stream.health}"||""]}',
+            instant: '{stream.instant::istrue["⚡ Instant"||""]}',
+            quality: '{stream.quality::exists["✨ {stream.quality}"||""]}',
+            tags: '{tags::exists["🏷️ {tags}"||""]}',
+          };
+
+          const map = variant === 'long' ? longTokenMap : shortTokenMap;
+          const parts = tokens.map((token) => map[token.toLowerCase()] || null).filter(Boolean);
+          lineParts.push(parts.join(' '));
+        });
+
+        const joined = lineParts.join('\n');
+        if (joined.replace(/\s/g, '') === '') return fallbackPattern;
+        return joined;
+      }
       const normalizedList = String(rawPattern || '')
         .replace(/\band\b/gi, ',')
         .replace(/[;|]/g, ',');
@@ -1440,7 +1502,7 @@
       const map = variant === 'long' ? longTokenMap : shortTokenMap;
       const parts = tokens.map((token) => map[token.toLowerCase()] || null).filter(Boolean);
       if (parts.length === 0) return fallbackPattern;
-      return variant === 'long' ? parts.join('\n') : parts.join(' ');
+      return parts.join(' ');
     }
 
     function runPreview(pattern, defaultPattern) {
