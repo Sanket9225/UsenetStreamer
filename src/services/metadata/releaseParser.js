@@ -1,4 +1,5 @@
 const { parseTorrentTitle } = require('../../utils/lib/parse-torrent-title/index.js');
+const { normalizeResolutionToken } = require('../../utils/parsers');
 
 const QUALITY_FEATURE_PATTERNS = [
   { label: 'DV', regex: /\b(dolby\s*vision|dolbyvision|dv)\b/i },
@@ -212,12 +213,25 @@ function parseReleaseMetadata(title) {
   })();
 
   // Trust the library output directly
-  const resolution = parsed.resolution || null;
-  const qualityScore = QUALITY_SCORE_MAP[resolution] || 0;
+  const resolution = normalizeResolutionToken(parsed.resolution) || parsed.resolution || null;
+  const qualityScore = QUALITY_SCORE_MAP[String(resolution || '').toLowerCase()] || 0;
+  const parsedTitle = parsed.title || null;
+  const parsedYear = parsed.year ? parseInt(parsed.year, 10) || null : null;
+  const parsedSeason = Array.isArray(parsed.seasons) ? parsed.seasons[0] || null : null;
+  const parsedEpisode = Array.isArray(parsed.episodes) ? parsed.episodes[0] || null : null;
+  let parsedTitleDisplay = parsedTitle;
+  if (parsedTitle) {
+    if (Number.isFinite(parsedSeason) && Number.isFinite(parsedEpisode)) {
+      parsedTitleDisplay = `${parsedTitle} S${String(parsedSeason).padStart(2, '0')}E${String(parsedEpisode).padStart(2, '0')}`;
+    } else if (Number.isFinite(parsedYear)) {
+      parsedTitleDisplay = `${parsedTitle} ${parsedYear}`;
+    }
+  }
 
   // Map library fields to internal schema
   return {
-    // title: parsed.title || null, // Parsed title (stripped of metadata)
+    parsedTitle, // Parsed title (stripped of metadata)
+    parsedTitleDisplay,
     resolution,
     languages: Array.isArray(parsed.languages) ? parsed.languages : [],
     qualityLabel: parsed.quality || parsed.source || parsed.codec || null,
@@ -225,9 +239,9 @@ function parseReleaseMetadata(title) {
     codec: parsed.codec || null,
     source: parsed.source || null,
     group: parsed.group || null,
-    season: Array.isArray(parsed.seasons) ? parsed.seasons[0] || null : null,
-    episode: Array.isArray(parsed.episodes) ? parsed.episodes[0] || null : null,
-    year: parsed.year ? parseInt(parsed.year, 10) || null : null,
+    season: parsedSeason,
+    episode: parsedEpisode,
+    year: parsedYear,
     complete: parsed.complete || false,
     proper: parsed.proper || false,
     repack: parsed.repack || false,

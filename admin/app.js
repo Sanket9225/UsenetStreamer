@@ -1377,6 +1377,7 @@
     const mockData = {
       // Nested (AIOStreams)
       stream: {
+        title: 'Dune Part Two',
         proxied: true,
         private: false,
         resolution: '2160p',
@@ -1410,14 +1411,18 @@
       }
     };
 
-    const defaultShortPattern = 'addon, quality, instant, health';
-    const defaultDescPattern = 'filename,\nsource,\ncodec,\nvisual,\naudio,\ngroup,\nsize,\nlanguages,\nindexer';
+    const defaultShortPattern = 'addon, health, instant, quality';
+    const defaultDescPattern = 'title,\nsource,\ncodec,\nvisual,\naudio,\ngroup,\nsize,\nlanguages,\nindexer';
+    const legacyDescPattern = 'filename,\nsource,\ncodec,\nvisual,\naudio,\ngroup,\nsize,\nlanguages,\nindexer';
 
     if (shortInput && !shortInput.value.trim()) {
       shortInput.value = defaultShortPattern;
     }
-    if (descInput && !descInput.value.trim()) {
-      descInput.value = defaultDescPattern;
+    if (descInput) {
+      const currentDesc = descInput.value.trim();
+      if (!currentDesc || currentDesc === legacyDescPattern) {
+        descInput.value = defaultDescPattern;
+      }
     }
 
     function buildPatternFromTokenList(rawPattern, variant, fallbackPattern) {
@@ -1437,6 +1442,7 @@
 
           const shortTokenMap = {
             addon: '{addon.name}',
+            title: '{stream.title::exists["{stream.title}"||""]}',
             instant: '{stream.instant::istrue["⚡"||""]}',
             health: '{stream.health::exists["{stream.health}"||""]}',
             quality: '{stream.quality::exists["{stream.quality}"||""]}',
@@ -1452,6 +1458,7 @@
           };
 
           const longTokenMap = {
+            title: '{stream.title::exists["🎬 {stream.title}"||""]}',
             filename: '{stream.filename::exists["📄 {stream.filename}"||""]}',
             source: '{stream.source::exists["🎥 {stream.source}"||""]}',
             codec: '{stream.encode::exists["🎞️ {stream.encode}"||""]}',
@@ -1473,7 +1480,8 @@
           lineParts.push(parts.join(' '));
         });
 
-        const joined = lineParts.join('\n');
+        const separator = variant === 'long' ? '\n' : ' ';
+        const joined = lineParts.join(separator);
         if (joined.replace(/\s/g, '') === '') return fallbackPattern;
         return joined;
       }
@@ -1488,6 +1496,7 @@
 
       const shortTokenMap = {
         addon: '{addon.name}',
+        title: '{stream.title::exists["{stream.title}"||""]}',
         instant: '{stream.instant::istrue["⚡"||""]}',
         health: '{stream.health::exists["{stream.health}"||""]}',
         quality: '{stream.quality::exists["{stream.quality}"||""]}',
@@ -1503,6 +1512,7 @@
       };
 
       const longTokenMap = {
+        title: '{stream.title::exists["🎬 {stream.title}"||""]}',
         filename: '{stream.filename::exists["📄 {stream.filename}"||""]}',
         source: '{stream.source::exists["🎥 {stream.source}"||""]}',
         codec: '{stream.encode::exists["🎞️ {stream.encode}"||""]}',

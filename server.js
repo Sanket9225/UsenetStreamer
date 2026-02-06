@@ -1814,7 +1814,7 @@ async function streamHandler(req, res) {
         }
         seenPlans.add(planKey);
         const planRecord = { type: planType, query, rawQuery: rawQuery ? rawQuery : null, tokens: normalizedTokens };
-        if (strictTextMode && planType === 'search' && rawQuery) {
+        if (strictTextMode && planType === 'search' && rawQuery && !isSpecialRequest) {
           const strictPhrase = sanitizeStrictSearchPhrase(rawQuery);
           if (strictPhrase) {
             planRecord.strictMatch = true;
@@ -1884,6 +1884,7 @@ async function streamHandler(req, res) {
       }
 
       // Wait for Cinemeta if applicable
+      let cinemetaTitleCandidate = null;
       const cinemetaWaitStartTs = Date.now();
       if (cinemetaPromise) {
         console.log('[CINEMETA] Waiting for Cinemeta metadata');
@@ -1891,6 +1892,12 @@ async function streamHandler(req, res) {
         console.log(`[CINEMETA] Cinemeta fetch completed in ${Date.now() - cinemetaWaitStartTs} ms`);
         if (cinemetaMeta) {
           metaSources.push(cinemetaMeta);
+          cinemetaTitleCandidate = pickFirstDefined(
+            cinemetaMeta?.name,
+            cinemetaMeta?.title,
+            cinemetaMeta?.originalTitle,
+            cinemetaMeta?.original_title
+          );
         }
       }
 
@@ -1920,20 +1927,30 @@ async function streamHandler(req, res) {
 
       console.log('[REQUEST] Resolved title/year', { movieTitle, releaseYear, elapsedMs: Date.now() - requestStartTs });
 
-      // Strip subtitle after colon for series only (e.g., "Show Name: The Subtitle" → "Show Name")
-      const stripSeriesSubtitle = (title) => {
-        if (!title) return title;
+      const isCinemetaTitleSource = Boolean(
+        cinemetaTitleCandidate
+        && movieTitle
+        && String(movieTitle).trim() === String(cinemetaTitleCandidate).trim()
+      );
+      // Strip subtitle after colon for Cinemeta series titles only when colon appears after 4th word
+      const stripSeriesSubtitle = (title, allowStrip) => {
+        if (!title || !allowStrip) return title;
         const colonIdx = title.indexOf(':');
         if (colonIdx > 0 && colonIdx < title.length - 1) {
-          const afterColon = title.slice(colonIdx + 1).trim();
-          // Only strip if it's not a year
-          if (!/^\d{4}$/.test(afterColon)) {
-            return title.slice(0, colonIdx).trim();
+          const beforeColon = title.slice(0, colonIdx).trim();
+          const beforeWords = beforeColon.split(/\s+/).filter(Boolean);
+          if (beforeWords.length >= 4) {
+            const afterColon = title.slice(colonIdx + 1).trim();
+            if (!/^\d{4}$/.test(afterColon)) {
+              return beforeColon;
+            }
           }
         }
         return title;
       };
-      const searchTitle = type === 'series' ? stripSeriesSubtitle(movieTitle) : movieTitle;
+      const searchTitle = type === 'series'
+        ? stripSeriesSubtitle(movieTitle, isCinemetaTitleSource)
+        : movieTitle;
 
       // Continue with text-based searches using TMDb titles
       const textQueryParts = [];
@@ -1950,7 +1967,7 @@ async function streamHandler(req, res) {
       }
 
       const shouldForceTextSearch = isSpecialRequest;
-      const shouldAddTextSearch = shouldForceTextSearch || (!INDEXER_MANAGER_STRICT_ID_MATCH && !incomingTvdbId);
+      const shouldAddTextSearch = shouldForceTextSearch || !INDEXER_MANAGER_STRICT_ID_MATCH;
 
       if (shouldAddTextSearch) {
         const hasTmdbTitles = metaSources.some(s => s?._tmdbTitles?.length > 0);
@@ -1960,11 +1977,11 @@ async function streamHandler(req, res) {
         } else {
           const textQueryCandidate = textQueryParts.join(' ').trim();
           const isEpisodeOnly = /^s\d{2}e\d{2}$/i.test(textQueryCandidate) && !movieTitle;
-          const isYearOnly = /^\d{4}$/.test(textQueryCandidate);
-          if (strictTextMode && isEpisodeOnly) {
+          const isYearOnly = /^\d{4}$/.test(textQueryCandidate) && (!movieTitle || !movieTitle.trim());
+          if (isEpisodeOnly) {
             console.log(`${INDEXER_LOG_PREFIX} Skipping episode-only text plan (no title)`);
-          } else if (strictTextMode && isYearOnly && (!movieTitle || !movieTitle.trim())) {
-            console.log(`${INDEXER_LOG_PREFIX} Skipping year-only text plan (strict mode, no title)`);
+          } else if (isYearOnly) {
+            console.log(`${INDEXER_LOG_PREFIX} Skipping year-only text plan (no title)`);
           } else {
             const rawFallback = textQueryCandidate.trim();
             textQueryFallbackValue = tmdbService.normalizeToAscii(rawFallback);
@@ -1975,7 +1992,7 @@ async function streamHandler(req, res) {
             const normalizedYearOnly = /^\d{4}$/.test(normalizedValue);
             const normalizedEpisodeOnly = /^s\d{2}e\d{2}$/i.test(normalizedValue) || /^s\d{2}$/i.test(normalizedValue) || /^e\d{2}$/i.test(normalizedValue);
             const rawHadNonAscii = /[^\x00-\x7F]/.test(rawFallback);
-            if ((normalizedYearOnly || normalizedEpisodeOnly) && rawHadNonAscii) {
+            if (normalizedYearOnly || normalizedEpisodeOnly) {
               console.log(`${INDEXER_LOG_PREFIX} Skipping text search plan (normalized to episode/year only)`, { original: rawFallback, normalized: normalizedValue });
             } else if (normalizedValue) {
               const addedTextPlan = addPlan('search', { rawQuery: textQueryFallbackValue });
@@ -2019,7 +2036,7 @@ async function streamHandler(req, res) {
           });
         }
       } else {
-        const reason = INDEXER_MANAGER_STRICT_ID_MATCH ? 'strict ID matching enabled' : 'tvdb identifier provided';
+        const reason = INDEXER_MANAGER_STRICT_ID_MATCH ? 'strict ID matching enabled' : 'text search disabled';
         console.log(`${INDEXER_LOG_PREFIX} ${reason}; skipping text-based search`);
       }
 
@@ -2157,9 +2174,118 @@ async function streamHandler(req, res) {
 
       const resultMatchesStrictPlan = (plan, item) => {
         if (!plan?.strictMatch || !plan.strictPhrase) return true;
-        const title = (item?.title || item?.Title || '').trim();
-        if (!title) return false;
-        return matchesStrictSearch(title, plan.strictPhrase);
+        const annotated = (item?.parsedTitle || item?.parsedTitleDisplay || item?.season || item?.episode || item?.year)
+          ? item
+          : annotateNzbResult(item, 0);
+        const candidateTitle = (annotated?.parsedTitleDisplay || annotated?.parsedTitle || annotated?.title || annotated?.Title || '').trim();
+        if (!candidateTitle) {
+          if (isNewznabDebugEnabled()) {
+            console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (no parsed title)`, {
+              rawTitle: item?.title || item?.Title || null,
+              query: plan.query,
+            });
+          }
+          return false;
+        }
+        if (!matchesStrictSearch(candidateTitle, plan.strictPhrase)) {
+          if (isNewznabDebugEnabled()) {
+            console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (title mismatch)`, {
+              title: candidateTitle,
+              query: plan.query,
+            });
+          }
+          return false;
+        }
+        if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
+          if (!Number.isFinite(annotated?.season) || !Number.isFinite(annotated?.episode)) {
+            if (isNewznabDebugEnabled()) {
+              console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (missing season/episode)`, {
+                title: candidateTitle,
+                season: annotated?.season ?? null,
+                episode: annotated?.episode ?? null,
+                query: plan.query,
+              });
+            }
+            return false;
+          }
+          if (Number(annotated.season) !== Number(seasonNum) || Number(annotated.episode) !== Number(episodeNum)) {
+            if (isNewznabDebugEnabled()) {
+              console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (season/episode mismatch)`, {
+                title: candidateTitle,
+                season: annotated?.season ?? null,
+                episode: annotated?.episode ?? null,
+                expectedSeason: seasonNum,
+                expectedEpisode: episodeNum,
+                query: plan.query,
+              });
+            }
+            return false;
+          }
+        }
+        if (type === 'movie' && Number.isFinite(releaseYear)) {
+          if (!Number.isFinite(annotated?.year)) {
+            if (isNewznabDebugEnabled()) {
+              console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (missing year)`, {
+                title: candidateTitle,
+                year: annotated?.year ?? null,
+                expectedYear: releaseYear,
+                query: plan.query,
+              });
+            }
+            return false;
+          }
+          if (Number(annotated.year) !== Number(releaseYear)) {
+            if (isNewznabDebugEnabled()) {
+              console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (year mismatch)`, {
+                title: candidateTitle,
+                year: annotated?.year ?? null,
+                expectedYear: releaseYear,
+                query: plan.query,
+              });
+            }
+            return false;
+          }
+        }
+        if (type === 'movie') {
+          const releaseTypes = Array.isArray(annotated?.releaseTypes)
+            ? annotated.releaseTypes.map((value) => String(value).toLowerCase())
+            : [];
+          const adultReleaseTypes = new Set(['xxx', 'adult', 'porn', 'pornographic', 'erotic', 'erotica']);
+          const hasAdultReleaseType = releaseTypes.some((value) => adultReleaseTypes.has(value));
+          if (hasAdultReleaseType) {
+            if (isNewznabDebugEnabled()) {
+              console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (adult release type)`, {
+                title: candidateTitle,
+                releaseTypes,
+                query: plan.query,
+              });
+            }
+            return false;
+          }
+          const audioOnlyPattern = /\b(soundtrack|ost|score|album|flac|mp3|aac|alac|wav|ape|m4a)\b/i;
+          const containerValue = (annotated?.container || '').toString().toLowerCase();
+          const isVideoContainer = /(mkv|mp4|avi|mov|wmv|mpg|mpeg|m4v|webm|ts|m2ts)/i.test(containerValue);
+          if (audioOnlyPattern.test(candidateTitle) && !isVideoContainer) {
+            if (isNewznabDebugEnabled()) {
+              console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (audio-only title)`, {
+                title: candidateTitle,
+                container: containerValue || null,
+                query: plan.query,
+              });
+            }
+            return false;
+          }
+        }
+        if (isNewznabDebugEnabled()) {
+          console.log(`${INDEXER_LOG_PREFIX} Strict text match passed`, {
+            title: candidateTitle,
+            season: annotated?.season ?? null,
+            episode: annotated?.episode ?? null,
+            year: annotated?.year ?? null,
+            query: plan.query,
+          });
+        }
+        return true;
       };
 
       // Process early ID-based searches that are already running
@@ -2429,8 +2555,6 @@ async function streamHandler(req, res) {
         }
       }
 
-      finalNzbResults = finalNzbResults.map((result, index) => annotateNzbResult(result, index));
-
       console.log(`${INDEXER_LOG_PREFIX} Final NZB selection: ${finalNzbResults.length} results`, { elapsedMs: Date.now() - requestStartTs });
     }
 
@@ -2447,6 +2571,7 @@ async function streamHandler(req, res) {
     const resolvedPreferredLanguages = resolvePreferredLanguages(triageOverrides.preferredLanguages, INDEXER_PREFERRED_LANGUAGES);
     const activeSortMode = triageOverrides.sortMode || INDEXER_SORT_MODE;
 
+    finalNzbResults = finalNzbResults.map((result, index) => annotateNzbResult(result, index));
     finalNzbResults = prepareSortedResults(finalNzbResults, {
       sortMode: activeSortMode,
       preferredLanguages: resolvedPreferredLanguages,
@@ -2579,7 +2704,7 @@ async function streamHandler(req, res) {
     };
     const categoryForType = STREAMING_MODE !== 'native' ? nzbdavService.getNzbdavCategory(type) : null;
     const triageCandidatesToRun = triageEligibleResults.filter((candidate) => !candidateHasConclusiveDecision(candidate));
-    const shouldSkipTriageForRequest = requestLacksIdentifiers;
+    const shouldSkipTriageForRequest = requestLacksIdentifiers || isSpecialRequest;
     const shouldAttemptTriage = triageCandidatesToRun.length > 0 && !requestedDisable && !shouldSkipTriageForRequest && (requestedEnable || TRIAGE_ENABLED);
     let triageOutcome = null;
     let triageCompleteForCache = !shouldAttemptTriage;
@@ -2649,7 +2774,10 @@ async function streamHandler(req, res) {
         }
       }
     } else if (shouldSkipTriageForRequest && TRIAGE_ENABLED && !requestedDisable) {
-      console.log('[NZB TRIAGE] Skipping health checks for non-ID request (no IMDb/TVDB identifier)');
+      const reason = isSpecialRequest
+        ? 'special catalog request'
+        : 'non-ID request (no IMDb/TVDB identifier)';
+      console.log(`[NZB TRIAGE] Skipping health checks for ${reason}`);
     }
 
     if (shouldAttemptTriage) {
@@ -2952,7 +3080,7 @@ async function streamHandler(req, res) {
 
       const namingContext = {
         addon: addonLabel,
-        title: result.title || '',
+        title: result.parsedTitleDisplay || result.parsedTitle || result.title || '',
         filename: normalizedFilename || '',
         indexer: result.indexer || '',
         size: sizeString || '',
@@ -2988,6 +3116,7 @@ async function streamHandler(req, res) {
         indexer: namingContext.indexer,
         languages: releaseLanguageLabels.length > 0 ? releaseLanguageLabels : (sourceLanguageLabel ? [sourceLanguageLabel] : []),
         network: '', // Not strictly tracked
+        title: namingContext.title,
         filename: namingContext.filename,
         message: namingContext.health, // Map health status to message
         health: namingContext.health, // Alias for clear naming
@@ -3026,6 +3155,7 @@ async function streamHandler(req, res) {
 
         const shortTokenMap = {
           addon: '{addon.name}',
+          title: '{stream.title::exists["{stream.title}"||""]}',
           instant: '{stream.instant::istrue["⚡"||""]}',
           health: '{stream.health::exists["{stream.health}"||""]}',
           quality: '{stream.quality::exists["{stream.quality}"||""]}',
@@ -3041,6 +3171,7 @@ async function streamHandler(req, res) {
         };
 
         const longTokenMap = {
+          title: '{stream.title::exists["🎬 {stream.title}"||""]}',
           filename: '{stream.filename::exists["📄 {stream.filename}"||""]}',
           source: '{stream.source::exists["🎥 {stream.source}"||""]}',
           codec: '{stream.encode::exists["🎞️ {stream.encode}"||""]}',
@@ -3074,7 +3205,8 @@ async function streamHandler(req, res) {
               .filter(Boolean)
               .join(' ');
           });
-          const joined = lineParts.join('\n');
+          const separator = variant === 'long' ? '\n' : ' ';
+          const joined = lineParts.join(separator);
           if (joined.replace(/\s/g, '') === '') return defaultPattern;
           return joined;
         }
@@ -3088,11 +3220,11 @@ async function streamHandler(req, res) {
       };
 
       // Default AIOStreams template
-      const defaultDescriptionPattern = '{stream.filename::exists["📄 {stream.filename}\n"||""]}{stream.source::exists["🎥 {stream.source} "||""]}{stream.encode::exists["🎞️ {stream.encode}\n"||"\n"]}{stream.visualTags::join(\' | \')::exists["📺 {stream.visualTags::join(\' | \')}\n"||""]}{stream.audioTags::join(\' \')::exists["🎧 {stream.audioTags::join(\' \')}\n"||""]}{stream.releaseGroup::exists["👥 {stream.releaseGroup}\n"||""]}{stream.size::>0["📦 {stream.size::bytes}\n"||""]}{stream.languages::join(\' \')::exists["🌎 {stream.languages::join(\' \')}\n"||""]}{stream.indexer::exists["🔎 {stream.indexer}"||""]}';
+      const defaultDescriptionPattern = '{stream.title::exists["🎬 {stream.title}\n"||""]}{stream.source::exists["🎥 {stream.source} "||""]}{stream.encode::exists["🎞️ {stream.encode}\n"||"\n"]}{stream.visualTags::join(\' | \')::exists["📺 {stream.visualTags::join(\' | \')}\n"||""]}{stream.audioTags::join(\' \')::exists["🎧 {stream.audioTags::join(\' \')}\n"||""]}{stream.releaseGroup::exists["👥 {stream.releaseGroup}\n"||""]}{stream.size::>0["📦 {stream.size::bytes}\n"||""]}{stream.languages::join(\' \')::exists["🌎 {stream.languages::join(\' \')}\n"||""]}{stream.indexer::exists["🔎 {stream.indexer}"||""]}';
       const effectiveDescriptionPattern = buildPatternFromTokenList(NZB_NAMING_PATTERN, 'long', defaultDescriptionPattern);
       const formattedTitle = formatStreamTitle(effectiveDescriptionPattern, namingContext, defaultDescriptionPattern);
 
-      const defaultNamePattern = '{addon.name} {stream.quality::exists["{stream.quality}"||""]}{stream.instant::istrue[" ⚡"||""]}{stream.health::exists[" {stream.health}"||""]}';
+      const defaultNamePattern = '{addon.name} {stream.health::exists["{stream.health} "||""]}{stream.instant::istrue["⚡ "||""]}{stream.quality::exists["{stream.quality}"||""]}';
       const effectiveNamePattern = buildPatternFromTokenList(NZB_DISPLAY_NAME_PATTERN, 'short', defaultNamePattern);
       const formattedName = formatStreamTitle(effectiveNamePattern, namingContext, defaultNamePattern);
 

@@ -197,11 +197,13 @@ function resultMatchesPreferredLanguage(result, preferredLanguages) {
 }
 
 function compareQualityThenSize(a, b) {
-  if (a.qualityRank !== b.qualityRank) {
-    return b.qualityRank - a.qualityRank;
+  const aRank = Number.isFinite(a?.qualityRank) ? a.qualityRank : 0;
+  const bRank = Number.isFinite(b?.qualityRank) ? b.qualityRank : 0;
+  if (aRank !== bRank) {
+    return bRank - aRank;
   }
-  const aSize = Number.isFinite(a.size) ? a.size : 0;
-  const bSize = Number.isFinite(b.size) ? b.size : 0;
+  const aSize = Number.isFinite(a?.size) ? a.size : 0;
+  const bSize = Number.isFinite(b?.size) ? b.size : 0;
   return bSize - aSize;
 }
 
