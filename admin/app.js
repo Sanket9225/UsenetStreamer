@@ -43,7 +43,7 @@
   let newznabPresets = [];
 
   const MAX_NEWZNAB_INDEXERS = 20;
-  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT'];
+  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT', 'ZYCLOPS'];
 
   const managerSelect = configForm.querySelector('select[name="INDEXER_MANAGER"]');
   const newznabList = document.getElementById('newznab-indexers-list');
@@ -440,6 +440,10 @@
             <input type="checkbox" data-field="PAID" />
             <span>I have a paid subscription with this indexer (use for health checks)</span>
           </label>
+          <label class="checkbox">
+            <input type="checkbox" data-field="ZYCLOPS" />
+            <span>Enable Zyclops Proxy</span>
+          </label>
           <label class="inline-select">
             <span>Grab limit</span>
             <select data-field="PAID_LIMIT" class="small-select" disabled>
@@ -485,6 +489,7 @@
         <button type="button" class="secondary" data-row-action="test">Test Indexer</button>
         <span class="status-message row-status" data-row-status></span>
       </div>
+      <p class="warning hidden" data-zyclops-warning>Zyclops is against the TOS of all indexers. All requests will be routed through Zyclops servers, so the indexer will see their IP address, not yours. Only use it if this particular indexer has blocked your IP range (e.g. Oracle VPS IP range).</p>
     `;
 
     const moveUpButton = row.querySelector('[data-row-action="move-up"]');
@@ -497,11 +502,16 @@
     const apiKeyToggle = row.querySelector('[data-role="api-key-toggle"]');
     const endpointInput = row.querySelector('[data-field="ENDPOINT"]');
     const paidLimitSelect = row.querySelector('[data-field="PAID_LIMIT"]');
+    const zyclopsToggle = row.querySelector('[data-field="ZYCLOPS"]');
+    const zyclopsRowWarning = row.querySelector('[data-zyclops-warning]');
 
     if (moveUpButton) moveUpButton.addEventListener('click', () => moveNewznabRow(row, -1));
     if (moveDownButton) moveDownButton.addEventListener('click', () => moveNewznabRow(row, 1));
-    if (removeButton) removeButton.addEventListener('click', () => removeNewznabRow(row));
+    if (removeButton) removeButton.addEventListener('click', () => { removeNewznabRow(row); });
     if (enabledToggle) enabledToggle.addEventListener('change', () => syncNewznabControls());
+    if (zyclopsToggle) zyclopsToggle.addEventListener('change', () => {
+      if (zyclopsRowWarning) zyclopsRowWarning.classList.toggle('hidden', !zyclopsToggle.checked);
+    });
     if (paidToggle) {
       paidToggle.addEventListener('change', () => {
         updateHealthPaidWarning();
@@ -551,6 +561,9 @@
     }
     refreshNewznabFieldNames();
     applyNewznabRowValues(row, initialValues);
+    const zyclopsCheck = row.querySelector('[data-field="ZYCLOPS"]');
+    const zyclopsWarn = row.querySelector('[data-zyclops-warning]');
+    if (zyclopsCheck && zyclopsWarn) zyclopsWarn.classList.toggle('hidden', !zyclopsCheck.checked);
     if (options.preset) {
       setRowApiKeyLink(row, options.preset);
     } else {

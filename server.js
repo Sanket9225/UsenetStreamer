@@ -399,7 +399,7 @@ const NEWZNAB_LOG_PREFIX = '[NEWZNAB]';
 
 function getPaidDirectIndexerTokens(configs = ACTIVE_NEWZNAB_CONFIGS) {
   return configs
-    .filter((config) => config && config.isPaid)
+    .filter((config) => config && config.isPaid && !config.zyclopsEnabled)
     .map((config) => normalizeIndexerToken(config.slug || config.dedupeKey || config.displayName || config.id))
     .filter(Boolean);
 }
@@ -407,7 +407,7 @@ function getPaidDirectIndexerTokens(configs = ACTIVE_NEWZNAB_CONFIGS) {
 function buildPaidIndexerLimitMap(configs = ACTIVE_NEWZNAB_CONFIGS) {
   const limitMap = new Map();
   (configs || []).forEach((config) => {
-    if (!config || !config.isPaid) return;
+    if (!config || !config.isPaid || config.zyclopsEnabled) return;
     const limit = Number.isFinite(config.paidLimit) ? config.paidLimit : 6;
     const tokens = [
       config.slug,
