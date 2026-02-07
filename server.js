@@ -304,7 +304,10 @@ adminApiRouter.post('/test-connections', async (req, res) => {
         message = await testTmdbConnection(values);
         break;
       case 'tvdb':
-        message = await tvdbService.testTvdbConnection({ apiKey: values?.TVDB_API_KEY });
+        message = await tvdbService.testTvdbConnection({
+          apiKey: values?.TVDB_API_KEY,
+          enabled: values?.TVDB_ENABLED,
+        });
         break;
       default:
         res.status(400).json({ error: `Unknown test type: ${type}` });
@@ -424,6 +427,9 @@ function buildPaidIndexerLimitMap(configs = ACTIVE_NEWZNAB_CONFIGS) {
 }
 
 function buildManagerIndexerLimitMap() {
+  if (INDEXER_MANAGER === 'none') {
+    return new Map();
+  }
   const limitMap = new Map();
   const indexers = TRIAGE_PRIORITY_INDEXERS || [];
   const limits = TRIAGE_PRIORITY_INDEXER_LIMITS || [];
@@ -1083,6 +1089,21 @@ const CINEMETA_URL = 'https://v3-cinemeta.strem.io/meta';
 const pipelineAsync = promisify(pipeline);
 const posixPath = path.posix;
 
+// Base64url helpers for clean stream URLs (no query params)
+function encodeStreamParams(params) {
+  const json = JSON.stringify(Object.fromEntries(params.entries()));
+  return Buffer.from(json, 'utf8').toString('base64url');
+}
+
+function decodeStreamParams(encoded) {
+  try {
+    const json = Buffer.from(encoded, 'base64url').toString('utf8');
+    return JSON.parse(json);
+  } catch (_) {
+    return null;
+  }
+}
+
 function buildStreamCacheKey({ type, id, query = {}, requestedEpisode = null }) {
   const normalizedQuery = {};
   Object.keys(query)
@@ -1473,7 +1494,7 @@ async function streamHandler(req, res) {
       });
       if (match.jobName) baseParams.set('historyJobName', match.jobName);
       if (match.category) baseParams.set('historyCategory', match.category);
-      const streamUrl = `${addonBaseUrl}${tokenSegment}/nzb/stream/${encodedFilename}?${baseParams.toString()}`;
+      const streamUrl = `${addonBaseUrl}${tokenSegment}/nzb/stream/${encodeStreamParams(baseParams)}/${encodedFilename}`;
 
       const stream = {
         title: match.jobName || 'NZBDav Completed',
@@ -2648,7 +2669,9 @@ async function streamHandler(req, res) {
       ? triageOverrides.indexers
       : null;
     const directPaidTokens = overrideIndexerTokens ? [] : getPaidDirectIndexerTokens();
-    const managerHealthTokens = TRIAGE_PRIORITY_INDEXERS.length > 0 ? TRIAGE_PRIORITY_INDEXERS : TRIAGE_HEALTH_INDEXERS;
+    const managerHealthTokens = INDEXER_MANAGER === 'none'
+      ? []
+      : (TRIAGE_PRIORITY_INDEXERS.length > 0 ? TRIAGE_PRIORITY_INDEXERS : TRIAGE_HEALTH_INDEXERS);
     let combinedHealthTokens = [];
     if (overrideIndexerTokens) {
       combinedHealthTokens = [...overrideIndexerTokens];
@@ -3102,7 +3125,7 @@ async function streamHandler(req, res) {
       const hasVideoExt = /\.(mkv|mp4|m4v|avi|mov|wmv|mpg|mpeg|ts|webm)$/i.test(fileBase);
       const fileWithExt = hasVideoExt ? fileBase : `${fileBase}.mkv`;
       const encodedFilename = encodeURIComponent(fileWithExt);
-      const streamUrl = `${addonBaseUrl}${tokenSegment}/nzb/stream/${encodedFilename}?${baseParams.toString()}`;
+      const streamUrl = `${addonBaseUrl}${tokenSegment}/nzb/stream/${encodeStreamParams(baseParams)}/${encodedFilename}`;
       const tags = [];
       if (triageTag) tags.push(triageTag);
       if (isInstant && STREAMING_MODE !== 'native') tags.push('⚡ Instant');
@@ -3542,6 +3565,13 @@ async function handleEasynewsNzbDownload(req, res) {
 }
 
 async function handleNzbdavStream(req, res) {
+  // Decode base64url encoded params from path if present
+  if (req.params.encodedParams && !req.query.downloadUrl) {
+    const decoded = decodeStreamParams(req.params.encodedParams);
+    if (decoded && typeof decoded === 'object') {
+      Object.assign(req.query, decoded);
+    }
+  }
   let { downloadUrl, type = 'movie', id = '', title = 'NZB Stream' } = req.query;
   const easynewsPayload = typeof req.query.easynewsPayload === 'string' ? req.query.easynewsPayload : null;
   const declaredSize = Number(req.query.size);
@@ -3678,7 +3708,7 @@ async function handleNzbdavStream(req, res) {
   }
 }
 
-['/:token/nzb/stream/:filename', '/nzb/stream/:filename', '/:token/nzb/stream', '/nzb/stream'].forEach((route) => {
+['/:token/nzb/stream/:encodedParams/:filename', '/:token/nzb/stream/:filename', '/nzb/stream/:encodedParams/:filename', '/nzb/stream/:filename', '/:token/nzb/stream', '/nzb/stream'].forEach((route) => {
   app.get(route, handleNzbdavStream);
   app.head(route, handleNzbdavStream);
 });

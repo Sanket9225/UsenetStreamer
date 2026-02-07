@@ -130,7 +130,11 @@ async function getTvdbIdForSeries(imdbId) {
   }
 }
 
-async function testTvdbConnection({ apiKey }) {
+async function testTvdbConnection({ apiKey, enabled }) {
+  if (enabled !== undefined) {
+    const normalized = String(enabled).trim().toLowerCase();
+    TVDB_ENABLED = !['false', '0', 'off', 'no'].includes(normalized);
+  }
   if (apiKey !== undefined) {
     TVDB_API_KEY = String(apiKey || '').trim();
   }

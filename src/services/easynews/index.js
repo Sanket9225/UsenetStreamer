@@ -320,6 +320,7 @@ function filterAndMap(jsonData, options) {
     strictMatch,
     skipSamples = true,
   } = options;
+  const debugEnabled = String(process.env.DEBUG_NEWZNAB_SEARCH || '').trim().toLowerCase() === 'true';
   const tokenSet = new Set((queryTokens || []).filter(Boolean));
   const thumbBase = jsonData?.thumbURL || jsonData?.thumbUrl || null;
   const items = [];
@@ -379,12 +380,71 @@ function filterAndMap(jsonData, options) {
 
     if (strictMatch && strictPhrase) {
       let parsedCandidateTitle = title;
+      let parsedRelease = null;
       try {
-        const parsed = parseTorrentTitle(title);
-        if (parsed?.title) parsedCandidateTitle = parsed.title;
+        parsedRelease = parseTorrentTitle(title);
+        if (parsedRelease?.title) parsedCandidateTitle = parsedRelease.title;
       } catch (_) { /* use raw title */ }
-      if (!matchesStrict(parsedCandidateTitle, strictPhrase)) {
+
+      const strictTitlePhrase = queryMeta?.title
+        ? sanitizePhrase(queryMeta.title)
+        : strictPhrase;
+
+      if (!matchesStrict(parsedCandidateTitle, strictTitlePhrase)) {
+        if (debugEnabled) {
+          console.log('[EASYNEWS] Strict match failed', {
+            title,
+            parsedTitle: parsedCandidateTitle,
+            query: strictTitlePhrase,
+          });
+        }
         return;
+      }
+
+      const parsedYear = parsedRelease?.year ? Number(parsedRelease.year) : null;
+      const parsedSeason = Array.isArray(parsedRelease?.seasons) ? parsedRelease.seasons[0] : null;
+      const parsedEpisode = Array.isArray(parsedRelease?.episodes) ? parsedRelease.episodes[0] : null;
+
+      if (queryMeta?.year && parsedYear && queryMeta.year !== parsedYear) {
+        if (debugEnabled) {
+          console.log('[EASYNEWS] Strict match failed (year mismatch)', {
+            title,
+            parsedTitle: parsedCandidateTitle,
+            year: parsedYear,
+            expectedYear: queryMeta.year,
+          });
+        }
+        return;
+      }
+      if (queryMeta?.season && parsedSeason && queryMeta.season !== parsedSeason) {
+        if (debugEnabled) {
+          console.log('[EASYNEWS] Strict match failed (season mismatch)', {
+            title,
+            parsedTitle: parsedCandidateTitle,
+            season: parsedSeason,
+            expectedSeason: queryMeta.season,
+          });
+        }
+        return;
+      }
+      if (queryMeta?.episode && parsedEpisode && queryMeta.episode !== parsedEpisode) {
+        if (debugEnabled) {
+          console.log('[EASYNEWS] Strict match failed (episode mismatch)', {
+            title,
+            parsedTitle: parsedCandidateTitle,
+            episode: parsedEpisode,
+            expectedEpisode: queryMeta.episode,
+          });
+        }
+        return;
+      }
+
+      if (debugEnabled) {
+        console.log('[EASYNEWS] Strict match passed', {
+          title,
+          parsedTitle: parsedCandidateTitle,
+          query: strictTitlePhrase,
+        });
       }
     }
 
@@ -461,6 +521,10 @@ function buildQueryMeta({ rawQuery, year, season, episode }) {
   if (year) markers.year = year;
   if (typeof season === 'number') markers.season = season;
   if (typeof episode === 'number') markers.episode = episode;
+  try {
+    const parsed = parseTorrentTitle(rawQuery || '');
+    if (parsed?.title) markers.title = parsed.title;
+  } catch (_) { /* ignore */ }
   return markers;
 }
 
