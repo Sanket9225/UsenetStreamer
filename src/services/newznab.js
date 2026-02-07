@@ -158,7 +158,7 @@ function parsePaidLimit(value, fallback = 6) {
   if (value === undefined || value === null || value === '') return fallback;
   const numeric = Number(String(value).trim());
   if (!Number.isFinite(numeric)) return fallback;
-  const clamped = Math.min(6, Math.max(2, Math.floor(numeric)));
+  const clamped = Math.min(6, Math.max(1, Math.floor(numeric)));
   return clamped;
 }
 

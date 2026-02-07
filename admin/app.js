@@ -443,6 +443,7 @@
           <label class="inline-select">
             <span>Grab limit</span>
             <select data-field="PAID_LIMIT" class="small-select" disabled>
+              <option value="1">1</option>
               <option value="2">2</option>
               <option value="3">3</option>
               <option value="4">4</option>
