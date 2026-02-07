@@ -340,6 +340,20 @@ async function fetchNewznabCaps(config, options = {}) {
   return parseSupportedParamsFromXml(body);
 }
 
+const DEFAULT_CAPS = {
+  search: new Set(['q']),
+  tvsearch: new Set(['q', 'tvdbid', 'season', 'ep']),
+  movie: new Set(['q', 'imdbid']),
+};
+
+function getDefaultCaps() {
+  return {
+    search: new Set(DEFAULT_CAPS.search),
+    tvsearch: new Set(DEFAULT_CAPS.tvsearch),
+    movie: new Set(DEFAULT_CAPS.movie),
+  };
+}
+
 function getSupportedParamsForType(supportedParams, planType) {
   if (!supportedParams) return null;
   if (supportedParams instanceof Set) return supportedParams;
@@ -360,8 +374,10 @@ async function getSupportedParams(config, options = {}) {
     newznabCapsCache.set(cacheKey, { supportedParams, fetchedAt: Date.now() });
     return getSupportedParamsForType(supportedParams, options.planType);
   } catch (error) {
-    newznabCapsCache.set(cacheKey, { supportedParams: null, fetchedAt: Date.now() });
-    return null;
+    console.warn(`[NEWZNAB][CAPS] Failed to fetch caps for ${config.displayName || config.dedupeKey}, using defaults:`, error?.message || error);
+    const defaults = getDefaultCaps();
+    newznabCapsCache.set(cacheKey, { supportedParams: defaults, fetchedAt: Date.now() });
+    return getSupportedParamsForType(defaults, options.planType);
   }
 }
 
@@ -369,12 +385,22 @@ async function refreshCapsCache(configs, options = {}) {
   const eligible = filterUsableConfigs(configs, { requireEnabled: true, requireApiKey: true });
   const results = {};
   await Promise.all(eligible.map(async (config) => {
-    const supportedParams = await fetchNewznabCaps(config, { ...options, forceRefresh: true });
-    if (supportedParams) {
+    try {
+      const supportedParams = await fetchNewznabCaps(config, { ...options, forceRefresh: true });
+      if (supportedParams) {
+        results[config.dedupeKey] = {
+          search: Array.from(supportedParams.search || []),
+          tvsearch: Array.from(supportedParams.tvsearch || []),
+          movie: Array.from(supportedParams.movie || []),
+        };
+      }
+    } catch (error) {
+      console.warn(`[NEWZNAB][CAPS] Failed to fetch caps for ${config.displayName || config.dedupeKey}, using defaults:`, error?.message || error);
+      const defaults = getDefaultCaps();
       results[config.dedupeKey] = {
-        search: Array.from(supportedParams.search || []),
-        tvsearch: Array.from(supportedParams.tvsearch || []),
-        movie: Array.from(supportedParams.movie || []),
+        search: Array.from(defaults.search),
+        tvsearch: Array.from(defaults.tvsearch),
+        movie: Array.from(defaults.movie),
       };
     }
   }));

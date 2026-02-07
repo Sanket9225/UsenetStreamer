@@ -237,12 +237,16 @@ adminApiRouter.post('/config', async (req, res) => {
     runtimeEnv.applyRuntimeEnv();
 
     const newznabConfigsForCaps = newznabService.getNewznabConfigsFromValues(incoming, { includeEmpty: false });
-    const capsCache = await newznabService.refreshCapsCache(newznabConfigsForCaps, { timeoutMs: 12000 });
-    console.log('[NEWZNAB][CAPS] Saved caps cache', capsCache);
-    runtimeEnv.updateRuntimeEnv({
-      NEWZNAB_CAPS_CACHE: Object.keys(capsCache).length > 0 ? JSON.stringify(capsCache) : ''
-    });
-    runtimeEnv.applyRuntimeEnv();
+    try {
+      const capsCache = await newznabService.refreshCapsCache(newznabConfigsForCaps, { timeoutMs: 12000 });
+      console.log('[NEWZNAB][CAPS] Saved caps cache', capsCache);
+      runtimeEnv.updateRuntimeEnv({
+        NEWZNAB_CAPS_CACHE: Object.keys(capsCache).length > 0 ? JSON.stringify(capsCache) : ''
+      });
+      runtimeEnv.applyRuntimeEnv();
+    } catch (capsError) {
+      console.warn('[NEWZNAB][CAPS] Failed to refresh caps cache (config saved anyway)', capsError?.message || capsError);
+    }
 
     // Debug: check process.env after apply
     console.log('[ADMIN] process.env.TMDB_API_KEY after apply:', process.env.TMDB_API_KEY ? `(${process.env.TMDB_API_KEY.length} chars)` : '(empty)');
@@ -2236,7 +2240,14 @@ async function streamHandler(req, res) {
         const annotated = (item?.parsedTitle || item?.parsedTitleDisplay || item?.season || item?.episode || item?.year)
           ? item
           : annotateNzbResult(item, 0);
-        const candidateTitle = (annotated?.parsedTitleDisplay || annotated?.parsedTitle || annotated?.title || annotated?.Title || '').trim();
+        const candidateTitle = (annotated?.parsedTitle || annotated?.title || annotated?.Title || '').trim();
+        const strictTitlePhrase = (() => {
+          try {
+            const parsed = parseTorrentTitle(plan.query || plan.strictPhrase);
+            if (parsed?.title) return sanitizeStrictSearchPhrase(parsed.title);
+          } catch (_) { /* fallback */ }
+          return plan.strictPhrase;
+        })();
         if (!candidateTitle) {
           if (isNewznabDebugEnabled()) {
             console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (no parsed title)`, {
@@ -2246,11 +2257,11 @@ async function streamHandler(req, res) {
           }
           return false;
         }
-        if (!matchesStrictSearch(candidateTitle, plan.strictPhrase)) {
+        if (!matchesStrictSearch(candidateTitle, strictTitlePhrase)) {
           if (isNewznabDebugEnabled()) {
             console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (title mismatch)`, {
               title: candidateTitle,
-              query: plan.query,
+              query: strictTitlePhrase,
             });
           }
           return false;
