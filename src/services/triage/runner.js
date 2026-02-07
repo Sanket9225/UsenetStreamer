@@ -293,12 +293,12 @@ async function triageAndRank(nzbResults, options = {}) {
       }
 
       const downloadStart = Date.now();
-      logEvent(logger, 'info', 'NZB download:start', {
-        downloadUrl,
-        indexerId: candidate.indexerId,
-        indexerName: candidate.indexerName,
-        title: candidate.title,
-      });
+      // logEvent(logger, 'info', 'NZB download:start', {
+      //   downloadUrl,
+      //   indexerId: candidate.indexerId,
+      //   indexerName: candidate.indexerName,
+      //   title: candidate.title,
+      // });
 
       let nzbPayload;
       try {

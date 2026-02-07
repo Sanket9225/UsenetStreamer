@@ -440,10 +440,6 @@
             <input type="checkbox" data-field="PAID" />
             <span>I have a paid subscription with this indexer (use for health checks)</span>
           </label>
-          <label class="checkbox">
-            <input type="checkbox" data-field="ZYCLOPS" />
-            <span>Enable Zyclops Proxy</span>
-          </label>
           <label class="inline-select">
             <span>Grab limit</span>
             <select data-field="PAID_LIMIT" class="small-select" disabled>
@@ -454,6 +450,10 @@
               <option value="5">5</option>
               <option value="6" selected>6</option>
             </select>
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" data-field="ZYCLOPS" />
+            <span>Zyclops Proxy</span>
           </label>
         </div>
         <div class="row-controls">

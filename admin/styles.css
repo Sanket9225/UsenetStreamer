@@ -483,6 +483,7 @@ button.ghost.danger:hover {
   display: flex;
   flex-direction: column;
   gap: 1.2rem;
+  overflow: hidden;
   transition: transform 120ms ease, box-shadow 200ms ease, border 150ms ease;
 }
 
@@ -495,7 +496,7 @@ button.ghost.danger:hover {
 .newznab-row .row-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 1.2rem;
   flex-wrap: wrap;
 }
@@ -506,6 +507,14 @@ button.ghost.danger:hover {
   gap: 0.9rem;
   font-size: 1.05rem;
   font-weight: 700;
+  flex-wrap: wrap;
+}
+
+.newznab-row .row-controls {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .newznab-row .inline-select {
@@ -822,7 +831,28 @@ button.ghost.danger:hover {
 
   .newznab-row .row-header {
     flex-direction: column;
+    align-items: stretch;
+  }
+
+  .newznab-row .row-title {
+    flex-direction: column;
     align-items: flex-start;
+    gap: 0.6rem;
+  }
+
+  .newznab-row .row-controls {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
+
+  .newznab-row .row-controls button.ghost {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .newznab-row .inline-select {
+    width: 100%;
   }
 }
 
@@ -858,6 +888,10 @@ button.ghost.danger:hover {
   button.ghost {
     width: 100%;
     justify-content: center;
+  }
+
+  .newznab-row .row-controls button.ghost {
+    width: auto;
   }
 }
 
@@ -909,6 +943,10 @@ button.ghost.danger:hover {
   button.ghost {
     width: 100%;
     justify-content: center;
+  }
+
+  .newznab-row .row-controls button.ghost {
+    width: auto;
   }
 
   .language-checkbox-grid {

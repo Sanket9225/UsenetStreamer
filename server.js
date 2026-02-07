@@ -2959,7 +2959,8 @@ async function streamHandler(req, res) {
       const sourceLanguage = result.language || null;
       const sourceLanguageLabel = resolveLanguageLabel(sourceLanguage);
       const qualityMatch = result.title?.match(/(4320p|2160p|1440p|1080p|720p|576p|540p|480p|360p|240p|8k|4k|uhd)/i);
-      const detectedResolutionToken = releaseInfo.resolution
+      const detectedResolutionToken = result.resolution
+        || releaseInfo.resolution
         || (qualityMatch ? normalizeResolutionToken(qualityMatch[0]) : null);
       const resolutionBadge = formatResolutionBadge(detectedResolutionToken);
       const qualityLabel = releaseInfo.qualityLabel && releaseInfo.qualityLabel !== detectedResolutionToken

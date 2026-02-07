@@ -38,6 +38,13 @@ function filterByReleaseExclusions(results, exclusionTokens) {
   if (!Array.isArray(results) || !exclusionTokens || exclusionTokens.length === 0) {
     return results;
   }
+  const normalizeCodecToken = (value) => {
+    if (!value) return '';
+    const working = String(value).toLowerCase();
+    if (/(hevc|h265|x265)/i.test(working)) return 'hevc';
+    if (/(avc|h264|x264)/i.test(working)) return 'avc';
+    return working;
+  };
   const normalizedTokens = exclusionTokens
     .map((value) => (value === undefined || value === null ? null : String(value).trim().toLowerCase()))
     .filter((token) => token && token.length > 0);
@@ -48,7 +55,9 @@ function filterByReleaseExclusions(results, exclusionTokens) {
 
   const matchesToken = (value, token) => {
     if (!value) return false;
-    return String(value).toLowerCase().includes(token);
+    const normalizedValue = normalizeCodecToken(value);
+    const normalizedToken = normalizeCodecToken(token);
+    return normalizedValue.includes(normalizedToken);
   };
 
   return results.filter((result) => {
