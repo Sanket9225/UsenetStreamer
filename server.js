@@ -2243,8 +2243,8 @@ async function streamHandler(req, res) {
         const candidateTitle = (annotated?.parsedTitle || annotated?.title || annotated?.Title || '').trim();
         const strictTitlePhrase = (() => {
           try {
-            const parsed = parseTorrentTitle(plan.query || plan.strictPhrase);
-            if (parsed?.title) return sanitizeStrictSearchPhrase(parsed.title);
+            const parsed = parseReleaseMetadata(plan.query || plan.strictPhrase);
+            if (parsed?.parsedTitle) return sanitizeStrictSearchPhrase(parsed.parsedTitle);
           } catch (_) { /* fallback */ }
           return plan.strictPhrase;
         })();
