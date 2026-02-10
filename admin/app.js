@@ -453,7 +453,7 @@
           </label>
           <label class="checkbox">
             <input type="checkbox" data-field="ZYCLOPS" />
-            <span>Zyclops Proxy</span>
+            <span>Enable Zyclops Health Check Proxy</span>
           </label>
         </div>
         <div class="row-controls">
@@ -489,7 +489,7 @@
         <button type="button" class="secondary" data-row-action="test">Test Indexer</button>
         <span class="status-message row-status" data-row-status></span>
       </div>
-      <p class="warning hidden" data-zyclops-warning>Zyclops is against the TOS of all indexers. All requests will be routed through Zyclops servers, so the indexer will see their IP address, not yours. Only use it if this particular indexer has blocked your IP range (e.g. Oracle VPS IP range).</p>
+      <p class="warning hidden" data-zyclops-warning>⚠️ Zyclops proxies your indexer URL/API key and returns only known-healthy results for your providers. It also downloads and ingests the newest untested NZB to enrich the health database. (Learn more <A HREF="https://zyclops.elfhosted.com/">here</A>) Many indexers prohibit this, so proceed at your own risk. The health database is directly searchable via Newznab on private ElfHosted instances only.</p>
     `;
 
     const moveUpButton = row.querySelector('[data-row-action="move-up"]');
