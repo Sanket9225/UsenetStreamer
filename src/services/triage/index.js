@@ -1,6 +1,11 @@
 const { parseStringPromise } = require('xml2js');
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const path = require('path');
+const os = require('os');
+const { exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 const { isVideoFileName } = require('../../utils/parsers');
 const NNTPModule = require('nntp/lib/nntp');
 const NNTP = typeof NNTPModule === 'function' ? NNTPModule : NNTPModule?.NNTP;
@@ -430,7 +435,7 @@ async function analyzeSingleNzb(raw, ctx) {
   } else {
     const archiveWithSegments = selectArchiveForInspection(archiveCandidates);
     if (archiveWithSegments) {
-      const nntpResult = await inspectArchiveViaNntp(archiveWithSegments, ctx);
+      const nntpResult = await inspectArchiveViaNntp(archiveWithSegments, ctx, files);
       archiveFindings.push({
         source: 'nntp',
         filename: archiveWithSegments.filename,
@@ -739,7 +744,10 @@ function buildArchiveScore(archive) {
   const filename = archive.filename || guessFilenameFromSubject(archive.subject) || '';
   let score = 0;
   if (/\.rar$/i.test(filename)) score += 10;
+  if (/\.7z$/i.test(filename)) score += 10;
+  if (/\.7z\.001$/i.test(filename)) score += 10;
   if (/\.r\d{2}$/i.test(filename)) score += 9;
+  if (/\.7z\.\d{3}$/i.test(filename)) score += 9;
   if (/\.part\d+\.rar$/i.test(filename)) score += 8;
   if (/proof|sample|nfo/i.test(filename)) score -= 5;
   if (isVideoFileName(filename)) score += 4;
@@ -796,7 +804,7 @@ async function analyzeArchiveFile(filePath) {
   }
 }
 
-async function inspectArchiveViaNntp(file, ctx) {
+async function inspectArchiveViaNntp(file, ctx, allFiles = []) {
   const segments = file.segments ?? [];
   if (segments.length === 0) return { status: 'archive-no-segments' };
   const segmentId = segments[0]?.id;
@@ -825,17 +833,10 @@ async function inspectArchiveViaNntp(file, ctx) {
       return { status: 'stat-error', details: { segmentId, message: err.message }, segmentId };
     }
 
+    // Perform deep inspection on 7z files
     if (isSevenZip) {
-      // console.log('[NZB TRIAGE] Skipping 7z archive inspection (STAT passed, body skipped)', {
-      //   filename: file.filename,
-      //   subject: file.subject,
-      //   segmentId,
-      // });
-      return {
-        status: 'sevenzip-untested',
-        details: { reason: '7z-skip-body', filename: effectiveFilename },
-        segmentId,
-      };
+      const result = await inspectSevenZipDeep(file, ctx, allFiles, client);
+      return { ...result, segmentId };
     }
 
     let bodyStart = null;
@@ -1203,6 +1204,118 @@ function inspectSevenZip(buffer) {
     }
     return { status: 'sevenzip-unsupported', details: error?.message || 'Unknown 7z error' };
   }
+}
+
+// Validates 7-Zip archives by remotely fetching headers/footers, 
+// creating a sparse local file to bypass full downloads, and 
+// using '7z' and 'ffprobe' to verify if a valid video exists inside.
+async function inspectSevenZipDeep(file, ctx, allFiles, client) {
+  const parts = findSevenZipParts(allFiles, file);
+  if (parts.length === 0) return { status: 'sevenzip-untested', details: { reason: 'no-parts-found' } };
+
+  const firstPart = parts[0];
+  const lastPart = parts[parts.length - 1];
+
+  if (!firstPart.segments?.length || !lastPart.segments?.length) {
+    return { status: 'sevenzip-untested', details: { reason: 'missing-segments' } };
+  }
+
+  const firstSegment = firstPart.segments[0];
+  const lastSegment = lastPart.segments[lastPart.segments.length - 1];
+
+  try {
+    const headerBuffer = await fetchSegmentBodyWithClient(client, firstSegment.id);
+    const decodedHeader = decodeYencBuffer(headerBuffer, 2 * 1024 * 1024);
+
+    if (decodedHeader.length < 32 || !SevenZipAnalyzer.hasSignature(decodedHeader)) {
+      return { status: 'sevenzip-insufficient-data', details: { reason: 'invalid-7z-signature' } };
+    }
+
+    const nextHeaderOffset = Number(decodedHeader.readBigUInt64LE(12));
+    const nextHeaderSize = Number(decodedHeader.readBigUInt64LE(20));
+    const actualArchiveSize = 32 + nextHeaderOffset + nextHeaderSize;
+
+    const footerBuffer = await fetchSegmentBodyWithClient(client, lastSegment.id);
+    const decodedFooter = decodeYencBuffer(footerBuffer, 2 * 1024 * 1024);
+
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), '7z-triage-'));
+    const virtualArchivePath = path.join(tmpDir, 'virtual_archive.7z');
+
+    try {
+      const handle = await fs.open(virtualArchivePath, 'w');
+      await handle.truncate(actualArchiveSize);
+      await handle.close();
+
+      const writeHandle = await fs.open(virtualArchivePath, 'r+');
+      await writeHandle.write(decodedHeader, 0, decodedHeader.length, 0);
+      await writeHandle.write(decodedFooter, 0, decodedFooter.length, actualArchiveSize - decodedFooter.length);
+      await writeHandle.close();
+
+      let listOutput;
+      try {
+        const { stdout } = await execAsync(`7z l "${virtualArchivePath}"`);
+        listOutput = stdout;
+      } catch (err) {
+        return { status: 'sevenzip-unsupported', details: { reason: '7z-list-failed', message: err.message.slice(0, 200) } };
+      }
+
+      const mkvMatch = listOutput.match(/\s+(\S+\.(?:mkv|mp4|avi|mov|ts|wmv|flv|webm))(?:\r?\n|$)/i);
+      if (!mkvMatch) {
+        return { status: 'sevenzip-stored', details: { note: 'no-video-found-in-list', list: listOutput.slice(0, 500) } };
+      }
+
+      const videoInArchive = mkvMatch[1];
+      try {
+        await execAsync(`7z x "${virtualArchivePath}" -o"${tmpDir}" "${videoInArchive}" -y`);
+      } catch (err) {}
+
+      const extractedVideoPath = path.join(tmpDir, videoInArchive);
+      try {
+        const { stdout } = await execAsync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${extractedVideoPath}"`);
+        if (parseFloat(stdout) > 0) {
+          return { status: 'sevenzip-stored', details: { video: videoInArchive, duration: stdout.trim() } };
+        }
+      } catch (err) {
+        return { status: 'sevenzip-unsupported', details: { reason: 'ffprobe-failed', message: err.message.slice(0, 200), video: videoInArchive } };
+      }
+
+      return { status: 'sevenzip-stored', details: { video: videoInArchive, note: 'ffprobe-no-duration' } };
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    return { status: 'sevenzip-error', details: { message: err.message } };
+  }
+}
+
+// Scans a list of files to find all volumes of a split 7-Zip archive (.7z.001, .7z.002, etc.).
+// Matches files based on the base filename and returns them sorted numerically.
+function findSevenZipParts(files, targetFile) {
+  const targetName = targetFile.filename || guessFilenameFromSubject(targetFile.subject);
+  if (!targetName) return [targetFile];
+
+  const match = targetName.match(/^(.*)\.7z(?:\.\d{3})?$/i);
+  if (!match) return [targetFile];
+
+  const baseName = match[1];
+  const parts = files.filter((f) => {
+    const name = f.filename || guessFilenameFromSubject(f.subject);
+    if (!name) return false;
+    const m = name.match(/^(.*)\.7z(?:\.(\d{3}))?$/i);
+    return m && m[1] === baseName;
+  });
+
+  parts.sort((a, b) => {
+    const nameA = a.filename || guessFilenameFromSubject(a.subject);
+    const nameB = b.filename || guessFilenameFromSubject(b.subject);
+    const mA = nameA.match(/\.7z\.(\d{3})$/i);
+    const mB = nameB.match(/\.7z\.(\d{3})$/i);
+    const pA = mA ? parseInt(mA[1], 10) : 1;
+    const pB = mB ? parseInt(mB[1], 10) : 1;
+    return pA - pB;
+  });
+
+  return parts;
 }
 
 function buildDecision(decision, blockers, warnings, meta) {
