@@ -451,6 +451,17 @@ button.ghost.danger:hover {
   margin-top: 0.25rem;
 }
 
+.health-check-notes {
+  display: grid;
+  gap: 0.18rem;
+  margin: 0.1rem 0 0.35rem;
+}
+
+.health-check-notes .field-hint {
+  margin: 0;
+  line-height: 1.4;
+}
+
 .newznab-preset-bar {
   display: flex;
   gap: 1rem;
