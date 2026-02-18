@@ -1542,6 +1542,15 @@ async function streamHandler(req, res) {
     if (streamCacheKey) {
       cachedStreamEntry = cache.getStreamCacheEntry(streamCacheKey);
       if (cachedStreamEntry) {
+        const cachedStreams = Array.isArray(cachedStreamEntry.payload?.streams)
+          ? cachedStreamEntry.payload.streams
+          : [];
+        if (cachedStreams.length === 0) {
+          console.log('[CACHE] Ignoring cached empty stream payload', { type, id });
+          cachedStreamEntry = null;
+        }
+      }
+      if (cachedStreamEntry) {
         const cacheMeta = cachedStreamEntry.meta;
         if (cacheMeta?.version === 1 && Array.isArray(cacheMeta.finalNzbResults)) {
           const snapshot = Array.isArray(cacheMeta.triageDecisionsSnapshot) ? cacheMeta.triageDecisionsSnapshot : [];
@@ -3538,8 +3547,10 @@ async function streamHandler(req, res) {
     }
 
     const responsePayload = { streams };
-    if (streamCacheKey && cacheMeta) {
+    if (streamCacheKey && cacheMeta && streams.length > 0) {
       cache.setStreamCacheEntry(streamCacheKey, responsePayload, cacheMeta);
+    } else if (streamCacheKey && cacheMeta) {
+      console.log('[CACHE] Skipping stream cache write for empty stream payload', { type, id });
     }
 
     res.json(responsePayload);
