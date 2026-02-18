@@ -1,6 +1,6 @@
 {
   "name": "usenetstreamer",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "Usenet-powered web streaming bridge for Stremio",
   "main": "index.js",
   "scripts": {
