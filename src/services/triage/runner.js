@@ -116,6 +116,17 @@ function summarizeDecision(decision) {
   const warnings = Array.isArray(decision?.warnings) ? decision.warnings : [];
   const archiveFindings = Array.isArray(decision?.archiveFindings) ? decision.archiveFindings : [];
 
+  const hasAssumedStoredWithoutParsedEntries = archiveFindings.some((finding) => {
+    const label = String(finding?.status || '').toLowerCase();
+    if (label !== 'rar-stored') return false;
+    const note = String(finding?.details?.note || '').toLowerCase();
+    if (note !== 'rar5-header-assumed-stored') return false;
+    const hasName = Boolean(finding?.details?.name);
+    const hasSamples = Array.isArray(finding?.details?.sampleEntries)
+      && finding.details.sampleEntries.some((entry) => Boolean(entry));
+    return !hasName && !hasSamples;
+  });
+
   // Check if we have a 7z that couldn't be verified (untested compression)
   const hasSevenZipUntested = archiveFindings.some((finding) => {
     const label = String(finding?.status || '').toLowerCase();
@@ -127,6 +138,8 @@ function summarizeDecision(decision) {
     // For 7z-untested, always mark as unverified_7z regardless of segment-ok findings
     if (hasSevenZipUntested) {
       status = 'unverified_7z';
+    } else if (hasAssumedStoredWithoutParsedEntries) {
+      status = 'blocked';
     } else {
       const positiveFinding = archiveFindings.some((finding) => {
         const label = String(finding?.status || '').toLowerCase();
