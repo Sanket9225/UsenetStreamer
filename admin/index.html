@@ -397,7 +397,7 @@
           <div class="field-grid">
             <label class="wide-field">Stream Label Fields (Short Name)
               <textarea name="NZB_DISPLAY_NAME_PATTERN" class="pattern-input" rows="2" placeholder='addon, health, instant, resolution'></textarea>
-              <span class="field-hint">Comma-separated fields. Example: <code>addon, health, instant, resolution</code>. Compatibility: <code>quality</code> = resolution+quality summary, use <code>stream_quality</code> for actual parsed quality only. Advanced templates are still supported if you use <code>{...}</code>.</span>
+              <span class="field-hint">Comma-separated fields. Example: <code>addon, health, instant, resolution</code>. <code>quality</code> and <code>resolution</code> both show resolution. Use <code>stream_quality</code> for actual parsed quality only. Advanced templates are still supported if you use <code>{...}</code>.</span>
             </label>
             <label class="wide-field">Description Fields (Long Title)
               <textarea name="NZB_NAMING_PATTERN" class="pattern-input" rows="6" placeholder='title,
@@ -411,7 +411,7 @@ size,
 languages,
 indexer,
 health'></textarea>
-              <span class="field-hint">Comma-separated fields. Example: <code>title, stream_quality, health, source, codec, visual, audio, group, size, languages, indexer</code>. Use <code>quality</code> for backward-compatible resolution+quality summary. Advanced templates are still supported if you use <code>{...}</code>.</span>
+              <span class="field-hint">Comma-separated fields. Example: <code>title, stream_quality, health, source, codec, visual, audio, group, size, languages, indexer</code>. Use <code>stream_quality</code> for actual parsed quality (e.g., BluRay/WEB-DL). Advanced templates are still supported if you use <code>{...}</code>.</span>
             </label>
             <div class="wide-field preview-card">
               <div class="preview-header">
