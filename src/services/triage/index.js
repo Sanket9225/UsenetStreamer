@@ -828,6 +828,13 @@ async function inspectArchiveViaNntp(file, ctx) {
       return { status: 'stat-error', details: { segmentId, message: err.message }, segmentId };
     }
 
+    // 7z: metadata header lives at the END of the archive so body parsing is
+    // useless (and split parts like .7z.002 don't even have the signature).
+    // STAT passed above, so just confirm it's a 7z candidate.
+    if (isSevenZip) {
+      return { status: 'sevenzip-signature-ok', details: { filename: effectiveFilename }, segmentId };
+    }
+
     let bodyStart = null;
     if (currentMetrics) {
       currentMetrics.bodyCalls += 1;
