@@ -17,6 +17,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "form-data": "^4.0.1",
+    "lzma-native": "^8.0.6",
     "morgan": "^1.10.0",
     "nntp": "^0.3.1",
     "streamsearch": "^0.1.2",

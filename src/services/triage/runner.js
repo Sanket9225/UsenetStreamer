@@ -116,32 +116,34 @@ function summarizeDecision(decision) {
   const warnings = Array.isArray(decision?.warnings) ? decision.warnings : [];
   const archiveFindings = Array.isArray(decision?.archiveFindings) ? decision.archiveFindings : [];
 
-  // Check if any 7z-related finding exists (7z is never verified, best case is unverified_7z)
+  // Check if any 7z finding is present, and whether a verified 7z (sevenzip-stored) was found
   const hasSevenZipFinding = archiveFindings.some((finding) => {
     const label = String(finding?.status || '').toLowerCase();
     return label.startsWith('sevenzip');
   }) || warnings.some((warning) => String(warning || '').toLowerCase().startsWith('sevenzip'));
 
+  const hasSevenZipStored = archiveFindings.some((finding) => {
+    const label = String(finding?.status || '').toLowerCase();
+    return label === 'sevenzip-stored';
+  });
+
   let status = 'blocked';
   if (decision?.decision === 'accept' && blockers.length === 0) {
-    if (hasSevenZipFinding) {
-      // 7z: best case is unverified_7z, never verified
+    const positiveFinding = archiveFindings.some((finding) => {
+      const label = String(finding?.status || '').toLowerCase();
+      return label === 'rar-stored' || label === 'sevenzip-stored' || label === 'segment-ok';
+    });
+    if (positiveFinding) {
+      status = 'verified';
+    } else if (hasSevenZipFinding) {
       status = 'unverified_7z';
     } else {
-      const positiveFinding = archiveFindings.some((finding) => {
-        const label = String(finding?.status || '').toLowerCase();
-        return label === 'rar-stored' || label === 'segment-ok';
-      });
-      if (positiveFinding) {
-        status = 'verified';
-      } else {
-        status = 'unverified';
-      }
+      status = 'unverified';
     }
   }
 
-  // Downgrade verified to unverified_7z if any 7z finding is present
-  if (status === 'verified' && hasSevenZipFinding) {
+  // Downgrade verified to unverified_7z if 7z finding present but none were sevenzip-stored
+  if (status === 'verified' && hasSevenZipFinding && !hasSevenZipStored) {
     status = 'unverified_7z';
   }
 

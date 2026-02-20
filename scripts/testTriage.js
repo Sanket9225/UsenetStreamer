@@ -196,20 +196,27 @@ function deriveTriageStatus(decision) {
     return label.startsWith('sevenzip');
   }) || warnings.some((warning) => String(warning || '').toLowerCase().startsWith('sevenzip'));
 
+  const hasSevenZipStored = archiveFindings.some((finding) => {
+    const label = String(finding?.status || '').toLowerCase();
+    return label === 'sevenzip-stored';
+  });
+
   let status = 'blocked';
   if (decision?.decision === 'accept' && blockers.length === 0) {
-    if (hasSevenZipFinding) {
+    const positiveFinding = archiveFindings.some((finding) => {
+      const label = String(finding?.status || '').toLowerCase();
+      return label === 'rar-stored' || label === 'sevenzip-stored' || label === 'segment-ok';
+    });
+    if (positiveFinding) {
+      status = 'verified';
+    } else if (hasSevenZipFinding) {
       status = 'unverified_7z';
     } else {
-      const positiveFinding = archiveFindings.some((finding) => {
-        const label = String(finding?.status || '').toLowerCase();
-        return label === 'rar-stored' || label === 'segment-ok';
-      });
-      status = positiveFinding ? 'verified' : 'unverified';
+      status = 'unverified';
     }
   }
 
-  if (status === 'verified' && hasSevenZipFinding) {
+  if (status === 'verified' && hasSevenZipFinding && !hasSevenZipStored) {
     status = 'unverified_7z';
   }
 
@@ -255,7 +262,7 @@ function deriveArchiveCheckStatus(decision, archiveFindings) {
     'rar-insufficient-data',
     'rar-header-not-found',
   ]);
-  const passedArchiveCheck = archiveStatuses.some((status) => status === 'rar-stored' || status === 'sevenzip-signature-ok');
+  const passedArchiveCheck = archiveStatuses.some((status) => status === 'rar-stored' || status === 'sevenzip-signature-ok' || status === 'sevenzip-stored');
   const failedArchiveCheck = (decision?.blockers || []).some((blocker) => archiveFailureTokens.has(blocker))
     || archiveStatuses.some((status) => archiveFailureTokens.has(status));
 

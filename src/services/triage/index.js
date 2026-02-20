@@ -1,6 +1,7 @@
 const { parseStringPromise } = require('xml2js');
 const fs = require('fs/promises');
 const path = require('path');
+const lzma = require('lzma-native');
 const { isVideoFileName } = require('../../utils/parsers');
 const NNTPModule = require('nntp/lib/nntp');
 const NNTP = typeof NNTPModule === 'function' ? NNTPModule : NNTPModule?.NNTP;
@@ -887,6 +888,7 @@ async function inspectArchiveViaNntp(file, ctx, allFiles) {
 function handleArchiveStatus(status, blockers, warnings) {
   switch (status) {
     case 'rar-stored':
+    case 'sevenzip-stored':
       return true;
     case 'sevenzip-signature-ok':
       warnings.add('sevenzip-signature-ok');
@@ -1398,10 +1400,47 @@ async function inspectSevenZipDeep(file, ctx, allFiles, client) {
       lastError = { error: parseResult.error, sliceLen: metadataSlice.length, firstBytes: metadataSlice.subarray(0, Math.min(8, metadataSlice.length)).toString('hex') };
       continue;
     }
-    if (parseResult.compressed) {
-      return { status: 'sevenzip-unsupported', details: { reason: 'compressed-coder-detected', nextHeaderSize, footerLen: footerBuf.length, debug: parseResult.debug } };
+
+    // If encoded header, try to decompress the real header from footerBuf
+    if (parseResult.encodedHeader && parseResult.encodedInfo) {
+      try {
+        const realHeader = await decompressEncodedHeader(parseResult.encodedInfo, footerBuf, nextHeaderSize);
+        if (realHeader) {
+          const innerResult = parseSevenZipMetadata(realHeader);
+          if (!innerResult.error && !innerResult.encodedHeader) {
+            const fnames = innerResult.filenames || [];
+            const nestedArchive = sz_detectNestedArchive(fnames);
+            if (innerResult.compressed) {
+              return { status: 'sevenzip-unsupported', details: { reason: 'compressed-coder-detected', nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, debug: innerResult.debug, filenames: fnames } };
+            }
+            if (nestedArchive) {
+              return { status: 'sevenzip-nested-archive', details: { reason: 'nested-archive-detected', nestedType: nestedArchive, nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, filenames: fnames } };
+            }
+            const innerStatus = sz_hasPlayableVideo(fnames) ? 'sevenzip-stored' : 'sevenzip-signature-ok';
+            return { status: innerStatus, details: { reason: 'copy-only-confirmed', nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, debug: innerResult.debug, filenames: fnames } };
+          }
+          // Inner parse failed
+          return { status: 'sevenzip-signature-ok', details: { reason: 'encoded-header-inner-parse-failed', nextHeaderSize, footerLen: footerBuf.length, innerError: innerResult.error, realHeaderLen: realHeader.length, realHeaderFirst8: realHeader.subarray(0, Math.min(8, realHeader.length)).toString('hex') } };
+        }
+        // realHeader was null
+        return { status: 'sevenzip-signature-ok', details: { reason: 'encoded-header-decompress-null', nextHeaderSize, footerLen: footerBuf.length, encodedInfo: parseResult.encodedInfo } };
+      } catch (decompErr) {
+        return { status: 'sevenzip-signature-ok', details: { reason: 'encoded-header-decompress-error', nextHeaderSize, footerLen: footerBuf.length, decompError: decompErr?.message, encodedInfo: parseResult.encodedInfo } };
+      }
+    } else if (parseResult.encodedHeader) {
+      return { status: 'sevenzip-signature-ok', details: { reason: 'encoded-header-no-info', nextHeaderSize, footerLen: footerBuf.length, debug: parseResult.debug } };
     }
-    return { status: 'sevenzip-signature-ok', details: { reason: 'copy-only-confirmed', nextHeaderSize, footerLen: footerBuf.length, debug: parseResult.debug } };
+
+    if (parseResult.compressed) {
+      return { status: 'sevenzip-unsupported', details: { reason: 'compressed-coder-detected', nextHeaderSize, footerLen: footerBuf.length, debug: parseResult.debug, filenames: parseResult.filenames || [] } };
+    }
+    const fnames = parseResult.filenames || [];
+    const nestedArchive = sz_detectNestedArchive(fnames);
+    if (nestedArchive) {
+      return { status: 'sevenzip-nested-archive', details: { reason: 'nested-archive-detected', nestedType: nestedArchive, nextHeaderSize, footerLen: footerBuf.length, filenames: fnames } };
+    }
+    const finalStatus = sz_hasPlayableVideo(fnames) ? 'sevenzip-stored' : 'sevenzip-signature-ok';
+    return { status: finalStatus, details: { reason: 'copy-only-confirmed', nextHeaderSize, footerLen: footerBuf.length, debug: parseResult.debug, filenames: fnames } };
   }
 
   // All attempts failed
@@ -1425,31 +1464,38 @@ function parseSevenZipMetadata(buffer) {
   try {
     const rootId = sz_readByte(reader);
     // 0x17 = kEncodedHeader — the metadata header itself is LZMA-compressed.
-    // This is very common; it does NOT mean the archive data is compressed.
-    // We can't decompress the header in pure JS, so treat as unknown/unverified.
-    if (rootId === 0x17) return { compressed: false, encodedHeader: true, debug: { rootId: '0x17-encoded' } };
+    // Parse the mini StreamsInfo to extract compression details so the caller
+    // can decompress the real header from the archive start.
+    if (rootId === 0x17) {
+      try {
+        const info = sz_parseEncodedHeaderInfo(reader);
+        return { compressed: false, encodedHeader: true, encodedInfo: info, debug: { rootId: '0x17-encoded', ...info } };
+      } catch (err) {
+        return { compressed: false, encodedHeader: true, debug: { rootId: '0x17-encoded', parseError: err?.message } };
+      }
+    }
     // 0x01 = kHeader (uncompressed metadata — we can parse coders)
     if (rootId !== 0x01) return { error: 'unexpected-root-id' };
 
+    let streamsResult = null;
+    let filenames = null;
     while (true) {
       const sectionId = sz_readByte(reader);
       if (sectionId === 0x00) break; // kEnd
       if (sectionId === 0x04) { // kMainStreamsInfo
-        const result = sz_parseStreamsInfo(reader);
-        if (result.compressed) return { compressed: true, debug: result.debug };
-        return { compressed: false, debug: result.debug };
+        streamsResult = sz_parseStreamsInfo(reader);
       } else if (sectionId === 0x02) { // kArchiveProperties
         sz_skipPropertyBlock(reader);
       } else if (sectionId === 0x03) { // kAdditionalStreamsInfo
-        // Can't reliably skip; if we haven't seen MainStreamsInfo yet, bail
         return { error: 'additional-streams-before-main' };
       } else if (sectionId === 0x05) { // kFilesInfo
-        sz_skipFilesInfo(reader);
+        filenames = sz_parseFilesInfo(reader);
       } else {
         return { error: `unsupported-section-${sectionId}` };
       }
     }
-    return { compressed: false };
+    const compressed = streamsResult ? streamsResult.compressed : false;
+    return { compressed, debug: streamsResult?.debug, filenames: filenames || [] };
   } catch (err) {
     return { error: err?.message || 'parse-exception' };
   }
@@ -1459,6 +1505,8 @@ function sz_parseStreamsInfo(reader) {
   let copyOnly = false;
   let sawUnpack = false;
   let debug = null;
+  let numFolders = 0;
+  let folders = [];
   while (true) {
     const id = sz_readByte(reader);
     if (id === 0x00) break; // kEnd
@@ -1468,10 +1516,11 @@ function sz_parseStreamsInfo(reader) {
       const result = sz_parseUnpackInfo(reader);
       copyOnly = result.copyOnly;
       debug = result.debug;
+      numFolders = result.numFolders;
+      folders = result.folders;
       sawUnpack = true;
-      return { copyOnly, compressed: !copyOnly, debug };
     } else if (id === 0x08) { // kSubStreamsInfo
-      return { copyOnly: false, compressed: false, debug: { note: 'substreams-before-unpack' } };
+      sz_skipSubStreamsInfo(reader, numFolders, folders);
     } else {
       throw new Error(`unsupported-streams-block-${id}`);
     }
@@ -1507,7 +1556,7 @@ function sz_parseUnpackInfo(reader) {
     throw new Error('unexpected-after-unpack');
   }
 
-  return { copyOnly: allCopy, debug: { numFolders, coderDebug } };
+  return { copyOnly: allCopy, numFolders, folders, debug: { numFolders, coderDebug } };
 }
 
 function sz_parseFolder(reader) {
@@ -1570,15 +1619,96 @@ function sz_skipPropertyBlock(reader) {
   }
 }
 
-function sz_skipFilesInfo(reader) {
+// Skip SubStreamsInfo (0x08). Requires folder info from UnpackInfo.
+// Format: kNumUnPackStream? (0x0D), kSize? (0x09), kCRC? (0x0A), kEnd (0x00)
+function sz_skipSubStreamsInfo(reader, numFolders, folders) {
+  let numSubStreams = new Array(numFolders).fill(1); // default 1 per folder
+  let totalSubStreams = numFolders;
+  while (true) {
+    const id = sz_readByte(reader);
+    if (id === 0x00) break; // kEnd
+    if (id === 0x0D) { // kNumUnPackStream
+      totalSubStreams = 0;
+      for (let i = 0; i < numFolders; i++) {
+        numSubStreams[i] = sz_readNumber(reader);
+        totalSubStreams += numSubStreams[i];
+      }
+    } else if (id === 0x09) { // kSize
+      for (let i = 0; i < numFolders; i++) {
+        // Read (numSubStreams[i] - 1) sizes per folder; last size is implicit
+        for (let j = 0; j < numSubStreams[i] - 1; j++) sz_readNumber(reader);
+      }
+    } else if (id === 0x0A) { // kCRC
+      // Count streams that need CRC: those in folders with >1 sub-stream,
+      // or those without CRC defined in UnpackInfo
+      sz_skipBoolVector(reader, totalSubStreams, true);
+    } else {
+      // Unknown sub-block — try to skip by reading size
+      const size = sz_readNumber(reader);
+      sz_skip(reader, size);
+    }
+  }
+}
+
+// Detect nested archive files inside a 7z. Returns the type string or null.
+const NESTED_ARCHIVE_RE = /\.(rar|r\d{2,3}|zip|7z|iso)$/i;
+function sz_detectNestedArchive(filenames) {
+  for (const name of filenames) {
+    const match = NESTED_ARCHIVE_RE.exec(name);
+    if (match) return match[1].toLowerCase();
+  }
+  return null;
+}
+
+// Check if any filename is a playable video (not inside Sample/Proof folders, not .iso).
+const SAMPLE_PROOF_FOLDER_RE = /[\\/](sample|proof)[\\/]/i;
+function sz_hasPlayableVideo(filenames) {
+  for (const name of filenames) {
+    if (!name) continue;
+    // Skip files inside Sample or Proof subdirectories
+    if (SAMPLE_PROOF_FOLDER_RE.test(name)) continue;
+    // Check if it's a video file extension
+    if (isVideoFileName(name)) return true;
+  }
+  return false;
+}
+
+function sz_parseFilesInfo(reader) {
   const numFiles = sz_readNumber(reader);
-  if (numFiles < 0) throw new Error('bad-file-count');
+  if (numFiles < 0 || numFiles > 100000) throw new Error('bad-file-count');
+  const filenames = [];
   while (true) {
     const propType = sz_readByte(reader);
-    if (propType === 0x00) break;
+    if (propType === 0x00) break; // kEnd
     const size = sz_readNumber(reader);
-    sz_skip(reader, size);
+    if (propType === 0x11) { // kName
+      // First byte: 0 = inline, 1 = external
+      const external = sz_readByte(reader);
+      if (external !== 0) {
+        sz_skip(reader, size - 1);
+      } else {
+        // Names are stored as UTF-16LE NUL-terminated strings, concatenated
+        const namesData = sz_readBytes(reader, size - 1);
+        let start = 0;
+        for (let i = 0; i < numFiles; i++) {
+          // Find the double-NUL (0x00 0x00) terminator for UTF-16LE
+          let end = start;
+          while (end + 1 < namesData.length) {
+            if (namesData[end] === 0 && namesData[end + 1] === 0) break;
+            end += 2;
+          }
+          const nameSlice = namesData.subarray(start, end);
+          try {
+            filenames.push(nameSlice.swap16 ? Buffer.from(nameSlice).toString('utf16le') : new TextDecoder('utf-16le').decode(nameSlice));
+          } catch { filenames.push(''); }
+          start = end + 2; // skip past NUL terminator
+        }
+      }
+    } else {
+      sz_skip(reader, size);
+    }
   }
+  return filenames;
 }
 
 function sz_skipBoolVector(reader, count, readCrcs) {
@@ -1598,6 +1728,165 @@ function sz_skipBoolVector(reader, count, readCrcs) {
     for (let i = 0; i < definedCount; i++) sz_skip(reader, 4); // uint32 CRC
   }
   return definedCount;
+}
+
+// ---------------------------------------------------------------------------
+// Parse the mini StreamsInfo inside a kEncodedHeader (0x17) to extract
+// compression method, pack position/size, and unpack size.
+// ---------------------------------------------------------------------------
+function sz_parseEncodedHeaderInfo(reader) {
+  let packPos = 0;
+  let packSizes = [];
+  let coderMethod = null;
+  let coderProperties = null;
+  let unpackSize = 0;
+
+  while (true) {
+    const id = sz_readByte(reader);
+    if (id === 0x00) break; // kEnd
+    if (id === 0x06) { // kPackInfo
+      packPos = sz_readNumber(reader);
+      const numPackStreams = sz_readNumber(reader);
+      while (true) {
+        const subId = sz_readByte(reader);
+        if (subId === 0x00) break;
+        if (subId === 0x09) { // kSize
+          for (let i = 0; i < numPackStreams; i++) packSizes.push(sz_readNumber(reader));
+        } else if (subId === 0x0A) { // kCRC
+          sz_skipBoolVector(reader, numPackStreams, true);
+        } else {
+          const size = sz_readNumber(reader);
+          sz_skip(reader, size);
+        }
+      }
+    } else if (id === 0x07) { // kUnpackInfo
+      if (sz_readByte(reader) !== 0x0B) throw new Error('expected-kFolder');
+      const numFolders = sz_readNumber(reader);
+      if (sz_readByte(reader) !== 0) throw new Error('external-folders-unsupported');
+      // Parse the single folder to get coder info
+      for (let fi = 0; fi < numFolders; fi++) {
+        const numCoders = sz_readNumber(reader);
+        let totalIn = 0, totalOut = 0;
+        for (let ci = 0; ci < numCoders; ci++) {
+          const mainByte = sz_readByte(reader);
+          const idSize = mainByte & 0x0F;
+          const isSimple = (mainByte & 0x10) === 0;
+          const hasAttributes = (mainByte & 0x20) !== 0;
+          const methodId = idSize > 0 ? sz_readBytes(reader, idSize) : Buffer.alloc(0);
+          if (fi === 0 && ci === 0) coderMethod = Buffer.from(methodId);
+          const inS = isSimple ? 1 : sz_readNumber(reader);
+          const outS = isSimple ? 1 : sz_readNumber(reader);
+          if (hasAttributes) {
+            const attrSize = sz_readNumber(reader);
+            const attrs = sz_readBytes(reader, attrSize);
+            if (fi === 0 && ci === 0) coderProperties = Buffer.from(attrs);
+          }
+          totalIn += inS;
+          totalOut += outS;
+        }
+        const numBindPairs = totalOut > 0 ? totalOut - 1 : 0;
+        for (let i = 0; i < numBindPairs; i++) { sz_readNumber(reader); sz_readNumber(reader); }
+        const numPacked = totalIn - numBindPairs;
+        if (numPacked > 1) { for (let i = 0; i < numPacked; i++) sz_readNumber(reader); }
+      }
+      // kCodersUnpackSize
+      if (sz_readByte(reader) !== 0x0C) throw new Error('expected-kCodersUnpackSize');
+      for (let fi = 0; fi < numFolders; fi++) {
+        const s = sz_readNumber(reader);
+        if (fi === 0) unpackSize = s;
+      }
+      // Skip remaining (CRC, kEnd)
+      while (true) {
+        const subId = sz_readByte(reader);
+        if (subId === 0x00) break;
+        if (subId === 0x0A) { sz_skipBoolVector(reader, numFolders, true); }
+        else { const size = sz_readNumber(reader); sz_skip(reader, size); }
+      }
+    } else if (id === 0x08) { // kSubStreamsInfo — skip
+      while (true) {
+        const subId = sz_readByte(reader);
+        if (subId === 0x00) break;
+        const size = sz_readNumber(reader);
+        sz_skip(reader, size);
+      }
+    } else {
+      throw new Error(`unknown-encoded-section-${id}`);
+    }
+  }
+
+  return {
+    packPos,
+    packSize: packSizes[0] || 0,
+    unpackSize,
+    coderMethod: coderMethod ? coderMethod.toString('hex') : null,
+    coderProperties: coderProperties || null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Decompress the real header from the archive data using lzma-native.
+// The compressed header data sits RIGHT BEFORE the metadata footer in the
+// archive. Since both are at the end, both live in footerBuf.
+//   footerBuf layout: [...other data...][packed header data][metadata footer]
+// ---------------------------------------------------------------------------
+async function decompressEncodedHeader(info, footerBuf, metaSize) {
+  if (!info || !info.packSize || !info.unpackSize) return null;
+  if (!metaSize || metaSize <= 0) return null;
+
+  // Packed data ends where metadata starts (right before footerBuf's last metaSize bytes)
+  const packedEnd = footerBuf.length - metaSize;
+  const packedStart = packedEnd - info.packSize;
+  if (packedStart < 0 || packedEnd > footerBuf.length) return null;
+
+  const compressedData = footerBuf.subarray(packedStart, packedEnd);
+  return await decompressLzmaBuffer(info, compressedData);
+}
+
+function lzma2DictSize(byte) {
+  if (byte > 40) return 0xFFFFFFFF;
+  if (byte === 40) return 0xFFFFFFFF;
+  const base = (2 | (byte & 1)) << ((byte >> 1) + 11);
+  return base;
+}
+
+async function decompressLzmaBuffer(info, compressedData) {
+  const methodHex = info.coderMethod;
+  // 0x21 = LZMA2, 0x030101 = LZMA1
+  if (methodHex === '21') {
+    // LZMA2: use .xz-style rawDecoder
+    const dictByte = info.coderProperties?.[0] ?? 24;
+    return new Promise((resolve, reject) => {
+      const decompressor = lzma.createStream('rawDecoder', {
+        filters: [{ id: lzma.FILTER_LZMA2, options: { dictSize: lzma2DictSize(dictByte) } }],
+      });
+      const chunks = [];
+      decompressor.on('data', (chunk) => chunks.push(chunk));
+      decompressor.on('end', () => resolve(Buffer.concat(chunks)));
+      decompressor.on('error', (err) => reject(err));
+      decompressor.end(compressedData);
+    });
+  } else if (methodHex === '030101') {
+    // LZMA1: wrap as .lzma format (5 prop bytes + 8 byte uncompressed size LE + data)
+    const props = info.coderProperties;
+    if (!props || props.length < 5) return null;
+    const dictSize = Buffer.from(props).readUInt32LE(1);
+    const lzmaHeader = Buffer.alloc(13);
+    lzmaHeader[0] = props[0]; // LZMA properties byte
+    lzmaHeader.writeUInt32LE(dictSize, 1);
+    const sizeBuf = Buffer.alloc(8);
+    sizeBuf.writeBigUInt64LE(BigInt(info.unpackSize));
+    sizeBuf.copy(lzmaHeader, 5);
+    const lzmaStream = Buffer.concat([lzmaHeader, compressedData]);
+    return new Promise((resolve, reject) => {
+      lzma.decompress(lzmaStream, {}, (result) => {
+        if (Buffer.isBuffer(result)) resolve(result);
+        else reject(new Error('lzma-decompress-non-buffer'));
+      }, (err) => reject(err instanceof Error ? err : new Error(String(err))));
+    });
+  } else if (methodHex === '00' || !methodHex) {
+    return compressedData;
+  }
+  return null;
 }
 
 // --- 7z reader primitives ---
