@@ -257,10 +257,12 @@ function deriveArchiveCheckStatus(decision, archiveFindings) {
     'rar-encrypted',
     'rar-solid',
     'sevenzip-unsupported',
+    'sevenzip-encrypted',
     'archive-not-found',
     'archive-no-segments',
     'rar-insufficient-data',
     'rar-header-not-found',
+    'rar-inconsistent-parts',
   ]);
   const passedArchiveCheck = archiveStatuses.some((status) => status === 'rar-stored' || status === 'sevenzip-signature-ok' || status === 'sevenzip-stored');
   const failedArchiveCheck = (decision?.blockers || []).some((blocker) => archiveFailureTokens.has(blocker))

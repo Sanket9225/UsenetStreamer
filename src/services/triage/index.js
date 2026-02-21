@@ -1,6 +1,7 @@
 const { parseStringPromise } = require('xml2js');
 const fs = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 const lzma = require('lzma-native');
 const { isVideoFileName } = require('../../utils/parsers');
 const NNTPModule = require('nntp/lib/nntp');
@@ -314,6 +315,25 @@ async function analyzeSingleNzb(raw, ctx) {
   const checkedSegments = new Set();
   let primaryArchive = null;
 
+  // Early NZB-level check: detect multipart RAR sets with inconsistent segment counts
+  const inconsistentParts = detectInconsistentRarParts(files);
+  if (inconsistentParts) {
+    blockers.add('rar-inconsistent-parts');
+    archiveFindings.push({
+      source: 'nzb-metadata',
+      filename: inconsistentParts.sample,
+      subject: null,
+      status: 'rar-inconsistent-parts',
+      details: {
+        archiveName: inconsistentParts.archiveName,
+        totalParts: inconsistentParts.totalParts,
+        expectedSegments: inconsistentParts.expectedSegments,
+        mismatchCount: inconsistentParts.mismatchCount,
+        segmentCounts: inconsistentParts.segmentCounts,
+      },
+    });
+  }
+
   const hasPlayableVideo = files.some((file) => {
     const name = file.filename || guessFilenameFromSubject(file.subject) || '';
     return isPlayableVideoName(name);
@@ -434,7 +454,8 @@ async function analyzeSingleNzb(raw, ctx) {
   } else {
     const archiveWithSegments = selectArchiveForInspection(archiveCandidates);
     if (archiveWithSegments) {
-      const nntpResult = await inspectArchiveViaNntp(archiveWithSegments, ctx, files);
+      const nzbPassword = extractPassword(parsed);
+      const nntpResult = await inspectArchiveViaNntp(archiveWithSegments, ctx, files, nzbPassword);
       archiveFindings.push({
         source: 'nntp',
         filename: archiveWithSegments.filename,
@@ -573,6 +594,14 @@ function extractTitle(parsedNzb) {
   if (!meta) return null;
   const items = Array.isArray(meta) ? meta : [meta];
   const match = items.find((entry) => entry?.$?.type === 'title');
+  return match?._ ?? null;
+}
+
+function extractPassword(parsedNzb) {
+  const meta = parsedNzb?.nzb?.head?.meta;
+  if (!meta) return null;
+  const items = Array.isArray(meta) ? meta : [meta];
+  const match = items.find((entry) => entry?.$?.type === 'password');
   return match?._ ?? null;
 }
 
@@ -722,6 +751,48 @@ function dedupeArchiveCandidates(archives) {
   return result;
 }
 
+// Detect multipart .partNN.rar sets with wildly inconsistent segment counts.
+// In a healthy multipart RAR, all volumes except the last have the same segment count.
+// If parts have wildly different sizes, the NZB was likely filled/patched with bad data.
+const PARTNN_RAR_RE = /^(.+)\.part(\d+)\.rar$/i;
+function detectInconsistentRarParts(files) {
+  const groups = new Map();
+  for (const file of files) {
+    const name = file.filename || guessFilenameFromSubject(file.subject) || '';
+    const m = PARTNN_RAR_RE.exec(name);
+    if (!m) continue;
+    const archiveName = m[1].toLowerCase();
+    const partNum = parseInt(m[2], 10);
+    const segCount = Array.isArray(file.segments) ? file.segments.length : 0;
+    if (!groups.has(archiveName)) groups.set(archiveName, []);
+    groups.get(archiveName).push({ partNum, segCount, filename: name });
+  }
+
+  for (const [archiveName, parts] of groups) {
+    if (parts.length < 3) continue; // Need at least 3 parts to judge consistency
+    // Sort by part number so we can exclude the last part (which is expected to be smaller)
+    parts.sort((a, b) => a.partNum - b.partNum);
+    const allButLast = parts.slice(0, -1);
+    if (allButLast.length < 2) continue;
+    const expectedSize = allButLast[0].segCount;
+    if (expectedSize === 0) continue;
+    const mismatchCount = allButLast.filter((p) => p.segCount !== expectedSize).length;
+    // If more than 20% of parts (excluding last) have different segment counts, flag it
+    if (mismatchCount > 0 && mismatchCount / allButLast.length > 0.2) {
+      const sizes = parts.map((p) => p.segCount);
+      return {
+        archiveName,
+        totalParts: parts.length,
+        expectedSegments: expectedSize,
+        mismatchCount,
+        segmentCounts: sizes,
+        sample: parts.find((p) => p.segCount !== expectedSize)?.filename || null,
+      };
+    }
+  }
+  return null;
+}
+
 function canonicalArchiveKey(name) {
   if (!name) return null;
   return name.toLowerCase();
@@ -803,7 +874,7 @@ async function analyzeArchiveFile(filePath) {
   }
 }
 
-async function inspectArchiveViaNntp(file, ctx, allFiles) {
+async function inspectArchiveViaNntp(file, ctx, allFiles, nzbPassword) {
   const segments = file.segments ?? [];
   if (segments.length === 0) return { status: 'archive-no-segments' };
   const segmentId = segments[0]?.id;
@@ -835,7 +906,7 @@ async function inspectArchiveViaNntp(file, ctx, allFiles) {
     // 7z: attempt deep inspection (fetch header + footer, parse coders in pure JS)
     if (isSevenZip) {
       try {
-        const deepResult = await inspectSevenZipDeep(file, ctx, allFiles || [], client);
+        const deepResult = await inspectSevenZipDeep(file, ctx, allFiles || [], client, nzbPassword);
         return { ...deepResult, segmentId };
       } catch (err) {
         // Deep inspection failed; fall back to signature-ok so 7z still caps at unverified_7z
@@ -900,8 +971,10 @@ function handleArchiveStatus(status, blockers, warnings) {
     case 'rar-nested-archive':
     case 'sevenzip-nested-archive':
     case 'sevenzip-unsupported':
+    case 'sevenzip-encrypted':
     case 'rar-iso-image':
     case 'rar-insufficient-data':
+    case 'rar-inconsistent-parts':
       blockers.add(status);
       break;
     case 'stat-missing':
@@ -1328,7 +1401,7 @@ function findSevenZipParts(files, targetFile) {
   return parts.length > 0 ? parts : [targetFile];
 }
 
-async function inspectSevenZipDeep(file, ctx, allFiles, client) {
+async function inspectSevenZipDeep(file, ctx, allFiles, client, nzbPassword) {
   const parts = findSevenZipParts(allFiles, file);
   const firstPart = parts[0];
   const lastPart = parts[parts.length - 1];
@@ -1422,7 +1495,34 @@ async function inspectSevenZipDeep(file, ctx, allFiles, client) {
           // Inner parse failed
           return { status: 'sevenzip-signature-ok', details: { reason: 'encoded-header-inner-parse-failed', nextHeaderSize, footerLen: footerBuf.length, innerError: innerResult.error, realHeaderLen: realHeader.length, realHeaderFirst8: realHeader.subarray(0, Math.min(8, realHeader.length)).toString('hex') } };
         }
-        // realHeader was null
+        // realHeader was null — check if the encoded header is encrypted (AES)
+        const method = parseResult.encodedInfo?.coderMethod || '';
+        if (method.startsWith('06f107')) {
+          // If we have a password from NZB metadata, try to decrypt the encoded header
+          if (nzbPassword && parseResult.encodedInfo.coders?.length >= 2) {
+            try {
+              const decryptedHeader = await decryptEncodedHeader(parseResult.encodedInfo, footerBuf, nextHeaderSize, nzbPassword);
+              if (decryptedHeader) {
+                const innerResult = parseSevenZipMetadata(decryptedHeader);
+                if (!innerResult.error && !innerResult.encodedHeader) {
+                  const fnames = innerResult.filenames || [];
+                  const nestedArchive = sz_detectNestedArchive(fnames);
+                  if (innerResult.compressed) {
+                    return { status: 'sevenzip-unsupported', details: { reason: 'encrypted-compressed-coder', nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, encrypted: true, debug: innerResult.debug, filenames: fnames } };
+                  }
+                  if (nestedArchive) {
+                    return { status: 'sevenzip-nested-archive', details: { reason: 'encrypted-nested-archive', nestedType: nestedArchive, nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, encrypted: true, filenames: fnames } };
+                  }
+                  const innerStatus = sz_hasPlayableVideo(fnames) ? 'sevenzip-stored' : 'sevenzip-signature-ok';
+                  return { status: innerStatus, details: { reason: 'encrypted-copy-confirmed', nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, encrypted: true, debug: innerResult.debug, filenames: fnames } };
+                }
+              }
+            } catch (decryptErr) {
+              // Decryption failed — fall through to sevenzip-encrypted
+            }
+          }
+          return { status: 'sevenzip-encrypted', details: { reason: 'aes-encrypted-header', nextHeaderSize, footerLen: footerBuf.length, encodedInfo: parseResult.encodedInfo } };
+        }
         return { status: 'sevenzip-signature-ok', details: { reason: 'encoded-header-decompress-null', nextHeaderSize, footerLen: footerBuf.length, encodedInfo: parseResult.encodedInfo } };
       } catch (decompErr) {
         return { status: 'sevenzip-signature-ok', details: { reason: 'encoded-header-decompress-error', nextHeaderSize, footerLen: footerBuf.length, decompError: decompErr?.message, encodedInfo: parseResult.encodedInfo } };
@@ -1581,9 +1681,12 @@ function sz_parseFolder(reader) {
     totalIn += inStreams;
     totalOut += outStreams;
     // Copy/Store method: codec ID is a single byte 0x00
+    // AES encryption (06f107xx) is treated as transparent — not a compression method
+    const methodHex = Buffer.from(methodId).toString('hex');
     const isCopy = (idSize === 1 && methodId[0] === 0x00) || idSize === 0;
-    if (!isCopy) copyOnly = false;
-    coderInfo.push({ mainByte: '0x' + mainByte.toString(16), idSize, methodHex: Buffer.from(methodId).toString('hex'), isCopy });
+    const isAES = methodHex.startsWith('06f107');
+    if (!isCopy && !isAES) copyOnly = false;
+    coderInfo.push({ mainByte: '0x' + mainByte.toString(16), idSize, methodHex, isCopy });
   }
   const numBindPairs = totalOut > 0 ? totalOut - 1 : 0;
   for (let i = 0; i < numBindPairs; i++) { sz_readNumber(reader); sz_readNumber(reader); }
@@ -1740,6 +1843,10 @@ function sz_parseEncodedHeaderInfo(reader) {
   let coderMethod = null;
   let coderProperties = null;
   let unpackSize = 0;
+  let numFolders = 0;
+  const folderOutStreams = []; // track totalOut per folder for kCodersUnpackSize
+  const allCoders = []; // all coders for multi-coder chains (e.g. AES + LZMA)
+  const allUnpackSizes = []; // all unpack sizes (one per output stream)
 
   while (true) {
     const id = sz_readByte(reader);
@@ -1761,7 +1868,7 @@ function sz_parseEncodedHeaderInfo(reader) {
       }
     } else if (id === 0x07) { // kUnpackInfo
       if (sz_readByte(reader) !== 0x0B) throw new Error('expected-kFolder');
-      const numFolders = sz_readNumber(reader);
+      numFolders = sz_readNumber(reader);
       if (sz_readByte(reader) !== 0) throw new Error('external-folders-unsupported');
       // Parse the single folder to get coder info
       for (let fi = 0; fi < numFolders; fi++) {
@@ -1780,20 +1887,30 @@ function sz_parseEncodedHeaderInfo(reader) {
             const attrSize = sz_readNumber(reader);
             const attrs = sz_readBytes(reader, attrSize);
             if (fi === 0 && ci === 0) coderProperties = Buffer.from(attrs);
+            if (fi === 0) allCoders.push({ method: Buffer.from(methodId).toString('hex'), properties: Buffer.from(attrs) });
+          } else {
+            if (fi === 0) allCoders.push({ method: Buffer.from(methodId).toString('hex'), properties: null });
           }
           totalIn += inS;
           totalOut += outS;
         }
+        folderOutStreams.push(totalOut);
         const numBindPairs = totalOut > 0 ? totalOut - 1 : 0;
         for (let i = 0; i < numBindPairs; i++) { sz_readNumber(reader); sz_readNumber(reader); }
         const numPacked = totalIn - numBindPairs;
         if (numPacked > 1) { for (let i = 0; i < numPacked; i++) sz_readNumber(reader); }
       }
-      // kCodersUnpackSize
+      // kCodersUnpackSize — read totalOutStreams sizes per folder
       if (sz_readByte(reader) !== 0x0C) throw new Error('expected-kCodersUnpackSize');
       for (let fi = 0; fi < numFolders; fi++) {
-        const s = sz_readNumber(reader);
-        if (fi === 0) unpackSize = s;
+        const numOut = folderOutStreams[fi] || 1;
+        for (let i = 0; i < numOut; i++) {
+          const s = sz_readNumber(reader);
+          if (fi === 0) {
+            allUnpackSizes.push(s);
+            if (i === 0) unpackSize = s;
+          }
+        }
       }
       // Skip remaining (CRC, kEnd)
       while (true) {
@@ -1802,13 +1919,8 @@ function sz_parseEncodedHeaderInfo(reader) {
         if (subId === 0x0A) { sz_skipBoolVector(reader, numFolders, true); }
         else { const size = sz_readNumber(reader); sz_skip(reader, size); }
       }
-    } else if (id === 0x08) { // kSubStreamsInfo — skip
-      while (true) {
-        const subId = sz_readByte(reader);
-        if (subId === 0x00) break;
-        const size = sz_readNumber(reader);
-        sz_skip(reader, size);
-      }
+    } else if (id === 0x08) { // kSubStreamsInfo
+      sz_skipSubStreamsInfo(reader, numFolders, []);
     } else {
       throw new Error(`unknown-encoded-section-${id}`);
     }
@@ -1820,7 +1932,81 @@ function sz_parseEncodedHeaderInfo(reader) {
     unpackSize,
     coderMethod: coderMethod ? coderMethod.toString('hex') : null,
     coderProperties: coderProperties || null,
+    coders: allCoders,
+    unpackSizes: allUnpackSizes,
   };
+}
+
+// ---------------------------------------------------------------------------
+// 7z AES-256-SHA-256 decryption for encrypted encoded headers.
+// Implements the 7zAES key derivation (SHA-256 iterated over salt+password+counter)
+// and AES-256-CBC decryption.
+// ---------------------------------------------------------------------------
+function parse7zAESProperties(properties) {
+  if (!properties || properties.length === 0) return null;
+  const firstByte = properties[0];
+  const numCyclesPower = firstByte & 0x3F;
+
+  let pos = 1;
+  let saltSize = 0;
+  let ivSize = 0;
+
+  if (firstByte & 0xC0) {
+    if (pos >= properties.length) return null;
+    const secondByte = properties[pos++];
+    // py7zr-verified encoding: bit 7 = salt base, bit 6 = IV base
+    // secondByte high nibble added to salt, low nibble added to IV
+    saltSize = ((firstByte >> 7) & 1) + ((secondByte >> 4) & 0x0F);
+    ivSize = ((firstByte >> 6) & 1) + (secondByte & 0x0F);
+  }
+
+  const salt = saltSize > 0 ? Buffer.from(properties.subarray(pos, pos + saltSize)) : Buffer.alloc(0);
+  pos += saltSize;
+  const iv = Buffer.alloc(16, 0); // AES block size = 16
+  if (ivSize > 0) {
+    const ivBytes = Math.min(ivSize, 16);
+    properties.copy(iv, 0, pos, pos + ivBytes);
+  }
+
+  return { numCyclesPower, salt, iv };
+}
+
+function derive7zAESKey(password, salt, numCyclesPower) {
+  const passwordBuf = Buffer.from(password, 'utf16le');
+  const numRounds = 1 << numCyclesPower;
+  const hash = crypto.createHash('sha256');
+
+  // Batch iterations to reduce JS→C++ call overhead
+  const iterPrefix = Buffer.concat([salt, passwordBuf]);
+  const batchSize = Math.min(4096, numRounds);
+  const iterSize = iterPrefix.length + 8;
+  const batch = Buffer.alloc(batchSize * iterSize);
+
+  for (let start = 0; start < numRounds; start += batchSize) {
+    const end = Math.min(start + batchSize, numRounds);
+    let offset = 0;
+    for (let i = start; i < end; i++) {
+      iterPrefix.copy(batch, offset);
+      offset += iterPrefix.length;
+      batch.writeUInt32LE(i & 0xFFFFFFFF, offset);
+      batch.writeUInt32LE(Math.floor(i / 0x100000000), offset + 4);
+      offset += 8;
+    }
+    hash.update(batch.subarray(0, offset));
+  }
+
+  return hash.digest(); // 32 bytes = AES-256 key
+}
+
+function decrypt7zAES(encryptedData, password, aesProperties) {
+  const params = parse7zAESProperties(aesProperties);
+  if (!params) return null;
+
+  const key = derive7zAESKey(password, params.salt, params.numCyclesPower);
+
+  const decipher = crypto.createDecipheriv('aes-256-cbc', key, params.iv);
+  decipher.setAutoPadding(false);
+  return Buffer.concat([decipher.update(encryptedData), decipher.final()]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1840,6 +2026,59 @@ async function decompressEncodedHeader(info, footerBuf, metaSize) {
 
   const compressedData = footerBuf.subarray(packedStart, packedEnd);
   return await decompressLzmaBuffer(info, compressedData);
+}
+
+// ---------------------------------------------------------------------------
+// Decrypt + decompress an AES-encrypted encoded header using a password.
+// Multi-coder pipeline: AES decrypt → LZMA decompress → raw header.
+// ---------------------------------------------------------------------------
+async function decryptEncodedHeader(info, footerBuf, metaSize, password) {
+  if (!info || !info.packSize || !password) return null;
+  if (!metaSize || metaSize <= 0) return null;
+
+  const packedEnd = footerBuf.length - metaSize;
+  const packedStart = packedEnd - info.packSize;
+  if (packedStart < 0 || packedEnd > footerBuf.length) return null;
+
+  const packedData = footerBuf.subarray(packedStart, packedEnd);
+  const coders = info.coders || [];
+  const unpackSizes = info.unpackSizes || [];
+
+  // Find the AES coder and the LZMA coder in the chain
+  const aesCoder = coders.find((c) => c.method.startsWith('06f107'));
+  const lzmaCoder = coders.find((c) => c.method === '030101' || c.method === '21');
+  if (!aesCoder) return null;
+
+  try {
+    // Step 1: AES decrypt the packed data
+    const decrypted = decrypt7zAES(packedData, password, aesCoder.properties);
+    if (!decrypted) return null;
+
+    // Step 2: If there's also a LZMA coder, decompress the decrypted data
+    if (lzmaCoder) {
+      const lzmaUnpackSize = unpackSizes[unpackSizes.length - 1] || info.unpackSize;
+      const lzmaInfo = {
+        coderMethod: lzmaCoder.method,
+        coderProperties: lzmaCoder.properties,
+        unpackSize: lzmaUnpackSize,
+      };
+      const trimSize = unpackSizes[0] || decrypted.length;
+      const lzmaInput = decrypted.subarray(0, trimSize);
+
+      const result = await decompressLzmaBuffer(lzmaInfo, lzmaInput);
+      if (result && Buffer.isBuffer(result) && result.length > 0) {
+        return result;
+      }
+    } else {
+      // No LZMA — trim AES padding and return
+      const trimSize = unpackSizes[0] || decrypted.length;
+      return decrypted.subarray(0, trimSize);
+    }
+  } catch (e) {
+    // AES decryption or LZMA decompression failed
+  }
+
+  return null;
 }
 
 function lzma2DictSize(byte) {
