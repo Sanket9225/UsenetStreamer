@@ -979,7 +979,8 @@ function handleArchiveStatus(status, blockers, warnings) {
       break;
     case 'rar-compressed':
     case 'rar-solid-encrypted':
-    case 'rar-encrypted-headers':
+    case 'rar-encrypted-headers-decrypt-fail':
+    case 'rar-no-video':
     case 'rar-nested-archive':
     case 'rar-corrupt-header':
     case 'sevenzip-nested-archive':
@@ -1021,7 +1022,7 @@ function inspectArchiveBuffer(buffer, password) {
   }
 
   if (buffer.length >= RAR5_SIGNATURE.length && buffer.subarray(0, RAR5_SIGNATURE.length).equals(RAR5_SIGNATURE)) {
-    return inspectRar5(buffer);
+    return inspectRar5(buffer, password);
   }
 
   if (buffer.length >= 6 && buffer[0] === 0x37 && buffer[1] === 0x7A) {
@@ -1065,10 +1066,10 @@ function inspectRar4(buffer, password) {
     if (headerType === 0x73 && (headerFlags & 0x0080)) {
       const saltOffset = offset + headerSize;
       if (saltOffset + 8 > buffer.length) {
-        return { status: 'rar-encrypted-headers', details: { reason: 'no-salt', archiveFlags: headerFlags } };
+        return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'no-salt', archiveFlags: headerFlags } };
       }
       if (!password) {
-        return { status: 'rar-encrypted-headers', details: { reason: 'no-password', archiveFlags: headerFlags } };
+        return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'no-password', archiveFlags: headerFlags } };
       }
       const salt = buffer.subarray(saltOffset, saltOffset + 8);
       let encryptedData = buffer.subarray(saltOffset + 8);
@@ -1076,7 +1077,7 @@ function inspectRar4(buffer, password) {
       const alignedLen = encryptedData.length - (encryptedData.length % 16);
       encryptedData = encryptedData.subarray(0, alignedLen);
       if (encryptedData.length < 16) {
-        return { status: 'rar-encrypted-headers', details: { reason: 'too-short', archiveFlags: headerFlags } };
+        return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'too-short', archiveFlags: headerFlags } };
       }
       try {
         const decrypted = decryptRar3Header(encryptedData, password, salt);
@@ -1091,7 +1092,7 @@ function inspectRar4(buffer, password) {
       }
       // Decryption produced no valid headers — password wrong or corrupted data.
       // nzbdav/SharpCompress will also fail with "Unknown Rar Header" in this case.
-      return { status: 'rar-encrypted-headers', details: { reason: 'decrypt-failed', archiveFlags: headerFlags } };
+      return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'decrypt-failed', archiveFlags: headerFlags } };
     }
 
     let addSize = 0;
@@ -1170,13 +1171,16 @@ function inspectRar4(buffer, password) {
         details: { nestedEntries: nestedArchiveCount, sampleEntries },
       };
     }
+    if (!playableEntryFound && sampleEntries.length > 0) {
+      return { status: 'rar-no-video', details: { ...storedDetails, sampleEntries } };
+    }
     return { status: 'rar-stored', details: { ...storedDetails, sampleEntries } };
   }
 
   return { status: 'rar-header-not-found' };
 }
 
-function inspectRar5(buffer) {
+function inspectRar5(buffer, password) {
   let offset = RAR5_SIGNATURE.length;
   let nestedArchiveCount = 0;
   let playableEntryFound = false;
@@ -1207,23 +1211,23 @@ function inspectRar5(buffer) {
     let extraAreaSize = 0;
     let dataSize = 0;
 
-    if (headerType === 0x02 || headerType === 0x03) {
-      const hasExtraArea = (headerFlags & 0x0001) !== 0;
-      const hasData = (headerFlags & 0x0002) !== 0;
+    // Common header flags apply to ALL block types (RAR5 spec):
+    // 0x0001 = extra area present, 0x0002 = data area present
+    const hasExtraArea = (headerFlags & 0x0001) !== 0;
+    const hasData = (headerFlags & 0x0002) !== 0;
 
-      if (hasExtraArea) {
-        const extraRes = readRar5Vint(buffer, pos);
-        if (!extraRes) break;
-        extraAreaSize = extraRes.value;
-        pos += extraRes.bytes;
-      }
+    if (hasExtraArea) {
+      const extraRes = readRar5Vint(buffer, pos);
+      if (!extraRes) break;
+      extraAreaSize = extraRes.value;
+      pos += extraRes.bytes;
+    }
 
-      if (hasData) {
-        const dataRes = readRar5Vint(buffer, pos);
-        if (!dataRes) break;
-        dataSize = dataRes.value;
-        pos += dataRes.bytes;
-      }
+    if (hasData) {
+      const dataRes = readRar5Vint(buffer, pos);
+      if (!dataRes) break;
+      dataSize = dataRes.value;
+      pos += dataRes.bytes;
     }
 
     // Correct offset calculation:
@@ -1232,8 +1236,81 @@ function inspectRar5(buffer) {
     // Actually, 'headerSize' includes the Type, Flags, etc.
     // So the block ends at: (offset + 4 + sizeRes.bytes) + headerSize + dataSize
     const nextBlockOffset = offset + 4 + sizeRes.bytes + headerSize + dataSize;
-    
-    // console.log(`[RAR5] Block type: ${headerType}, size: ${headerSize}, data: ${dataSize}, next: ${nextBlockOffset}`);
+
+    // RAR5 Archive Encryption Header (type 4): all subsequent headers are AES-256 encrypted.
+    // Parse the encryption params, derive key via PBKDF2-HMAC-SHA256, decrypt and re-parse.
+    if (headerType === 0x04) {
+      // Parse encryption header fields (after common header fields already consumed)
+      const encVerRes = readRar5Vint(buffer, pos);
+      if (!encVerRes) return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'bad-enc-header', format: 'rar5' } };
+      pos += encVerRes.bytes;
+
+      const encFlagsRes = readRar5Vint(buffer, pos);
+      if (!encFlagsRes) return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'bad-enc-header', format: 'rar5' } };
+      const encFlags = encFlagsRes.value;
+      pos += encFlagsRes.bytes;
+
+      if (pos + 1 > buffer.length) return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'truncated', format: 'rar5' } };
+      const kdfCount = buffer[pos]; // binary log of iterations
+      pos += 1;
+
+      if (pos + 16 > buffer.length) return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'truncated', format: 'rar5' } };
+      const salt = buffer.subarray(pos, pos + 16);
+      pos += 16;
+
+      const hasPswCheck = (encFlags & 0x0001) !== 0;
+      let pswCheck = null;
+      if (hasPswCheck) {
+        if (pos + 12 > buffer.length) return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'truncated', format: 'rar5' } };
+        pswCheck = buffer.subarray(pos, pos + 12); // 8 bytes check + 4 bytes checksum
+        pos += 12;
+      }
+
+      if (!password) {
+        return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'no-password', format: 'rar5' } };
+      }
+
+      // Derive AES-256 key via PBKDF2-HMAC-SHA256 (matching nzbdav's GenerateRarPbkdf2Key)
+      const iterations = 1 << kdfCount;
+      const saltWithBlock = Buffer.concat([salt, Buffer.from([0, 0, 0, 1])]);
+      const derivedParts = deriveRar5Key(password, saltWithBlock, iterations);
+
+      // Password verification
+      if (hasPswCheck && pswCheck) {
+        const derivedCheck = Buffer.alloc(8, 0);
+        for (let i = 0; i < 32; i++) {
+          derivedCheck[i % 8] ^= derivedParts[2][i];
+        }
+        if (!derivedCheck.equals(pswCheck.subarray(0, 8))) {
+          return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'wrong-password', format: 'rar5' } };
+        }
+      }
+
+      const aesKey = derivedParts[0].subarray(0, 32); // AES-256 key
+
+      // After the encryption header, each subsequent header block is:
+      // [16-byte IV] [encrypted data aligned to 16 bytes]
+      // We need to decrypt header by header.
+      const encOffset = nextBlockOffset;
+      if (encOffset + 16 > buffer.length) {
+        return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'no-encrypted-data', format: 'rar5' } };
+      }
+
+      // Decrypt all remaining data as a continuous stream, each block has its own IV
+      try {
+        const decryptedHeaders = decryptRar5Headers(buffer, encOffset, aesKey);
+        if (decryptedHeaders && decryptedHeaders.length > 0) {
+          // Prepend the RAR5 signature so inspectRar5 can re-parse the decrypted headers
+          const fakeBuffer = Buffer.concat([RAR5_SIGNATURE, decryptedHeaders]);
+          const result = inspectRar5(fakeBuffer, null);
+          if (result.status !== 'rar-header-not-found') return result;
+        }
+      } catch (_) {
+        // Decryption failed
+      }
+
+      return { status: 'rar-encrypted-headers-decrypt-fail', details: { reason: 'decrypt-failed', format: 'rar5' } };
+    }
 
     if (headerType === 0x02) { // File Header
       const fileFlagsRes = readRar5Vint(buffer, pos);
@@ -1305,24 +1382,19 @@ function inspectRar5(buffer) {
 
   if (storedDetails) {
     if (nestedArchiveCount > 0 && !playableEntryFound) {
-      // console.log('[NZB TRIAGE] Detected nested archive (RAR5)', {
-      //   nestedEntries: nestedArchiveCount,
-      //   sample: storedDetails?.name,
-      // });
       return {
         status: 'rar-nested-archive',
         details: { nestedEntries: nestedArchiveCount, sampleEntries },
       };
     }
-    // console.log('[NZB TRIAGE] RAR5 archive marked stored', {
-    //   playableEntryFound,
-    //   nestedEntries: nestedArchiveCount,
-    //   sample: storedDetails?.name,
-    // });
+    if (!playableEntryFound && sampleEntries.length > 0) {
+      return { status: 'rar-no-video', details: { ...storedDetails, sampleEntries } };
+    }
     return { status: 'rar-stored', details: { ...storedDetails, sampleEntries } };
   }
 
-  return { status: 'rar-stored', details: { note: 'rar5-header-assumed-stored', sampleEntries } };
+  // RAR5: couldn't parse file entries — don't assume stored
+  return { status: 'rar-header-not-found', details: { note: 'rar5-no-file-entries', sampleEntries } };
 }
 
 function readRar5Vint(buffer, offset) {
@@ -2019,6 +2091,102 @@ function sz_parseEncodedHeaderInfo(reader) {
 }
 
 // ---------------------------------------------------------------------------
+// RAR5 PBKDF2-HMAC-SHA256 key derivation for encrypted headers.
+// Matches nzbdav's GenerateRarPbkdf2Key and GetRar5AesParams.
+// Returns array of 3 derived 32-byte values:
+//   [0] = AES key, [1] = extra data, [2] = password check material
+// ---------------------------------------------------------------------------
+function deriveRar5Key(password, salt, iterations) {
+  const hmac = crypto.createHmac('sha256', Buffer.from(password, 'utf8'));
+  let block = hmac.update(salt).digest();
+  const finalHash = Buffer.from(block);
+
+  const rounds = [iterations, 17, 17];
+  const results = [];
+
+  for (let x = 0; x < 3; x++) {
+    for (let i = 1; i < rounds[x]; i++) {
+      block = crypto.createHmac('sha256', Buffer.from(password, 'utf8')).update(block).digest();
+      for (let j = 0; j < finalHash.length; j++) {
+        finalHash[j] ^= block[j];
+      }
+    }
+    results.push(Buffer.from(finalHash));
+  }
+
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Decrypt RAR5 encrypted headers from the buffer.
+// After the Archive Encryption Header, each subsequent header is preceded by
+// a 16-byte AES IV. The encrypted header data is aligned to 16-byte blocks.
+// We decrypt one header at a time, reassembling the plaintext stream.
+// ---------------------------------------------------------------------------
+function decryptRar5Headers(buffer, startOffset, aesKey) {
+  const chunks = [];
+  let pos = startOffset;
+
+  // Each encrypted header block: [16-byte IV] [encrypted data aligned to 16 bytes]
+  // We decrypt, parse one header to find its actual size, collect it, then advance to next.
+  while (pos + 32 <= buffer.length) { // need at least IV(16) + one AES block(16)
+    const iv = buffer.subarray(pos, pos + 16);
+    pos += 16;
+
+    // Remaining encrypted data from this point
+    const remaining = buffer.length - pos;
+    if (remaining < 16) break;
+
+    // We don't know the exact encrypted block size, so decrypt all remaining
+    // aligned data and parse the header from the plaintext to find its size.
+    const alignedLen = remaining - (remaining % 16);
+    const encData = buffer.subarray(pos, pos + alignedLen);
+
+    let decrypted;
+    try {
+      const decipher = crypto.createDecipheriv('aes-256-cbc', aesKey, iv);
+      decipher.setAutoPadding(false);
+      decrypted = Buffer.concat([decipher.update(encData), decipher.final()]);
+    } catch (_) {
+      break;
+    }
+
+    // Parse actual header size from decrypted data
+    if (decrypted.length < 7) break;
+    let dPos = 4; // skip CRC
+
+    const sizeRes = readRar5Vint(decrypted, dPos);
+    if (!sizeRes || sizeRes.value === 0) break;
+    const headerSize = sizeRes.value;
+    dPos += sizeRes.bytes;
+
+    const typeRes = readRar5Vint(decrypted, dPos);
+    if (!typeRes) break;
+    const headerType = typeRes.value;
+    if (headerType < 1 || headerType > 5) break;
+
+    // The header block is: CRC(4) + sizeVint(sizeRes.bytes) + headerData(headerSize)
+    // Data area for service/file headers is NOT included in encrypted header blocks
+    // (data areas are separately encrypted with per-file IVs)
+    const headerBlockSize = 4 + sizeRes.bytes + headerSize;
+    if (headerBlockSize > decrypted.length) break;
+
+    chunks.push(decrypted.subarray(0, headerBlockSize));
+
+    // End of archive
+    if (headerType === 5) break;
+
+    // Advance pos in original buffer past the encrypted data for this header.
+    // The encrypted data size is headerBlockSize rounded up to 16 bytes.
+    const encBlockSize = headerBlockSize + ((16 - (headerBlockSize % 16)) % 16);
+    pos += encBlockSize;
+  }
+
+  if (chunks.length === 0) return null;
+  return Buffer.concat(chunks);
+}
+
+// ---------------------------------------------------------------------------
 // RAR3 AES-128-CBC decryption for encrypted headers.
 // Key derivation: iterative SHA-1 over (password_utf16le + salt + counter)
 // for 262144 rounds, producing a 16-byte AES key and 16-byte IV.
@@ -2164,6 +2332,9 @@ function inspectRar4DecryptedHeaders(buffer, sampleEntries) {
   if (storedDetails) {
     if (nestedArchiveCount > 0 && !playableEntryFound) {
       return { status: 'rar-nested-archive', details: { nestedEntries: nestedArchiveCount, sampleEntries, decrypted: true } };
+    }
+    if (!playableEntryFound && sampleEntries.length > 0) {
+      return { status: 'rar-no-video', details: { ...storedDetails, sampleEntries, decrypted: true } };
     }
     return { status: 'rar-stored', details: { ...storedDetails, sampleEntries, decrypted: true } };
   }
