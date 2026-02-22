@@ -637,6 +637,19 @@ function isIsoFileName(name) {
   return ISO_FILE_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
+function isDiscStructurePath(name) {
+  if (!name) return false;
+  const lower = name.toLowerCase().replace(/\\/g, '/');
+  // Blu-ray disc: BDMV/ directory structure
+  if (/\bbdmv\//.test(lower)) return true;
+  // DVD disc: VIDEO_TS/ directory structure
+  if (/\bvideo_ts\//.test(lower)) return true;
+  // Blu-ray/DVD root markers
+  if (lower.endsWith('.bdjo') || lower.endsWith('.clpi') || lower.endsWith('.mpls')) return true;
+  if (lower.endsWith('.bup') || lower.endsWith('.ifo') || lower.endsWith('.vob')) return true;
+  return false;
+}
+
 function isPlayableVideoName(name) {
   if (!name) return false;
   if (!isVideoFileName(name)) return false;
@@ -969,10 +982,12 @@ function handleArchiveStatus(status, blockers, warnings) {
     case 'rar-solid':
     case 'rar5-unsupported':
     case 'rar-nested-archive':
+    case 'rar-corrupt-header':
     case 'sevenzip-nested-archive':
     case 'sevenzip-unsupported':
     case 'sevenzip-encrypted':
     case 'rar-iso-image':
+    case 'rar-disc-structure':
     case 'rar-insufficient-data':
     case 'rar-inconsistent-parts':
       blockers.add(status);
@@ -1029,16 +1044,30 @@ function inspectRar4(buffer) {
   const sampleEntries = [];
 
   while (offset + 7 <= buffer.length) {
+    const headerCRC = buffer.readUInt16LE(offset);
     const headerType = buffer[offset + 2];
     const headerFlags = buffer.readUInt16LE(offset + 3);
     const headerSize = buffer.readUInt16LE(offset + 5);
 
-    // console.log(`[RAR4] Type: ${headerType}, Size: ${headerSize}, Offset: ${offset}`);
+    // Block type outside the valid RAR4 range (0x72-0x7B): stop parsing.
+    // This handles zero-filled buffer tails, alignment padding, and unknown sub-blocks
+    // that can appear between entries in multi-volume Blu-ray or large RAR archives.
+    if (headerType < 0x72 || headerType > 0x7B) {
+      break;
+    }
 
     if (headerSize < 7) return { status: 'rar-corrupt-header' };
     if (offset + headerSize > buffer.length) return { status: 'rar-insufficient-data' };
 
     let addSize = 0;
+
+    // ADD_SIZE / LONG_BLOCK flag (0x8000): header has additional data after the header body
+    // This applies to ALL block types, not just file headers
+    if ((headerFlags & 0x8000) && headerType !== 0x74) {
+      if (offset + 7 + 4 <= buffer.length) {
+        addSize = buffer.readUInt32LE(offset + 7);
+      }
+    }
 
     if (headerType === 0x74) {
       let pos = offset + 7;
@@ -1090,6 +1119,9 @@ function inspectRar4(buffer) {
       } else if (isArchiveEntryName(name)) {
         nestedArchiveCount += 1;
       }
+      if (isDiscStructurePath(name)) {
+        return { status: 'rar-disc-structure', details: { name, sampleEntries } };
+      }
     }
 
     offset += headerSize + addSize;
@@ -1097,20 +1129,11 @@ function inspectRar4(buffer) {
 
   if (storedDetails) {
     if (nestedArchiveCount > 0 && !playableEntryFound) {
-      // console.log('[NZB TRIAGE] Detected nested archive (RAR4)', {
-      //   nestedEntries: nestedArchiveCount,
-      //   sample: storedDetails?.name,
-      // });
       return {
         status: 'rar-nested-archive',
         details: { nestedEntries: nestedArchiveCount, sampleEntries },
       };
     }
-    // console.log('[NZB TRIAGE] RAR4 archive marked stored', {
-    //   playableEntryFound,
-    //   nestedEntries: nestedArchiveCount,
-    //   sample: storedDetails?.name,
-    // });
     return { status: 'rar-stored', details: { ...storedDetails, sampleEntries } };
   }
 
@@ -1229,6 +1252,9 @@ function inspectRar5(buffer) {
                     } else if (isArchiveEntryName(name)) {
                       nestedArchiveCount += 1;
                     }
+                    if (isDiscStructurePath(name)) {
+                      return { status: 'rar-disc-structure', details: { name, sampleEntries } };
+                    }
                   }
                 }
               }
@@ -1332,6 +1358,9 @@ function inspectZip(buffer) {
       playableEntryFound = true;
     } else if (isArchiveEntryName(name)) {
       nestedArchiveCount += 1;
+    }
+    if (isDiscStructurePath(name)) {
+      return { status: 'rar-disc-structure', details: { name, sampleEntries } };
     }
 
     if (compressedSize === 0xFFFFFFFF) return { status: 'rar-insufficient-data' };
@@ -1489,6 +1518,9 @@ async function inspectSevenZipDeep(file, ctx, allFiles, client, nzbPassword) {
             if (nestedArchive) {
               return { status: 'sevenzip-nested-archive', details: { reason: 'nested-archive-detected', nestedType: nestedArchive, nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, filenames: fnames } };
             }
+            if (sz_hasDiscStructure(fnames)) {
+              return { status: 'sevenzip-unsupported', details: { reason: 'disc-structure-detected', nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, filenames: fnames } };
+            }
             const innerStatus = sz_hasPlayableVideo(fnames) ? 'sevenzip-stored' : 'sevenzip-signature-ok';
             return { status: innerStatus, details: { reason: 'copy-only-confirmed', nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, debug: innerResult.debug, filenames: fnames } };
           }
@@ -1512,6 +1544,9 @@ async function inspectSevenZipDeep(file, ctx, allFiles, client, nzbPassword) {
                   }
                   if (nestedArchive) {
                     return { status: 'sevenzip-nested-archive', details: { reason: 'encrypted-nested-archive', nestedType: nestedArchive, nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, encrypted: true, filenames: fnames } };
+                  }
+                  if (sz_hasDiscStructure(fnames)) {
+                    return { status: 'sevenzip-unsupported', details: { reason: 'encrypted-disc-structure', nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, encrypted: true, filenames: fnames } };
                   }
                   const innerStatus = sz_hasPlayableVideo(fnames) ? 'sevenzip-stored' : 'sevenzip-signature-ok';
                   return { status: innerStatus, details: { reason: 'encrypted-copy-confirmed', nextHeaderSize, footerLen: footerBuf.length, encodedHeader: true, encrypted: true, debug: innerResult.debug, filenames: fnames } };
@@ -1538,6 +1573,9 @@ async function inspectSevenZipDeep(file, ctx, allFiles, client, nzbPassword) {
     const nestedArchive = sz_detectNestedArchive(fnames);
     if (nestedArchive) {
       return { status: 'sevenzip-nested-archive', details: { reason: 'nested-archive-detected', nestedType: nestedArchive, nextHeaderSize, footerLen: footerBuf.length, filenames: fnames } };
+    }
+    if (sz_hasDiscStructure(fnames)) {
+      return { status: 'sevenzip-unsupported', details: { reason: 'disc-structure-detected', nextHeaderSize, footerLen: footerBuf.length, filenames: fnames } };
     }
     const finalStatus = sz_hasPlayableVideo(fnames) ? 'sevenzip-stored' : 'sevenzip-signature-ok';
     return { status: finalStatus, details: { reason: 'copy-only-confirmed', nextHeaderSize, footerLen: footerBuf.length, debug: parseResult.debug, filenames: fnames } };
@@ -1761,6 +1799,13 @@ function sz_detectNestedArchive(filenames) {
     if (match) return match[1].toLowerCase();
   }
   return null;
+}
+
+function sz_hasDiscStructure(filenames) {
+  for (const name of filenames) {
+    if (isDiscStructurePath(name)) return true;
+  }
+  return false;
 }
 
 // Check if any filename is a playable video (not inside Sample/Proof folders, not .iso).
