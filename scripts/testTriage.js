@@ -236,7 +236,8 @@ function getTriagePriority(status) {
 function collectArchiveSampleEntries(archiveFindings) {
   const archiveSampleEntries = [];
   (archiveFindings || []).forEach((finding) => {
-    const samples = finding?.details?.sampleEntries;
+    // RAR parsers use details.sampleEntries; 7z parsers use details.filenames
+    const samples = finding?.details?.sampleEntries || finding?.details?.filenames;
     if (Array.isArray(samples)) {
       samples.forEach((entry) => {
         if (entry && !archiveSampleEntries.includes(entry)) {

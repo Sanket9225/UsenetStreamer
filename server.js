@@ -3399,7 +3399,8 @@ async function streamHandler(req, res) {
       if (triageApplied && triageLogCount < 10) {
         const archiveSampleEntries = [];
         (triageInfo?.archiveFindings || []).forEach((finding) => {
-          const samples = finding?.details?.sampleEntries;
+          // RAR parsers use details.sampleEntries; 7z parsers use details.filenames
+          const samples = finding?.details?.sampleEntries || finding?.details?.filenames;
           if (Array.isArray(samples)) {
             samples.forEach((entry) => {
               if (entry && !archiveSampleEntries.includes(entry)) {

@@ -5,7 +5,7 @@ const { getRandomUserAgent } = require('../../utils/userAgent');
 const DEFAULT_TIME_BUDGET_MS = 40000;
 const DEFAULT_MAX_CANDIDATES = 25;
 const DEFAULT_DOWNLOAD_CONCURRENCY = 8;
-const DEFAULT_DOWNLOAD_TIMEOUT_MS = 15000;
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 10000;
 const TIMEOUT_ERROR_CODE = 'TRIAGE_TIMEOUT';
 
 function normalizeTitle(title) {

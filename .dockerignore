@@ -21,3 +21,4 @@ test_nzbs/
 assets/*.nzb
 *.nzb
 !assets/Test_Passed_ignore_failure.nzb
+temp_nzbs/

@@ -12,9 +12,9 @@ const { sleep, safeStat } = require('../utils/helpers');
 const pipelineAsync = promisify(pipeline);
 
 // Configuration
-let NZBDAV_URL = (process.env.NZBDAV_URL || '').trim();
+let NZBDAV_URL = (process.env.NZBDAV_URL || '').trim().replace(/\/+$/, '');
 let NZBDAV_API_KEY = (process.env.NZBDAV_API_KEY || '').trim();
-let NZBDAV_WEBDAV_URL = (process.env.NZBDAV_WEBDAV_URL || NZBDAV_URL).trim();
+let NZBDAV_WEBDAV_URL = (process.env.NZBDAV_WEBDAV_URL || NZBDAV_URL).trim().replace(/\/+$/, '');
 let NZBDAV_WEBDAV_USER = (process.env.NZBDAV_WEBDAV_USER || '').trim();
 let NZBDAV_WEBDAV_PASS = (process.env.NZBDAV_WEBDAV_PASS || '').trim();
 let NZBDAV_WEBDAV_ROOT = '/';
@@ -37,9 +37,9 @@ function resetWebdavClient() {
 }
 
 function reloadConfig() {
-  NZBDAV_URL = (process.env.NZBDAV_URL || '').trim();
+  NZBDAV_URL = (process.env.NZBDAV_URL || '').trim().replace(/\/+$/, '');
   NZBDAV_API_KEY = (process.env.NZBDAV_API_KEY || '').trim();
-  NZBDAV_WEBDAV_URL = (process.env.NZBDAV_WEBDAV_URL || NZBDAV_URL).trim();
+  NZBDAV_WEBDAV_URL = (process.env.NZBDAV_WEBDAV_URL || NZBDAV_URL).trim().replace(/\/+$/, '');
   NZBDAV_WEBDAV_USER = (process.env.NZBDAV_WEBDAV_USER || '').trim();
   NZBDAV_WEBDAV_PASS = (process.env.NZBDAV_WEBDAV_PASS || '').trim();
   NZBDAV_WEBDAV_ROOT = '/';
