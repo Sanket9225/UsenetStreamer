@@ -2792,7 +2792,7 @@ async function streamHandler(req, res) {
       const decision = triageDecisions.get(candidate.downloadUrl);
       return decision && decision.status ? String(decision.status).toLowerCase() : null;
     };
-    const pendingStatuses = new Set(['unverified', 'pending']);
+    const pendingStatuses = new Set(['unverified', 'pending', 'fetch-error']);
     const hasPendingRetries = triagePool.some((candidate) => pendingStatuses.has(getDecisionStatus(candidate)));
     const hasVerifiedResult = triagePool.some((candidate) => getDecisionStatus(candidate) === 'verified');
     let triageEligibleResults = [];
