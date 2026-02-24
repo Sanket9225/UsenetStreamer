@@ -7,7 +7,7 @@ const DEFAULT_MAX_CANDIDATES = 25;
 const DEFAULT_DOWNLOAD_CONCURRENCY = 8;
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 10000;
 const LARGE_NZB_DOWNLOAD_TIMEOUT_MS = 15000;
-const LARGE_NZB_SIZE_THRESHOLD = 40 * 1024 * 1024 * 1024; // 40 GB
+const LARGE_NZB_SIZE_THRESHOLD = 30 * 1024 * 1024 * 1024; // 30 GB
 const TIMEOUT_ERROR_CODE = 'TRIAGE_TIMEOUT';
 
 function normalizeTitle(title) {
@@ -235,6 +235,11 @@ async function triageAndRank(nzbResults, options = {}) {
     Math.min(options.downloadConcurrency ?? DEFAULT_DOWNLOAD_CONCURRENCY, selectedCandidates.length),
   );
   const baseDownloadTimeoutMs = options.downloadTimeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
+  // If any candidate is >40 GB, use the larger timeout for all downloads
+  const hasLargeCandidate = selectedCandidates.some((c) => (c.size || 0) > LARGE_NZB_SIZE_THRESHOLD);
+  const downloadTimeoutMs = hasLargeCandidate
+    ? Math.max(baseDownloadTimeoutMs, LARGE_NZB_DOWNLOAD_TIMEOUT_MS)
+    : baseDownloadTimeoutMs;
   const triageConfig = { ...triageOptions, reuseNntpPool: true };
   const serializedChains = new Map();
 
@@ -296,11 +301,6 @@ async function triageAndRank(nzbResults, options = {}) {
       }
 
       const downloadStart = Date.now();
-      // Dynamic timeout: larger NZBs (>40 GB) get more time to download
-      const candidateSize = candidate.size || 0;
-      const downloadTimeoutMs = candidateSize > LARGE_NZB_SIZE_THRESHOLD
-        ? Math.max(baseDownloadTimeoutMs, LARGE_NZB_DOWNLOAD_TIMEOUT_MS)
-        : baseDownloadTimeoutMs;
       // logEvent(logger, 'info', 'NZB download:start', {
       //   downloadUrl,
       //   indexerId: candidate.indexerId,

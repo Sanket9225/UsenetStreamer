@@ -962,6 +962,18 @@ async function inspectArchiveViaNntp(file, ctx, allFiles, nzbPassword) {
       // });
       let archiveResult = inspectArchiveBuffer(decoded, nzbPassword);
       archiveResult = applyHeuristicArchiveHints(archiveResult, decoded, { filename: effectiveFilename });
+      // If the file is named .rar/.7z but no valid archive signature was found,
+      // the content is likely fully encrypted data — upgrade to a blocker.
+      if (archiveResult.status === 'rar-header-not-found' && /\.(rar|7z)(?:\.|$)/i.test(effectiveFilename)) {
+        archiveResult = {
+          status: 'rar-no-signature',
+          details: {
+            ...(archiveResult.details || {}),
+            filename: effectiveFilename,
+            firstBytes: decoded.subarray(0, 8).toString('hex'),
+          },
+        };
+      }
       // console.log('[NZB TRIAGE] Archive inspection via NNTP', {
       //   status: archiveResult.status,
       //   details: archiveResult.details,
@@ -1008,6 +1020,7 @@ function handleArchiveStatus(status, blockers, warnings) {
     case 'rar-disc-structure':
     case 'rar-insufficient-data':
     case 'rar-inconsistent-parts':
+    case 'rar-no-signature':
       blockers.add(status);
       break;
     case 'stat-missing':
