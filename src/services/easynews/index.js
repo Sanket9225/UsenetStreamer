@@ -448,12 +448,6 @@ function filterAndMap(jsonData, options) {
       }
     }
 
-    if (queryMeta) {
-      if (queryMeta.year && titleMeta.year && queryMeta.year !== titleMeta.year) return;
-      if (queryMeta.season && titleMeta.season && queryMeta.season !== titleMeta.season) return;
-      if (queryMeta.episode && titleMeta.episode && queryMeta.episode !== titleMeta.episode) return;
-    }
-
     if (tokenSet.size > 0) {
       const titleTokens = tokenizeTitle(title);
       for (const token of tokenSet) {
@@ -489,31 +483,55 @@ function filterAndMap(jsonData, options) {
 }
 
 async function fetchSearchResults(query, authOverride = null) {
-  const params = new URLSearchParams();
-  params.set('fly', '2');
-  params.set('sb', '1');
-  params.set('pno', '1');
-  params.set('pby', String(MAX_RESULTS_PER_PAGE));
-  params.set('u', '1');
-  params.set('chxu', '1');
-  params.set('chxgx', '1');
-  params.set('st', 'basic');
-  params.set('gps', query);
-  params.set('vv', '1');
-  params.set('safeO', '0');
-  params.set('s1', 'relevance');
-  params.set('s1d', '-');
-  params.append('fty[]', 'VIDEO');
+  const MAX_PAGES = 3; // 3 pages x 250 = 750 results max; keeps us within the 7s timeout
+  const allItems = [];
+  let thumbURL = null;
+  let thumbUrl = null;
+  let total = null;
 
-  const requestUrl = `/2.0/search/solr-search/?${params.toString()}`;
-  const response = await httpClient.get(requestUrl, buildAuthConfig(authOverride));
-  if (response.status === 401 || response.status === 403) {
-    throw new Error('Easynews rejected credentials');
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const params = new URLSearchParams();
+    params.set('fly', '2');
+    params.set('sb', '1');
+    params.set('pno', String(page));
+    params.set('pby', String(MAX_RESULTS_PER_PAGE));
+    params.set('u', '1');
+    params.set('chxu', '1');
+    params.set('chxgx', '1');
+    params.set('st', 'basic');
+    params.set('gps', query);
+    params.set('vv', '1');
+    params.set('safeO', '0');
+    params.set('s1', 'relevance');
+    params.set('s1d', '-');
+    params.append('fty[]', 'VIDEO');
+
+    const requestUrl = `/2.0/search/solr-search/?${params.toString()}`;
+    const response = await httpClient.get(requestUrl, buildAuthConfig(authOverride));
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Easynews rejected credentials');
+    }
+    if (response.status >= 400) {
+      throw new Error(`Easynews search failed with status ${response.status}`);
+    }
+
+    const data = response.data || {};
+
+    // Capture thumbnail base URL from first page
+    if (page === 1) {
+      thumbURL = data.thumbURL || null;
+      thumbUrl = data.thumbUrl || null;
+      total = Number(data.total) || 0;
+    }
+
+    const pageItems = Array.isArray(data.data) ? data.data : [];
+    allItems.push(...pageItems);
+
+    // Stop early if this page was empty or we've fetched everything
+    if (pageItems.length === 0 || allItems.length >= total) break;
   }
-  if (response.status >= 400) {
-    throw new Error(`Easynews search failed with status ${response.status}`);
-  }
-  return response.data || {};
+
+  return { data: allItems, thumbURL, thumbUrl, total };
 }
 
 function buildQueryMeta({ rawQuery, year, season, episode }) {
