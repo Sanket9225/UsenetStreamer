@@ -53,8 +53,7 @@ test_nzbs/
 assets/*.nzb
 *.nzb
 !assets/Test_Passed_ignore_failure.nzb
-cache/nzb_payloads/
-cache/nzb_payloads/index.json
+cache/
 temp_nzbs/
 
 
