@@ -1137,6 +1137,20 @@ button.ghost.danger:hover {
   font-size: 0.9rem;
 }
 
+.dismiss-btn {
+  background: none;
+  border: 1px solid rgba(53, 201, 255, 0.4);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.8rem;
+  margin-left: 0.75rem;
+  padding: 0.2rem 0.6rem;
+}
+.dismiss-btn:hover {
+  background: rgba(53, 201, 255, 0.15);
+}
+
 /* Mode-based visibility */
 .native-mode-hidden {
   display: none !important;

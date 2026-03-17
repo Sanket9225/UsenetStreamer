@@ -539,7 +539,6 @@
           </div>
           <div class="input-with-toggle">
             <input type="password" data-field="API_KEY" placeholder="Paste API key" autocomplete="off" />
-            <button type="button" class="mask-toggle" data-role="api-key-toggle" aria-pressed="false">Show</button>
           </div>
         </label>
       </div>
@@ -555,7 +554,6 @@
     const enabledToggle = row.querySelector('[data-field="INDEXER_ENABLED"]');
     const paidToggle = row.querySelector('[data-field="PAID"]');
     const apiKeyInput = row.querySelector('[data-field="API_KEY"]');
-    const apiKeyToggle = row.querySelector('[data-role="api-key-toggle"]');
     const endpointInput = row.querySelector('[data-field="ENDPOINT"]');
     const paidLimitSelect = row.querySelector('[data-field="PAID_LIMIT"]');
     const zyclopsToggle = row.querySelector('[data-field="ZYCLOPS"]');
@@ -572,14 +570,6 @@
       });
     }
     if (testButton) testButton.addEventListener('click', () => runNewznabRowTest(row));
-    if (apiKeyToggle && apiKeyInput) {
-      apiKeyToggle.addEventListener('click', () => {
-        const isMasked = apiKeyInput.type === 'password';
-        apiKeyInput.type = isMasked ? 'text' : 'password';
-        apiKeyToggle.textContent = isMasked ? 'Hide' : 'Show';
-        apiKeyToggle.setAttribute('aria-pressed', String(isMasked));
-      });
-    }
     if (endpointInput) {
       endpointInput.addEventListener('input', () => refreshRowApiKeyLink(row));
       endpointInput.addEventListener('blur', () => refreshRowApiKeyLink(row));

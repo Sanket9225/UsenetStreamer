@@ -33,6 +33,10 @@
     </section>
 
     <section class="card hidden" id="configSection">
+      <div class="info-box" id="migrationNotice">
+        <strong>Upgrading from a version before v1.7.6?</strong> The stream token is now separate from the admin token. Your manifest URL has changed — you may need to reinstall the addon in Stremio using the new URL shown after saving.
+        <button type="button" class="dismiss-btn" onclick="this.parentElement.remove()">Dismiss</button>
+      </div>
       <form id="configForm">
         <section class="group streaming-mode-section">
           <h3>Streaming Mode</h3>

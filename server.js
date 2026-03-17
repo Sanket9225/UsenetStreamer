@@ -218,7 +218,7 @@ const adminStatic = express.static(path.join(__dirname, 'admin'), {
 // responses so plaintext secrets never reach the browser.  On save/test,
 // sentinel values are swapped back to the real process.env value.
 // ---------------------------------------------------------------------------
-const CREDENTIAL_MASK_SENTINEL = '\x00__MASKED__\x00';
+const CREDENTIAL_MASK_SENTINEL = '\u200B__MASKED_CREDENTIAL__\u200B';
 const SENSITIVE_KEYS = new Set([
   'INDEXER_MANAGER_API_KEY',
   'NZBDAV_API_KEY',
@@ -323,7 +323,13 @@ adminApiRouter.post('/config', async (req, res) => {
       if (FROZEN_KEYS.has(key)) return;
       const value = incoming[key];
       // Skip masked sentinel values — keep existing process.env value unchanged
-      if (value === CREDENTIAL_MASK_SENTINEL) return;
+      if (value === CREDENTIAL_MASK_SENTINEL) {
+        // For numbered keys pre-initialized to null, undo the deletion
+        if (numberedKeySet.has(key)) {
+          delete updates[key];
+        }
+        return;
+      }
       if (numberedKeySet.has(key)) {
         const trimmed = typeof value === 'string' ? value.trim() : value;
         if (trimmed === '' || trimmed === null || trimmed === undefined) {
