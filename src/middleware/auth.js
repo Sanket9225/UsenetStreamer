@@ -8,11 +8,23 @@ const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 const RATE_LIMIT_MAX = 60;              // max requests per window
 const rateLimitBuckets = new Map();
 
+// ---------------------------------------------------------------------------
+// Failed-login lockout: block IP after repeated auth failures
+// ---------------------------------------------------------------------------
+const LOCKOUT_THRESHOLD = 10;           // failures before lockout
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15-minute lockout
+const failedAttempts = new Map();       // ip → { count, lockedUntil }
+
 function pruneRateLimitBuckets() {
   const now = Date.now();
   for (const [ip, bucket] of rateLimitBuckets) {
     if (now - bucket.windowStart > RATE_LIMIT_WINDOW_MS * 2) {
       rateLimitBuckets.delete(ip);
+    }
+  }
+  for (const [ip, entry] of failedAttempts) {
+    if (now > entry.lockedUntil && now - entry.lastAttempt > LOCKOUT_DURATION_MS) {
+      failedAttempts.delete(ip);
     }
   }
 }
@@ -80,6 +92,35 @@ function getEffectiveStreamToken() {
 }
 
 // ---------------------------------------------------------------------------
+// Lockout helpers
+// ---------------------------------------------------------------------------
+function isLockedOut(ip) {
+  const entry = failedAttempts.get(ip);
+  if (!entry) return false;
+  if (entry.count >= LOCKOUT_THRESHOLD && Date.now() < entry.lockedUntil) return true;
+  // Lockout expired — reset
+  if (Date.now() >= entry.lockedUntil) {
+    failedAttempts.delete(ip);
+  }
+  return false;
+}
+
+function recordFailedAttempt(ip) {
+  const now = Date.now();
+  const entry = failedAttempts.get(ip) || { count: 0, lockedUntil: 0, lastAttempt: 0 };
+  entry.count += 1;
+  entry.lastAttempt = now;
+  if (entry.count >= LOCKOUT_THRESHOLD) {
+    entry.lockedUntil = now + LOCKOUT_DURATION_MS;
+  }
+  failedAttempts.set(ip, entry);
+}
+
+function clearFailedAttempts(ip) {
+  failedAttempts.delete(ip);
+}
+
+// ---------------------------------------------------------------------------
 // Middleware: protect admin API routes (checks ADDON_SHARED_SECRET only)
 // Explicitly rejects the stream token if it differs from the admin secret.
 // ---------------------------------------------------------------------------
@@ -93,9 +134,35 @@ function ensureAdminSecret(req, res, next) {
   }
   if (req.method === 'OPTIONS') { next(); return; }
 
+  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+
+  if (isLockedOut(ip)) {
+    res.status(429).json({ error: 'Too many failed attempts — try again in 15 minutes' });
+    return;
+  }
+
   if (!rateLimitCheck(req)) {
     res.status(429).json({ error: 'Too many requests — try again later' });
     return;
+  }
+
+  // CSRF: reject mutating requests with a mismatched Origin header
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    const origin = req.headers['origin'];
+    if (origin) {
+      const addonBase = (process.env.ADDON_BASE_URL || '').trim();
+      const allowed = addonBase ? [addonBase] : [];
+      // Also allow requests from the same host:port
+      const host = req.headers['host'];
+      if (host) {
+        allowed.push(`http://${host}`, `https://${host}`);
+      }
+      const originMatch = allowed.some((a) => origin === a || origin === a.replace(/\/+$/, ''));
+      if (!originMatch) {
+        res.status(403).json({ error: 'Forbidden: cross-origin request rejected' });
+        return;
+      }
+    }
   }
 
   const provided = extractTokenFromRequest(req);
@@ -103,14 +170,17 @@ function ensureAdminSecret(req, res, next) {
   // Explicitly reject if the caller supplied the stream token instead of the admin secret
   const streamToken = getEffectiveStreamToken();
   if (provided && streamToken && !safeEqual(streamToken, secret) && safeEqual(provided, streamToken)) {
+    recordFailedAttempt(ip);
     res.status(403).json({ error: 'Forbidden: stream tokens cannot access the admin panel' });
     return;
   }
 
   if (!provided || !safeEqual(provided, secret)) {
+    recordFailedAttempt(ip);
     res.status(401).json({ error: 'Unauthorized: invalid or missing admin token' });
     return;
   }
+  clearFailedAttempts(ip);
   next();
 }
 

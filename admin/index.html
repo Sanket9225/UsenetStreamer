@@ -23,7 +23,7 @@
     <section class="card">
       <h2>Authentication</h2>
   <p class="hint">Enter your admin token (<code>ADDON_SHARED_SECRET</code>) to access the dashboard. This is the value you set in your Docker/environment config — it cannot be changed here.</p>
-      <p class="warning">Treat this token like a password. If someone has both the token and the public addon URL, they can open the admin panel and view or modify your credentials.</p>
+      <p class="warning">Treat this token like a password. If someone has both the token and the public addon URL, they can open the admin panel and modify your settings. Passwords and API keys are never visible - they are write-only.</p>
       <div class="field-row">
         <label for="tokenInput">Admin Token</label>
         <input id="tokenInput" type="password" autocomplete="off" />
@@ -36,14 +36,13 @@
       <form id="configForm">
         <section class="group streaming-mode-section">
           <h3>Streaming Mode</h3>
-          <p class="hint">Choose how streams are delivered to Stremio. Desktop Native mode requires Stremio v5 on Windows desktop.</p>
           <div class="field-grid">
             <label>
-              <select name="STREAMING_MODE" id="streamingModeSelect">
+              <select name="STREAMING_MODE" id="streamingModeSelect" disabled>
                 <option value="nzbdav">NZBDav Mode (All Platforms)</option>
                 <option value="native">Desktop Native Mode (Stremio v5 Desktop)</option>
               </select>
-              <span class="field-hint" id="streamingModeHint">NZBDav mode uses WebDAV streaming and works on all platforms. Desktop Native mode streams directly via NNTP (experimental, Windows only).</span>
+              <span class="field-hint" id="streamingModeHint">To switch mode, set <code>"STREAMING_MODE": "native"</code> in <code>runtime-env.json</code> and restart.</span>
             </label>
           </div>
           <div id="nativeModeNotice" class="info-box hidden">

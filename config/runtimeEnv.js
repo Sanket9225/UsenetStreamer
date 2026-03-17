@@ -52,7 +52,9 @@ function writeRuntimeEnv(envObject) {
   sortedKeys.forEach((key) => {
     data[key] = envObject[key];
   });
-  fs.writeFileSync(RUNTIME_ENV_FILE, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
+  fs.writeFileSync(RUNTIME_ENV_FILE, `${JSON.stringify(data, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
+  // Ensure restrictive permissions even if file already existed with wider mode
+  try { fs.chmodSync(RUNTIME_ENV_FILE, 0o600); } catch (_) { /* Windows ignores chmod */ }
   cachedEnv = { ...data };
 }
 

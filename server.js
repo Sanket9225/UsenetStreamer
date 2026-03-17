@@ -148,6 +148,27 @@ function extractQualityFeatureBadges(title) {
 app.use(cors());
 
 // ---------------------------------------------------------------------------
+// Security headers
+// ---------------------------------------------------------------------------
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
+
+// ---------------------------------------------------------------------------
+// Sanitize error messages before sending to clients — strip URLs that could
+// contain internal IPs, API keys, or other sensitive information.
+// ---------------------------------------------------------------------------
+const URL_PATTERN = /https?:\/\/[^\s'"<>)]+/gi;
+function sanitizeErrorForClient(error) {
+  const msg = error?.failureMessage || error?.response?.data?.message || error?.message || 'Internal server error';
+  return msg.replace(URL_PATTERN, '[redacted-url]');
+}
+
+// ---------------------------------------------------------------------------
 // Global guard: ADDON_SHARED_SECRET is mandatory since v1.7.6.
 // Without it, every route returns 503 except a helpful setup hint.
 // ---------------------------------------------------------------------------
@@ -192,6 +213,53 @@ const adminStatic = express.static(path.join(__dirname, 'admin'), {
   },
 });
 
+// ---------------------------------------------------------------------------
+// Credential masking: sensitive keys are replaced with a sentinel in API
+// responses so plaintext secrets never reach the browser.  On save/test,
+// sentinel values are swapped back to the real process.env value.
+// ---------------------------------------------------------------------------
+const CREDENTIAL_MASK_SENTINEL = '\x00__MASKED__\x00';
+const SENSITIVE_KEYS = new Set([
+  'INDEXER_MANAGER_API_KEY',
+  'NZBDAV_API_KEY',
+  'NZBDAV_WEBDAV_PASS',
+  'NZB_TRIAGE_NNTP_PASS',
+  'EASYNEWS_PASSWORD',
+  'TMDB_API_KEY',
+  'TVDB_API_KEY',
+  'SPECIAL_PROVIDER_SECRET',
+]);
+const SENSITIVE_KEY_PATTERNS = [/^NEWZNAB_API_KEY_\d+$/];
+
+function isSensitiveKey(key) {
+  if (SENSITIVE_KEYS.has(key)) return true;
+  return SENSITIVE_KEY_PATTERNS.some((rx) => rx.test(key));
+}
+
+function maskSensitiveValues(values) {
+  const masked = { ...values };
+  Object.keys(masked).forEach((key) => {
+    if (isSensitiveKey(key) && masked[key]) {
+      masked[key] = CREDENTIAL_MASK_SENTINEL;
+    }
+  });
+  return masked;
+}
+
+function unsentinelValues(values) {
+  if (!values || typeof values !== 'object') return values;
+  const resolved = { ...values };
+  Object.keys(resolved).forEach((key) => {
+    if (resolved[key] === CREDENTIAL_MASK_SENTINEL) {
+      resolved[key] = process.env[key] || '';
+    }
+  });
+  return resolved;
+}
+
+// Keys that cannot be changed via the admin API — only via env/docker/filesystem
+const FROZEN_KEYS = new Set(['ADDON_SHARED_SECRET', 'STREAMING_MODE']);
+
 adminApiRouter.get('/config', (req, res) => {
   const values = collectConfigValues(ADMIN_CONFIG_KEYS);
   if (!values.NZB_MAX_RESULT_SIZE_GB) {
@@ -201,7 +269,7 @@ adminApiRouter.get('/config', (req, res) => {
     values.TMDB_SEARCH_MODE = 'english_only';
   }
   res.json({
-    values,
+    values: maskSensitiveValues(values),
     manifestUrl: computeManifestUrl(),
     runtimeEnvPath: runtimeEnv.RUNTIME_ENV_FILE,
     debugNewznabSearch: isNewznabDebugEnabled(),
@@ -251,7 +319,11 @@ adminApiRouter.post('/config', async (req, res) => {
 
   ADMIN_CONFIG_KEYS.forEach((key) => {
     if (Object.prototype.hasOwnProperty.call(incoming, key)) {
+      // Never allow frozen keys to be changed via the API
+      if (FROZEN_KEYS.has(key)) return;
       const value = incoming[key];
+      // Skip masked sentinel values — keep existing process.env value unchanged
+      if (value === CREDENTIAL_MASK_SENTINEL) return;
       if (numberedKeySet.has(key)) {
         const trimmed = typeof value === 'string' ? value.trim() : value;
         if (trimmed === '' || trimmed === null || trimmed === undefined) {
@@ -274,12 +346,13 @@ adminApiRouter.post('/config', async (req, res) => {
   });
 
   // Safety: explicitly persist TMDb keys even if ADMIN_CONFIG_KEYS filtering breaks
-  if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_API_KEY')) {
+  if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_API_KEY')
+      && incoming.TMDB_API_KEY !== CREDENTIAL_MASK_SENTINEL) {
     updates.TMDB_API_KEY = incoming.TMDB_API_KEY ? String(incoming.TMDB_API_KEY) : '';
   }
 
-  // Safety: ADDON_SHARED_SECRET can never be changed via the API — only via env/docker
-  delete updates.ADDON_SHARED_SECRET;
+  // Safety: frozen keys can never be changed via the API — only via env/docker
+  FROZEN_KEYS.forEach((key) => delete updates[key]);
   if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_ENABLED')) {
     updates.TMDB_ENABLED = incoming.TMDB_ENABLED ? String(incoming.TMDB_ENABLED) : 'false';
   }
@@ -342,7 +415,9 @@ adminApiRouter.post('/config', async (req, res) => {
 
 adminApiRouter.post('/test-connections', async (req, res) => {
   const payload = req.body || {};
-  const { type, values } = payload;
+  const { type } = payload;
+  // Resolve masked sentinel values back to real process.env before testing
+  const values = unsentinelValues(payload.values);
   if (!type || typeof values !== 'object') {
     res.status(400).json({ error: 'Invalid payload: expected "type" and "values"' });
     return;
@@ -1342,9 +1417,9 @@ function decodeStreamParams(encoded) {
       const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
       return JSON.parse(decrypted.toString('utf8'));
     }
-    // Legacy fallback: plain base64url (pre-encryption URLs)
-    const json = Buffer.from(encoded, 'base64url').toString('utf8');
-    return JSON.parse(json);
+    // Legacy base64url fallback removed for security — only encrypted params accepted
+    console.warn('[SECURITY] Rejected unencrypted (legacy) stream params. Re-search to get updated encrypted URLs.');
+    return null;
   } catch (_) {
     return null;
   }
@@ -1367,7 +1442,7 @@ function ensureStreamTokenExists() {
   console.log('[SECURITY] ⚠ ADDON_STREAM_TOKEN was not set - auto-generated a new stream token.');
   console.log('[SECURITY] ⚠ Since v1.7.6, the stream token is always separate from the admin token.');
   console.log('[SECURITY] ⚠ Your manifest URL has changed - you may need to reinstall the addon in Stremio.');
-  console.log(`[SECURITY] ⚠ New stream token: ${generated}`);
+  console.log(`[SECURITY] ⚠ New stream token generated (${generated.slice(0, 4)}…). Check runtime-env.json or the admin panel to see the full token.`);
 }
 
 function buildStreamCacheKey({ type, id, query = {}, requestedEpisode = null }) {
@@ -1580,7 +1655,7 @@ async function catalogHandler(req, res) {
   try {
     nzbdavService.ensureNzbdavConfigured();
   } catch (error) {
-    res.status(500).json({ metas: [], error: error.message });
+    res.status(500).json({ metas: [], error: sanitizeErrorForClient(error) });
     return;
   }
 
@@ -1628,7 +1703,7 @@ async function metaHandler(req, res) {
   try {
     nzbdavService.ensureNzbdavConfigured();
   } catch (error) {
-    res.status(500).json({ meta: null, error: error.message });
+    res.status(500).json({ meta: null, error: sanitizeErrorForClient(error) });
     return;
   }
 
@@ -4498,7 +4573,7 @@ async function streamHandler(req, res) {
   } catch (error) {
     console.error('[ERROR] Processing failed:', error.message);
     res.status(error.response?.status || 500).json({
-      error: error.response?.data?.message || error.message,
+      error: sanitizeErrorForClient(error),
       details: {
         type,
         id,
@@ -4541,7 +4616,7 @@ async function handleEasynewsNzbDownload(req, res) {
   } catch (error) {
     const statusCode = /credential|unauthorized|forbidden/i.test(error.message || '') ? 401 : 502;
     console.warn('[EASYNEWS] NZB download failed', error.message || error);
-    res.status(statusCode).json({ error: error.message || 'Unable to fetch Easynews NZB' });
+    res.status(statusCode).json({ error: sanitizeErrorForClient(error) || 'Unable to fetch Easynews NZB' });
   }
 }
 
@@ -4665,7 +4740,7 @@ async function handleSmartPlay(req, res) {
       failError.failureMessage = waitErr.message;
       const served = await nzbdavService.streamFailureVideo(req, res, failError);
       if (!served && !res.headersSent) {
-        res.status(502).json({ error: waitErr.message });
+        res.status(502).json({ error: sanitizeErrorForClient(waitErr) });
       }
       return;
     }
@@ -4705,7 +4780,7 @@ async function handleSmartPlay(req, res) {
           if (!res.headersSent) {
             const served = await nzbdavService.streamFailureVideo(req, res, autoAdvanceError);
             if (!served && !res.headersSent) {
-              res.status(502).json({ error: autoAdvanceError.message });
+              res.status(502).json({ error: sanitizeErrorForClient(autoAdvanceError) });
             }
           }
         }
@@ -4722,9 +4797,9 @@ async function handleSmartPlay(req, res) {
     if (!res.headersSent) {
       if (error?.isNzbdavFailure) {
         const served = await nzbdavService.streamFailureVideo(req, res, error);
-        if (!served) res.status(502).json({ error: error.message });
+        if (!served) res.status(502).json({ error: sanitizeErrorForClient(error) });
       } else {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: sanitizeErrorForClient(error) });
       }
     }
   }
@@ -4972,7 +5047,7 @@ async function handleNzbdavStream(req, res) {
       if (!res.headersSent) {
         const served = await nzbdavService.streamFailureVideo(req, res, error);
         if (!served && !res.headersSent) {
-          res.status(502).json({ error: error.failureMessage || error.message });
+          res.status(502).json({ error: sanitizeErrorForClient(error) });
         } else if (!served) {
           res.end();
         }
@@ -4987,7 +5062,7 @@ async function handleNzbdavStream(req, res) {
       console.warn('[NZBDAV] Stream failure due to missing playable files');
       const served = await nzbdavService.streamVideoTypeFailure(req, res, error);
       if (!served && !res.headersSent) {
-        res.status(502).json({ error: error.message });
+        res.status(502).json({ error: sanitizeErrorForClient(error) });
       } else if (!served) {
         res.end();
       }
@@ -4997,7 +5072,7 @@ async function handleNzbdavStream(req, res) {
     const statusCode = error.response?.status || 502;
     // console.error('[NZBDAV] Stream proxy error:', error.message);
     if (!res.headersSent) {
-      res.status(statusCode).json({ error: error.message });
+      res.status(statusCode).json({ error: sanitizeErrorForClient(error) });
     } else {
       res.end();
     }
