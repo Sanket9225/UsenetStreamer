@@ -919,11 +919,24 @@ async function proxyNzbdavStream(req, res, viewPath, fileNameHint = '') {
 
   res.status(responseStatus);
 
-  const headerBlocklist = new Set(['transfer-encoding', 'www-authenticate', 'set-cookie', 'cookie', 'authorization']);
+  // Allowlist: only forward headers that are safe and needed for streaming.
+  // This prevents upstream Server, X-Powered-By, Location, or other headers
+  // from leaking internal infrastructure details to the client.
+  const headerAllowlist = new Set([
+    'content-type',
+    'content-length',
+    'content-range',
+    'content-disposition',
+    'accept-ranges',
+    'etag',
+    'last-modified',
+    'cache-control',
+    'date',
+  ]);
 
   Object.entries(nzbdavResponse.headers || {}).forEach(([key, value]) => {
     const lowerKey = key.toLowerCase();
-    if (headerBlocklist.has(lowerKey)) {
+    if (!headerAllowlist.has(lowerKey)) {
       return;
     }
     if (value !== undefined) {

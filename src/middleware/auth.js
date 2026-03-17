@@ -76,9 +76,7 @@ function safeEqual(a, b) {
 // Resolve effective stream token (ADDON_STREAM_TOKEN ?? ADDON_SHARED_SECRET)
 // ---------------------------------------------------------------------------
 function getEffectiveStreamToken() {
-  const explicit = (process.env.ADDON_STREAM_TOKEN || '').trim();
-  if (explicit) return explicit;
-  return (process.env.ADDON_SHARED_SECRET || '').trim();
+  return (process.env.ADDON_STREAM_TOKEN || '').trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -88,8 +86,11 @@ function getEffectiveStreamToken() {
 function ensureAdminSecret(req, res, next) {
   const secret = (process.env.ADDON_SHARED_SECRET || '').trim();
 
-  // No admin secret configured — allow through
-  if (!secret) { next(); return; }
+  // ADDON_SHARED_SECRET is mandatory since v1.7.6
+  if (!secret) {
+    res.status(503).json({ error: 'ADDON_SHARED_SECRET is not configured. Set it in your Docker/environment config and restart.' });
+    return;
+  }
   if (req.method === 'OPTIONS') { next(); return; }
 
   if (!rateLimitCheck(req)) {

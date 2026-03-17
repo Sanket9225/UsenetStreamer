@@ -146,6 +146,36 @@ function extractQualityFeatureBadges(title) {
 }
 
 app.use(cors());
+
+// ---------------------------------------------------------------------------
+// Global guard: ADDON_SHARED_SECRET is mandatory since v1.7.6.
+// Without it, every route returns 503 except a helpful setup hint.
+// ---------------------------------------------------------------------------
+const SETUP_HTML = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>UsenetStreamer — Setup Required</title>
+<style>body{font-family:system-ui,sans-serif;background:#0b1118;color:#e0e0e0;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
+.box{max-width:520px;padding:2rem;border:1px solid #333;border-radius:8px;background:#161b22}
+h1{color:#f85149;margin-top:0}code{background:#0d1117;padding:2px 6px;border-radius:4px;font-size:0.95em}</style></head>
+<body><div class="box"><h1>Setup Required</h1>
+<p><strong>ADDON_SHARED_SECRET</strong> is not configured. Since v1.7.6 this is mandatory.</p>
+<p>Set it in your Docker environment or <code>.env</code> file:</p>
+<pre><code>ADDON_SHARED_SECRET=your-secret-here</code></pre>
+<p>Then restart the container. The admin panel and all streaming endpoints will remain locked until this is set.</p></div></body></html>`;
+
+app.use((req, res, next) => {
+  const secret = (process.env.ADDON_SHARED_SECRET || '').trim();
+  if (secret) return next();
+  // Allow assets so the error page could reference them in future
+  if (req.path.startsWith('/assets/')) return next();
+  const wantsJson = (req.headers.accept || '').includes('application/json')
+    || req.path.endsWith('.json');
+  if (wantsJson) {
+    res.status(503).json({ error: 'ADDON_SHARED_SECRET is not configured. Set it in your Docker/environment config and restart.' });
+    return;
+  }
+  res.status(503).type('html').send(SETUP_HTML);
+});
+
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 const adminApiRouter = express.Router();
@@ -419,7 +449,7 @@ let INDEXER_MANAGER_CACHE_MINUTES = (() => {
 let INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
 let ADDON_BASE_URL = (process.env.ADDON_BASE_URL || '').trim();
 let ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
-let ADDON_STREAM_TOKEN = ''; // resolved in rebuildRuntimeConfig
+let ADDON_STREAM_TOKEN = ''; // resolved in rebuildRuntimeConfig (auto-generated if missing)
 let ADDON_NAME = (process.env.ADDON_NAME || DEFAULT_ADDON_NAME).trim() || DEFAULT_ADDON_NAME;
 const DEFAULT_MAX_RESULT_SIZE_GB = 30;
 let NZBDAV_HISTORY_CATALOG_LIMIT = (() => {
@@ -894,7 +924,8 @@ function rebuildRuntimeConfig({ log = true } = {}) {
 
   ADDON_BASE_URL = (process.env.ADDON_BASE_URL || '').trim();
   ADDON_SHARED_SECRET = (process.env.ADDON_SHARED_SECRET || '').trim();
-  // Stream token defaults to ADDON_SHARED_SECRET for backward compatibility
+  // Stream token is independent — auto-generated if not explicitly set
+  ensureStreamTokenExists();
   ADDON_STREAM_TOKEN = getEffectiveStreamToken();
   ADDON_NAME = (process.env.ADDON_NAME || DEFAULT_ADDON_NAME).trim() || DEFAULT_ADDON_NAME;
 
@@ -1322,6 +1353,22 @@ function decodeStreamParams(encoded) {
 // Eagerly initialize the stream-params encryption key so it appears in
 // runtime-env.json immediately on first startup (not deferred to first request).
 getStreamParamsKey();
+
+// ---------------------------------------------------------------------------
+// Auto-generate ADDON_STREAM_TOKEN if not explicitly set.
+// Since v1.7.6 the stream token is always independent from the admin secret.
+// ---------------------------------------------------------------------------
+function ensureStreamTokenExists() {
+  const existing = (process.env.ADDON_STREAM_TOKEN || '').trim();
+  if (existing) return;
+  const generated = crypto.randomBytes(24).toString('base64url');
+  runtimeEnv.updateRuntimeEnv({ ADDON_STREAM_TOKEN: generated });
+  runtimeEnv.applyRuntimeEnv();
+  console.log('[SECURITY] ⚠ ADDON_STREAM_TOKEN was not set - auto-generated a new stream token.');
+  console.log('[SECURITY] ⚠ Since v1.7.6, the stream token is always separate from the admin token.');
+  console.log('[SECURITY] ⚠ Your manifest URL has changed - you may need to reinstall the addon in Stremio.');
+  console.log(`[SECURITY] ⚠ New stream token: ${generated}`);
+}
 
 function buildStreamCacheKey({ type, id, query = {}, requestedEpisode = null }) {
   const normalizedQuery = {};
@@ -4455,8 +4502,6 @@ async function streamHandler(req, res) {
       details: {
         type,
         id,
-        indexerManager: INDEXER_MANAGER_LABEL,
-        indexerManagerUrl: INDEXER_MANAGER_URL,
         timestamp: new Date().toISOString()
       }
     });
@@ -5004,6 +5049,16 @@ async function restartHttpServer() {
 }
 
 startHttpServer();
+
+// Startup security checks (v1.7.6+)
+if (!ADDON_SHARED_SECRET) {
+  console.error('[SECURITY] ✖ ADDON_SHARED_SECRET is NOT set — all endpoints are locked (503).');
+  console.error('[SECURITY] ✖ Set ADDON_SHARED_SECRET in your Docker environment or .env file and restart.');
+} else if (ADDON_STREAM_TOKEN && ADDON_STREAM_TOKEN !== ADDON_SHARED_SECRET) {
+  console.log('[SECURITY] ✓ Admin token and stream token are separate — good.');
+} else {
+  console.log('[SECURITY] ✓ ADDON_SHARED_SECRET is set.');
+}
 
 // Fetch real caps for all enabled indexers in the background at startup
 if (NEWZNAB_ENABLED && ACTIVE_NEWZNAB_CONFIGS.length > 0) {

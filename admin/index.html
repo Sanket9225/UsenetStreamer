@@ -776,9 +776,9 @@ health'></textarea>
             <label>Public Base URL
               <input name="ADDON_BASE_URL" type="url" placeholder="https://example.com" />
             </label>
-            <label>Stream Token (highly recommended)
+            <label>Stream Token (required - auto-generated if blank)
               <input name="ADDON_STREAM_TOKEN" type="text" autocomplete="off" />
-              <span class="field-hint">Token embedded in manifest and stream URLs. Defaults to your admin secret if left blank. Changing this does NOT affect admin access but will change your manifest URL and all older links.</span>
+              <span class="field-hint">Token embedded in manifest and stream URLs. Since v1.7.6 this is always separate from the admin token and auto-generated on first start. Changing it will update your manifest URL - you may need to reinstall the addon in Stremio.</span>
             </label>
           </div>
         </section>
