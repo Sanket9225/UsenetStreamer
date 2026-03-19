@@ -293,15 +293,43 @@ function normalizeHydraResults(data) {
       attrMap.pubdate, attrMap['pub-date'], attrMap.publishdate, attrMap['publish-date'],
       attrMap.usenetdate, attrMap['usenet-date']
     );
+    const filesCandidate = resolveFirst(
+      item.files, item.filecount, item.fileCount,
+      attrMap.files, attrMap.filecount, attrMap['file_count']
+    );
+    const grabsCandidate = resolveFirst(
+      item.grabs,
+      attrMap.grabs
+    );
+    const groupCandidate = resolveFirst(
+      item.group, item.groups, item.usenetGroup,
+      attrMap.group, attrMap.groups
+    );
+    const parsedFiles = filesCandidate !== undefined && filesCandidate !== null
+      ? Number.parseInt(String(filesCandidate), 10)
+      : NaN;
+    const parsedGrabs = grabsCandidate !== undefined && grabsCandidate !== null
+      ? Number.parseInt(String(grabsCandidate), 10)
+      : NaN;
+    const publishDateNumeric = publishDateCandidate !== undefined && publishDateCandidate !== null
+      ? Number(publishDateCandidate)
+      : NaN;
+    const publishDateMs = Number.isFinite(publishDateNumeric)
+      ? (publishDateNumeric >= 1e12 ? publishDateNumeric : publishDateNumeric * 1000)
+      : undefined;
 
     results.push({
       title: title || downloadUrl,
       downloadUrl,
       guid: guidValue,
       size: Number.isFinite(parsedSize) ? parsedSize : undefined,
+      files: Number.isFinite(parsedFiles) && parsedFiles > 0 ? parsedFiles : undefined,
+      grabs: Number.isFinite(parsedGrabs) && parsedGrabs >= 0 ? parsedGrabs : undefined,
+      group: groupCandidate || undefined,
       indexer,
       indexerId,
       publishDate: publishDateCandidate || undefined,
+      publishDateMs,
       pubDate: publishDateCandidate || undefined,
       publish_date: attrMap.publishdate || undefined,
       age: resolveFirst(attrMap.age, attrMap.age_days, attrMap['age-days']),

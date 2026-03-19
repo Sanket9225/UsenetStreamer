@@ -260,6 +260,13 @@ function normalizeSortChain(values) {
     keyword: 'keyword',
     keywords: 'keyword',
     size: 'size',
+    date: 'date',
+    age: 'date',
+    publishdate: 'date',
+    recent: 'date',
+    newest: 'date',
+    files: 'files',
+    filecount: 'files',
   };
   const normalized = [];
   const seen = new Set();
@@ -411,6 +418,22 @@ function compareByCustomChain(a, b, options = {}) {
       if (cmp !== 0) return cmp;
       continue;
     }
+
+    if (criterion === 'date') {
+      // More recent = preferred. Items without a date sort after dated items.
+      const aDate = Number.isFinite(a?.publishDateMs) ? a.publishDateMs : 0;
+      const bDate = Number.isFinite(b?.publishDateMs) ? b.publishDateMs : 0;
+      if (aDate !== bDate) return bDate - aDate;
+      continue;
+    }
+
+    if (criterion === 'files') {
+      // Fewer files = preferred. Items without file count sort after those with it.
+      const aFiles = Number.isFinite(a?.files) && a.files > 0 ? a.files : Number.POSITIVE_INFINITY;
+      const bFiles = Number.isFinite(b?.files) && b.files > 0 ? b.files : Number.POSITIVE_INFINITY;
+      if (aFiles !== bFiles) return aFiles - bFiles;
+      continue;
+    }
   }
 
   return compareQualityThenSize(a, b);
@@ -418,6 +441,15 @@ function compareByCustomChain(a, b, options = {}) {
 
 function sortAnnotatedResults(results, sortMode, preferredLanguages, sortOptions = {}) {
   if (!Array.isArray(results) || results.length === 0) return results;
+
+  const hasCustomOrder = Array.isArray(sortOptions?.sortOrder) && sortOptions.sortOrder.length > 0;
+  if (hasCustomOrder) {
+    results.sort((a, b) => compareByCustomChain(a, b, {
+      ...sortOptions,
+      preferredLanguages,
+    }));
+    return results;
+  }
 
   if (sortMode === 'custom_priority') {
     results.sort((a, b) => compareByCustomChain(a, b, {

@@ -695,6 +695,29 @@ function isResultFromPaidIndexer(result) {
   return tokens.some((token) => PAID_INDEXER_TOKENS.has(token));
 }
 
+function normalizeUsenetGroup(value) {
+  if (!value) return '';
+  return String(value).trim().toLowerCase();
+}
+
+function extractUsenetGroup(result) {
+  if (!result || typeof result !== 'object') return '';
+  return normalizeUsenetGroup(
+    result.group
+    || result.groups
+    || result.usenetGroup
+    || result?.release?.group
+  );
+}
+
+function extractFileCount(result) {
+  if (!result || typeof result !== 'object') return Number.POSITIVE_INFINITY;
+  const raw = result.files ?? result.filecount ?? result.fileCount;
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  return Number.POSITIVE_INFINITY;
+}
+
 function dedupeResultsByTitle(results) {
   if (!Array.isArray(results) || results.length === 0) return [];
   const buckets = new Map();
@@ -716,13 +739,22 @@ function dedupeResultsByTitle(results) {
       deduped.push(result);
       continue;
     }
-    let bucket = buckets.get(normalizedTitle);
+    const usenetGroup = extractUsenetGroup(result);
+    if (!usenetGroup) {
+      // Require a group token for safe duplicate collapsing across indexers.
+      deduped.push(result);
+      continue;
+    }
+
+    const bucketKey = `${normalizedTitle}|${usenetGroup}`;
+    let bucket = buckets.get(bucketKey);
     if (!bucket) {
       bucket = [];
-      buckets.set(normalizedTitle, bucket);
+      buckets.set(bucketKey, bucket);
     }
     const candidatePublish = publishMeta.publishDateMs ?? null;
     const candidateIsPaid = isResultFromPaidIndexer(result);
+    const candidateFiles = extractFileCount(result);
     let matchedEntry = null;
     for (const entry of bucket) {
       if (areReleasesWithinDays(entry.publishDateMs ?? null, candidatePublish ?? null, DEDUPE_MAX_PUBLISH_DIFF_DAYS)) {
@@ -734,6 +766,7 @@ function dedupeResultsByTitle(results) {
       const entry = {
         publishDateMs: candidatePublish,
         isPaid: candidateIsPaid,
+        fileCount: candidateFiles,
         result,
         listIndex: deduped.length,
       };
@@ -744,16 +777,16 @@ function dedupeResultsByTitle(results) {
 
     if (candidateIsPaid && !matchedEntry.isPaid) {
       matchedEntry.isPaid = true;
-      matchedEntry.publishDateMs = candidatePublish;
+      matchedEntry.fileCount = candidateFiles;
       matchedEntry.result = result;
       deduped[matchedEntry.listIndex] = result;
       continue;
     }
 
     if (candidateIsPaid === matchedEntry.isPaid) {
-      const existingPublish = matchedEntry.publishDateMs;
-      if (candidatePublish !== null && (existingPublish === null || candidatePublish > existingPublish)) {
-        matchedEntry.publishDateMs = candidatePublish;
+      const existingFiles = Number.isFinite(matchedEntry.fileCount) ? matchedEntry.fileCount : Number.POSITIVE_INFINITY;
+      if (candidateFiles < existingFiles) {
+        matchedEntry.fileCount = candidateFiles;
         matchedEntry.result = result;
         deduped[matchedEntry.listIndex] = result;
       }
@@ -799,7 +832,7 @@ function buildNntpServersArray() {
 }
 
 let INDEXER_SORT_MODE = normalizeSortMode(process.env.NZB_SORT_MODE, 'quality_then_size');
-let INDEXER_SORT_ORDER = parseCommaList(process.env.NZB_SORT_ORDER);
+let INDEXER_SORT_ORDER = parseCommaList(process.env.NZB_SORT_ORDER || 'quality,size,files');
 let INDEXER_PREFERRED_LANGUAGES = resolvePreferredLanguages(process.env.NZB_PREFERRED_LANGUAGE, []);
 let INDEXER_PREFERRED_QUALITIES = parseCommaList(process.env.NZB_PREFERRED_QUALITIES);
 let INDEXER_PREFERRED_ENCODES = parseCommaList(process.env.NZB_PREFERRED_ENCODES);
@@ -1055,7 +1088,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   });
 
   INDEXER_SORT_MODE = normalizeSortMode(process.env.NZB_SORT_MODE, 'quality_then_size');
-  INDEXER_SORT_ORDER = parseCommaList(process.env.NZB_SORT_ORDER);
+  INDEXER_SORT_ORDER = parseCommaList(process.env.NZB_SORT_ORDER || 'quality,size,files');
   INDEXER_PREFERRED_LANGUAGES = resolvePreferredLanguages(process.env.NZB_PREFERRED_LANGUAGE, []);
   INDEXER_PREFERRED_QUALITIES = parseCommaList(process.env.NZB_PREFERRED_QUALITIES);
   INDEXER_PREFERRED_ENCODES = parseCommaList(process.env.NZB_PREFERRED_ENCODES);
@@ -3906,7 +3939,11 @@ async function streamHandler(req, res) {
         // Additional mappings
         shortName: namingContext.indexer,
         cached: isInstant || Boolean(triageTag && triageTag.includes('✅')),
-        instant: isInstant
+        instant: isInstant,
+        files: Number.isFinite(result.files) ? result.files : null,
+        grabs: Number.isFinite(result.grabs) ? result.grabs : null,
+        date: result.publishDateMs ? new Date(result.publishDateMs).toISOString().slice(0, 10) : null,
+        usenetGroup: result.group || null,
       };
 
       // Service context (representing the provider/addon logic)
@@ -3952,6 +3989,9 @@ async function streamHandler(req, res) {
           indexer: '{stream.indexer::exists["{stream.indexer}"||""]}',
           filename: '{stream.filename::exists["{stream.filename}"||""]}',
           tags: '{tags::exists["{tags}"||""]}',
+          files: '{stream.files::exists["{stream.files} files"||""]}',
+          grabs: '{stream.grabs::exists["{stream.grabs} grabs"||""]}',
+          date: '{stream.date::exists["{stream.date}"||""]}',
         };
 
         const longTokenMap = {
@@ -3968,6 +4008,9 @@ async function streamHandler(req, res) {
           indexer: '{stream.indexer::exists["🔎 {stream.indexer}"||""]}',
           health: '{stream.health::exists["🧪 {stream.health}"||""]}',
           instant: '{stream.instant::istrue["⚡ Instant"||""]}',
+          files: '{stream.files::exists["📁 {stream.files} files"||""]}',
+          grabs: '{stream.grabs::exists["⬇️ {stream.grabs} grabs"||""]}',
+          date: '{stream.date::exists["📅 {stream.date}"||""]}',
           quality: '{stream.resolution::exists["🖥️ {stream.resolution}"||""]}',
           resolution_quality: '{stream.resolution::exists["🖥️ {stream.resolution}"||""]}',
           stream_quality: '{stream.streamQuality::exists["✨ {stream.streamQuality}"||""]}',

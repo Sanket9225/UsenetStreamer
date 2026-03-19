@@ -387,6 +387,7 @@ function filterAndMap(jsonData, options) {
     let extensionField;
     let durationRaw;
     let fullres;
+    let usenetGroup;
 
     if (Array.isArray(entry)) {
       hashId = entry[0];
@@ -394,8 +395,9 @@ function filterAndMap(jsonData, options) {
       filenameNoExt = entry[10];
       ext = entry[11];
       poster = entry[7];
-      postedRaw = entry[8];
+      postedRaw = entry[5]; // Post Date field (e.g. "08-01-2019 12:11:24")
       durationRaw = entry[14];
+      usenetGroup = entry[9];
     } else if (entry && typeof entry === 'object') {
       hashId = entry.hash || entry['0'] || entry.id;
       subject = entry.subject || entry['6'];
@@ -403,12 +405,13 @@ function filterAndMap(jsonData, options) {
       ext = entry.ext || entry['11'];
       size = entry.size || entry.Length || entry.length || 0;
       poster = entry.poster || entry['7'];
-      postedRaw = entry.dtime || entry.date || entry['12'];
+      postedRaw = entry.ts || entry.timestamp || entry['5'] || entry.dtime || entry.date;
       sig = entry.sig;
       displayFn = entry.fn || entry.filename;
       extensionField = entry.extension || entry.ext;
       durationRaw = entry['14'] || entry.duration || entry.len;
       fullres = entry.fullres || entry.resolution;
+      usenetGroup = entry.groups || entry.group || entry['9'];
     }
 
     if (!hashId) return;
@@ -564,6 +567,7 @@ function filterAndMap(jsonData, options) {
       size: sizeValue,
       title,
       poster,
+      group: usenetGroup || null,
       posted,
       durationSeconds,
       durationHms,
@@ -645,6 +649,7 @@ function buildResult(rawItem) {
     poster: rawItem.poster,
     easynewsPayload: payload,
     _sourceType: 'easynews',
+    group: rawItem.group || undefined,
   };
 }
 

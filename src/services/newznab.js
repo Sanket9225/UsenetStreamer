@@ -636,6 +636,11 @@ function buildSearchParams(plan) {
   } else if ((!plan?.tokens || plan.tokens.length === 0) && plan?.query) {
     params.q = plan.query;
   }
+
+  // Request extended attributes so indexers return files, usenetdate, group, etc.
+  params.extended = '1';
+  params.attrs = 'files,usenetdate,group,language,resolution,season,episode,imdb,grabs,password';
+
   return params;
 }
 
@@ -767,6 +772,23 @@ function normalizeNewznabItem(item, config, { filterNzbOnly = true } = {}) {
   if (attrMap.category) resolved.category = attrMap.category;
   if (!resolved.indexer && attrMap.indexer) {
     resolved.indexer = attrMap.indexer;
+  }
+
+  // Extended attributes (returned when extended=1 / attrs= is sent)
+  const filesValue = attrMap.files || attrMap.filecount || attrMap['file_count'];
+  if (filesValue !== undefined && filesValue !== null) {
+    const parsed = Number.parseInt(String(filesValue), 10);
+    if (Number.isFinite(parsed) && parsed > 0) resolved.files = parsed;
+  }
+  if (attrMap.grabs !== undefined && attrMap.grabs !== null) {
+    const parsed = Number.parseInt(String(attrMap.grabs), 10);
+    if (Number.isFinite(parsed) && parsed >= 0) resolved.grabs = parsed;
+  }
+  if (attrMap.group) resolved.group = String(attrMap.group);
+  if (attrMap.password) resolved.password = String(attrMap.password);
+  if (attrMap.usenetdate && !resolved.publishDate) {
+    resolved.publishDate = attrMap.usenetdate;
+    resolved.publishDateMs = Date.parse(attrMap.usenetdate) || undefined;
   }
 
   return resolved;

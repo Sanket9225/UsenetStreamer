@@ -49,7 +49,7 @@
 
   const MAX_NEWZNAB_INDEXERS = 20;
   const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT', 'ZYCLOPS'];
-  const SUPPORTED_SORT_KEYS = ['language', 'release_group', 'size', 'resolution', 'quality', 'encode', 'visual_tag', 'audio_tag', 'keyword'];
+  const SUPPORTED_SORT_KEYS = ['language', 'release_group', 'size', 'resolution', 'quality', 'encode', 'visual_tag', 'audio_tag', 'keyword', 'date', 'files'];
   const SORT_LABELS = {
     language: 'Language',
     release_group: 'Release Group',
@@ -60,6 +60,8 @@
     visual_tag: 'Visual Tag',
     audio_tag: 'Audio Tag',
     keyword: 'Keyword',
+    date: 'Date',
+    files: 'File Count',
   };
 
   const managerSelect = configForm.querySelector('select[name="INDEXER_MANAGER"]');
@@ -317,9 +319,7 @@
   }
 
   function getDefaultSortOrder() {
-    return loadedSortMode === 'language_quality_size'
-      ? ['language', 'resolution', 'size']
-      : ['resolution', 'size'];
+    return ['quality', 'size', 'files'];
   }
 
   function syncSortOrderUI() {

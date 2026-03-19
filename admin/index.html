@@ -185,6 +185,8 @@
                 <label class="checkbox"><input type="checkbox" value="visual_tag" data-sort-order-option /> <span>Visual Tag</span> <span class="sort-order-index" data-sort-order-index></span></label>
                 <label class="checkbox"><input type="checkbox" value="audio_tag" data-sort-order-option /> <span>Audio Tag</span> <span class="sort-order-index" data-sort-order-index></span></label>
                 <label class="checkbox"><input type="checkbox" value="keyword" data-sort-order-option /> <span>Keyword</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                <label class="checkbox"><input type="checkbox" value="date" data-sort-order-option /> <span>Date (newest first)</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                <label class="checkbox"><input type="checkbox" value="files" data-sort-order-option /> <span>File Count (fewest first)</span> <span class="sort-order-index" data-sort-order-index></span></label>
               </div>
               <span class="field-hint">Select keys in your preferred order. First selected key has highest priority.</span>
               <span class="field-hint" data-sort-order-current></span>
@@ -252,7 +254,7 @@
               <input name="NZB_DEDUP_ENABLED" type="checkbox" checked />
               <span>
                 Hide duplicate releases
-                <span class="field-hint">Collapses identical matches (same title/indexer/size). Disable to inspect every result.</span>
+                <span class="field-hint">Collapses duplicates when normalized title and Usenet group match within the publish window. Keeps preferred result by paid indexer, then fewer files. Disable to inspect every result.</span>
               </span>
             </label>
             <label class="checkbox">
@@ -409,10 +411,12 @@ visual,
 audio,
 group,
 size,
+files,
+date,
 languages,
 indexer,
 health'></textarea>
-              <span class="field-hint">Comma-separated fields. Example: <code>title, stream_quality, health, source, codec, visual, audio, group, size, languages, indexer</code>. Use <code>stream_quality</code> for actual parsed quality (e.g., BluRay/WEB-DL). Advanced templates are still supported if you use <code>{...}</code>.</span>
+              <span class="field-hint">Comma-separated fields. Example: <code>title, stream_quality, health, source, codec, visual, audio, group, size, files, date, languages, indexer</code>. Use <code>stream_quality</code> for actual parsed quality (e.g., BluRay/WEB-DL). Use <code>files</code> for file count and <code>date</code> for publish date. Advanced templates are still supported if you use <code>{...}</code>.</span>
             </label>
             <div class="wide-field preview-card">
               <div class="preview-header">
