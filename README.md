@@ -12,7 +12,6 @@
 <p align="center">
   <a href="https://discord.gg/tUwNjXSZZN"><img src="https://img.shields.io/badge/Discord-Join-blue?logo=discord&logoColor=white" alt="Join Discord" /></a>
   <a href="https://buymeacoffee.com/gaikwadsank"><img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-yellow?logo=buymeacoffee&logoColor=white" alt="Buy me a coffee" /></a>
-  <a href="https://github.com/Sanket9225/UsenetStreamer/actions"><img src="https://img.shields.io/github/actions/workflow/status/Sanket9225/UsenetStreamer/docker-publish.yml?label=docker%20build" alt="CI badge" /></a>
   <a href="https://ghcr.io/sanket9225/usenetstreamer"><img src="https://img.shields.io/badge/Docker-ghcr.io%2Fsanket9225%2Fusenetstreamer-blue?logo=docker" alt="Docker image" /></a>
 </p>
 
@@ -21,8 +20,8 @@
 ## 🔗 Quick Links
 
 - **Docker image:** `ghcr.io/sanket9225/usenetstreamer:latest`
-- **Admin dashboard:** `https://your-addon-domain/<token>/admin/`
-- **Manifest template:** `https://your-addon-domain/<token>/manifest.json`
+- **Admin dashboard:** `https://your-addon-domain/<admin-token (ADDON_SHARED_SECRET)>/admin/`
+- **Manifest template:** `https://your-addon-domain/<stream-token>/manifest.json`
 - **Discord:** [Community chat](https://discord.gg/tUwNjXSZZN)
 - **Support:** [Buy me a coffee](https://buymeacoffee.com/gaikwadsank)
 - **Self-hosting guide:** [Jump to instructions](#-deployment)
@@ -30,6 +29,8 @@
 ---
 
 > **Disclaimer:** UsenetStreamer is not affiliated with any Usenet provider or indexer, does not host or distribute media, and is offered strictly for educational purposes.
+
+> **⚠️ Upgrade notice:** If you are upgrading from a version older than 1.7.6, you may need to reinstall the addon in Stremio for changes to take effect.
 
 ## ☕ Support Development
 
@@ -42,8 +43,7 @@
 ### 🆕 Recent Enhancements
 - **Stream Protection modes** — unified protection selector in the dashboard: `none`, `auto-advance`, `health-check`, `health-check-auto-advance`, `smart-play-only`, and `smart-play`.
 - **Smart Play (background triage)** — background health checks add a dedicated Smart Play stream that can auto-pick healthy candidates while checks continue.
-- **Auto-advance strategy controls** — choose `on-demand` or `prequeue` behavior for fallback queueing when auto-advance is enabled.
-- **Custom sorting chain by priority** — `NZB_SORT_ORDER` now drives ordering with explicit keys (including `date` and `files`), with default chain `quality,size,files`.
+- **Custom sorting chain** — `NZB_SORT_ORDER` drives result ordering with any combination of: `language`, `release_group`, `size`, `resolution`, `quality`, `encode`, `visual_tag`, `audio_tag`, `keyword`, `date`, `files`. Default chain: `quality,size,files`.
 - **Per-indexer capability gating** — ID-based plans run only on indexers that advertise required caps support (e.g., skip `imdbid` tvsearch where unsupported).
 - **Anime ID support** — accepts `kitsu:`, `mal:`, and `anilist:` IDs and resolves them to IMDb/TVDb via bundled mapping databases (Fribb, Kitsu-IMDB, Manami).
 
@@ -75,8 +75,8 @@
 - Decisions are cached per download URL and per normalized title, so later requests inherit health verdicts instantly.
 
 ### 🔐 Secure-by-Default
-- **Admin token** — used to access the admin dashboard where you can edit settings and credentials. Credentials are write-only (never exposed back to the UI).
-- **Stream token** — a separate token used only for streaming; it cannot access the admin dashboard or modify any settings.
+- **Admin token** (`ADDON_SHARED_SECRET`) — used to access the admin dashboard where you can edit settings and credentials. Credentials are write-only (never exposed back to the UI).
+- **Stream token** (`ADDON_STREAM_TOKEN`) — a separate token used only for streaming; it cannot access the admin dashboard or modify any settings.
 
 ---
 
@@ -211,7 +211,7 @@ See `.env.example` for the complete list and defaults.
 | Android TV / Mobile | ✅ Tested |
 | iOS via Safari/TestFlight | ✅ Tested |
 | Web (Chromium-based browsers) | ✅ Tested |
-| tvOS / Apple TV (Omni/Vidi/Fusion) | ✅ Reported working |
+| tvOS / Apple TV (Omni/Vidi/Fusion) | ✅ Tested |
 
 Anything that can load HTTPS manifests and handle `externalPlayer` hints should work. Open an issue or drop by Discord if you hit a platform-specific quirk.
 
