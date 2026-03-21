@@ -543,7 +543,7 @@ let INDEXER_MANAGER_BACKOFF_SECONDS = toPositiveInt(process.env.INDEXER_MANAGER_
 let indexerManagerUnavailableUntil = 0;
 
 let NEWZNAB_ENABLED = toBoolean(process.env.NEWZNAB_ENABLED, false);
-let NEWZNAB_FILTER_NZB_ONLY = toBoolean(process.env.NEWZNAB_FILTER_NZB_ONLY, true);
+let NEWZNAB_FILTER_NZB_ONLY = toBoolean(process.env.NEWZNAB_FILTER_NZB_ONLY, false);
 let DEBUG_NEWZNAB_SEARCH = toBoolean(process.env.DEBUG_NEWZNAB_SEARCH, false);
 let DEBUG_NEWZNAB_TEST = toBoolean(process.env.DEBUG_NEWZNAB_TEST, false);
 let DEBUG_NEWZNAB_ENDPOINTS = toBoolean(process.env.DEBUG_NEWZNAB_ENDPOINTS, false);
@@ -1075,7 +1075,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   indexerManagerUnavailableUntil = 0;
 
   NEWZNAB_ENABLED = toBoolean(process.env.NEWZNAB_ENABLED, false);
-  NEWZNAB_FILTER_NZB_ONLY = toBoolean(process.env.NEWZNAB_FILTER_NZB_ONLY, true);
+  NEWZNAB_FILTER_NZB_ONLY = toBoolean(process.env.NEWZNAB_FILTER_NZB_ONLY, false);
   DEBUG_NEWZNAB_SEARCH = toBoolean(process.env.DEBUG_NEWZNAB_SEARCH, false);
   DEBUG_NEWZNAB_TEST = toBoolean(process.env.DEBUG_NEWZNAB_TEST, false);
   DEBUG_NEWZNAB_ENDPOINTS = toBoolean(process.env.DEBUG_NEWZNAB_ENDPOINTS, false);

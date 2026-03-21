@@ -369,7 +369,7 @@ async function fetchNewznabCaps(config, options = {}) {
 
 const DEFAULT_CAPS = {
   search: new Set(['q']),
-  tvsearch: new Set(['q', 'tvdbid', 'imdbid', 'season', 'ep']),
+  tvsearch: new Set(['q', 'tvdbid', 'season', 'ep']),
   movie: new Set(['q', 'imdbid']),
 };
 
@@ -721,7 +721,7 @@ function isLikelyNzb(url) {
   );
 }
 
-function normalizeNewznabItem(item, config, { filterNzbOnly = true } = {}) {
+function normalizeNewznabItem(item, config, { filterNzbOnly = false } = {}) {
   if (!item) return null;
   const parsedGuid = parseGuid(item.guid || item.GUID);
   let downloadUrl = null;
@@ -881,7 +881,7 @@ async function fetchIndexerResults(config, plan, options) {
 
 async function searchNewznabIndexers(plan, configs, options = {}) {
   const defaults = {
-    filterNzbOnly: true,
+    filterNzbOnly: false,
     debug: false,
     timeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
     label: '[NEWZNAB]',
