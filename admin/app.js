@@ -1197,6 +1197,19 @@
     }
 
     syncManagerControls();
+
+    // In native mode, only allow 'none' and 'health-check' stream protection
+    if (streamProtectionSelect) {
+      const nativeOnlyValues = new Set(['none', 'health-check']);
+      Array.from(streamProtectionSelect.options).forEach((opt) => {
+        opt.hidden = isNativeMode && !nativeOnlyValues.has(opt.value);
+      });
+      // If current selection is hidden, reset to 'health-check'
+      if (isNativeMode && !nativeOnlyValues.has(streamProtectionSelect.value)) {
+        streamProtectionSelect.value = 'health-check';
+        syncStreamProtectionControls();
+      }
+    }
   }
 
   function getSelectedTmdbLanguages() {

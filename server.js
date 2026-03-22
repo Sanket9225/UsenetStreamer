@@ -831,8 +831,19 @@ function buildNntpServersArray() {
   return [serverUrl];
 }
 
+// Backward compat: derive sort order from legacy NZB_SORT_MODE when NZB_SORT_ORDER is not explicitly set
+function deriveSortOrder(rawSortOrder, sortMode) {
+  const explicit = (rawSortOrder || '').trim();
+  if (explicit) return parseCommaList(explicit);
+  switch (sortMode) {
+    case 'language_quality_size': return ['language', 'quality', 'size'];
+    case 'quality_then_size':    return ['quality', 'size', 'files'];
+    default:                     return ['quality', 'size', 'files'];
+  }
+}
+
 let INDEXER_SORT_MODE = normalizeSortMode(process.env.NZB_SORT_MODE, 'quality_then_size');
-let INDEXER_SORT_ORDER = parseCommaList(process.env.NZB_SORT_ORDER || 'quality,size,files');
+let INDEXER_SORT_ORDER = deriveSortOrder(process.env.NZB_SORT_ORDER, INDEXER_SORT_MODE);
 let INDEXER_PREFERRED_LANGUAGES = resolvePreferredLanguages(process.env.NZB_PREFERRED_LANGUAGE, []);
 let INDEXER_PREFERRED_QUALITIES = parseCommaList(process.env.NZB_PREFERRED_QUALITIES);
 let INDEXER_PREFERRED_ENCODES = parseCommaList(process.env.NZB_PREFERRED_ENCODES);
@@ -1088,7 +1099,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   });
 
   INDEXER_SORT_MODE = normalizeSortMode(process.env.NZB_SORT_MODE, 'quality_then_size');
-  INDEXER_SORT_ORDER = parseCommaList(process.env.NZB_SORT_ORDER || 'quality,size,files');
+  INDEXER_SORT_ORDER = deriveSortOrder(process.env.NZB_SORT_ORDER, INDEXER_SORT_MODE);
   INDEXER_PREFERRED_LANGUAGES = resolvePreferredLanguages(process.env.NZB_PREFERRED_LANGUAGE, []);
   INDEXER_PREFERRED_QUALITIES = parseCommaList(process.env.NZB_PREFERRED_QUALITIES);
   INDEXER_PREFERRED_ENCODES = parseCommaList(process.env.NZB_PREFERRED_ENCODES);
@@ -3299,11 +3310,7 @@ async function streamHandler(req, res) {
     })();
     const resolvedPreferredLanguages = resolvePreferredLanguages(triageOverrides.preferredLanguages, INDEXER_PREFERRED_LANGUAGES);
     const activeSortMode = triageOverrides.sortMode || INDEXER_SORT_MODE;
-    const resolvedSortOrder = INDEXER_SORT_ORDER.length > 0
-      ? INDEXER_SORT_ORDER
-      : (activeSortMode === 'language_quality_size'
-        ? ['language', 'resolution', 'size']
-        : ['resolution', 'size']);
+    const resolvedSortOrder = INDEXER_SORT_ORDER;
     const effectiveSortMode = resolvedSortOrder.length > 0 ? 'custom_priority' : activeSortMode;
 
     finalNzbResults = finalNzbResults.map((result, index) => annotateNzbResult(result, index));
