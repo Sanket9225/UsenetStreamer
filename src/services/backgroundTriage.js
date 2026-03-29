@@ -210,6 +210,34 @@ class BackgroundTriageSession {
   }
 
   /**
+   * Get the best (highest-ranked) candidate from the triage pool regardless of
+   * whether it has been verified yet. Used by top-ranked mode for the first
+   * immediate decision gate before waiting on verification.
+   */
+  getBestTriageCandidate() {
+    if (this.allCandidates.length === 0) return null;
+    let bestCandidate = null;
+    let bestRank = Infinity;
+    for (const candidate of this.allCandidates) {
+      if (!candidate || !candidate.downloadUrl) continue;
+      const rank = this._getRank(candidate.downloadUrl);
+      if (rank < bestRank) {
+        bestRank = rank;
+        bestCandidate = candidate;
+      }
+    }
+    return bestCandidate;
+  }
+
+  /**
+   * Rank of the best triage-pool candidate. Infinity when triage pool is empty.
+   */
+  getBestTriageRank() {
+    const best = this.getBestTriageCandidate();
+    return best ? this._getRank(best.downloadUrl) : Infinity;
+  }
+
+  /**
    * Internal: get the original rank of a candidate by download URL.
    * Lower number = better rank (rank 0 = top result).
    * Uses rankByUrl map if available, then falls back to position in allCandidates/completedCandidates.
