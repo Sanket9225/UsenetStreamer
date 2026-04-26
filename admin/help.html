@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UsenetStreamer — Help & Reference</title>
+  <link rel="icon" href="/assets/icon.png" type="image/png" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .help-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      padding: 0;
+      list-style: none;
+      margin: 0;
+    }
+    .help-nav a {
+      display: inline-block;
+      padding: 0.35rem 0.9rem;
+      border-radius: 999px;
+      background: rgba(53, 201, 255, 0.1);
+      border: 1px solid rgba(53, 201, 255, 0.3);
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .help-nav a:hover {
+      background: rgba(53, 201, 255, 0.2);
+      border-color: rgba(53, 201, 255, 0.55);
+    }
+    .help-section {
+      display: flex;
+      flex-direction: column;
+      gap: 1.1rem;
+      scroll-margin-top: 2rem;
+    }
+    .help-section h2 {
+      margin: 0;
+      font-size: 1.45rem;
+      color: var(--text-primary);
+    }
+    .help-section p {
+      margin: 0;
+      color: var(--text-secondary);
+      line-height: 1.75;
+    }
+    .help-section ul, .help-section ol {
+      margin: 0;
+      padding-left: 1.4rem;
+      color: var(--text-secondary);
+      line-height: 1.9;
+    }
+    .help-section li + li {
+      margin-top: 0.25rem;
+    }
+    .flow-diagram {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 1.2rem 1.4rem;
+      background: rgba(11, 19, 29, 0.8);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-soft);
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+    .flow-node {
+      padding: 0.4rem 0.9rem;
+      border-radius: var(--radius-sm);
+      background: rgba(53, 201, 255, 0.1);
+      border: 1px solid rgba(53, 201, 255, 0.3);
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    .flow-arrow {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+    }
+    .option-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1rem;
+    }
+    .option-card {
+      padding: 1rem 1.15rem;
+      border-radius: var(--radius-sm);
+      background: rgba(18, 30, 45, 0.7);
+      border: 1px solid var(--border-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .option-card .option-name {
+      font-weight: 700;
+      color: var(--text-primary);
+      font-size: 0.95rem;
+    }
+    .option-card .option-desc {
+      color: var(--text-secondary);
+      font-size: 0.88rem;
+      line-height: 1.6;
+    }
+    .option-card .option-default {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      font-style: italic;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .badge-blue { background: rgba(53, 201, 255, 0.15); color: #8deaff; border: 1px solid rgba(53,201,255,0.3); }
+    .badge-green { background: rgba(114, 244, 207, 0.12); color: var(--success); border: 1px solid rgba(114,244,207,0.3); }
+    .badge-yellow { background: rgba(255, 209, 102, 0.12); color: var(--warning); border: 1px solid rgba(255,209,102,0.3); }
+    .badge-red { background: rgba(255, 141, 155, 0.12); color: var(--danger); border: 1px solid rgba(255,141,155,0.3); }
+    .tip-box {
+      padding: 0.9rem 1.2rem;
+      border-radius: var(--radius-sm);
+      background: rgba(114, 244, 207, 0.07);
+      border: 1px solid rgba(114, 244, 207, 0.25);
+      color: var(--success);
+      font-size: 0.9rem;
+      line-height: 1.65;
+    }
+    .tip-box strong { color: #a8ffdf; }
+    .warn-box {
+      padding: 0.9rem 1.2rem;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 209, 102, 0.07);
+      border: 1px solid rgba(255, 209, 102, 0.25);
+      color: var(--warning);
+      font-size: 0.9rem;
+      line-height: 1.65;
+    }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.92rem;
+      transition: opacity 0.15s;
+    }
+    .back-link:hover { opacity: 0.75; }
+    .section-divider {
+      border: none;
+      border-top: 1px solid var(--border-soft);
+      margin: 0;
+    }
+    code {
+      background: rgba(53, 201, 255, 0.1);
+      border: 1px solid rgba(53, 201, 255, 0.2);
+      border-radius: 5px;
+      padding: 0.1em 0.45em;
+      font-size: 0.87em;
+      color: #8deaff;
+      font-family: "Fira Mono", "Cascadia Code", "Consolas", monospace;
+    }
+    .toc-card {
+      position: sticky;
+      top: 1.5rem;
+    }
+    @media (min-width: 900px) {
+      .help-layout {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        gap: 2.5rem;
+        align-items: start;
+      }
+    }
+    .toc-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+    .toc-list a {
+      display: block;
+      padding: 0.4rem 0.75rem;
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.88rem;
+      font-weight: 500;
+      transition: background 0.12s, color 0.12s;
+    }
+    .toc-list a:hover {
+      background: rgba(53, 201, 255, 0.08);
+      color: var(--accent);
+    }
+    .toc-list .toc-section-title {
+      padding: 0.55rem 0.75rem 0.2rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>Help &amp; Reference</h1>
+      <p class="subtitle">Plain-English explanations of every part of UsenetStreamer — what each option does and when to use it.</p>
+      <a href="index.html" class="back-link">← Back to Control Panel</a>
+    </header>
+
+    <div class="help-layout">
+
+      <!-- Sidebar TOC -->
+      <aside>
+        <div class="card toc-card" style="padding: 1.2rem 1rem; gap: 0.5rem;">
+          <p style="margin:0; font-size:0.78rem; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:var(--text-muted);">Contents</p>
+          <ul class="toc-list">
+            <li><a href="#how-it-works">How it works</a></li>
+            <li><a href="#streaming-mode">Streaming Mode</a></li>
+            <li class="toc-section-title">Indexers</li>
+            <li><a href="#indexer-manager">Indexer Manager</a></li>
+            <li><a href="#direct-newznab">Direct Newznab</a></li>
+            <li><a href="#easynews">Easynews</a></li>
+            <li class="toc-section-title">Results</li>
+            <li><a href="#sorting">Sorting</a></li>
+            <li><a href="#filtering">Filtering</a></li>
+            <li><a href="#deduplication">Deduplication</a></li>
+            <li><a href="#naming">Stream Names</a></li>
+            <li class="toc-section-title">Quality</li>
+            <li><a href="#triage">Health Checks</a></li>
+            <li><a href="#stream-protection">Stream Protection</a></li>
+            <li><a href="#smart-play">Smart Play</a></li>
+            <li class="toc-section-title">Setup</li>
+            <li><a href="#nzbdav">NZBDav</a></li>
+            <li><a href="#metadata">Metadata (TMDb / TVDB)</a></li>
+            <li><a href="#tokens">Tokens &amp; Security</a></li>
+          </ul>
+        </div>
+      </aside>
+
+      <!-- Main content -->
+      <div style="display:flex; flex-direction:column; gap:2.2rem;">
+
+        <!-- How it works -->
+        <section class="card help-section" id="how-it-works">
+          <h2>How it works</h2>
+          <p>When you click a title in Stremio, UsenetStreamer looks it up on your Usenet indexers, fetches matching NZB files, scores and sorts them, then hands the best results back to Stremio as stream links. The whole flow looks like this:</p>
+          <div class="flow-diagram">
+            <span class="flow-node">Stremio</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-node">UsenetStreamer</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-node">Indexer(s)</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-node">NZB files</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-node">Sorted results</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-node">Stremio stream list</span>
+          </div>
+          <p>When you pick a stream, the NZB is sent to your download client (NZBDav or directly to your NNTP provider in Native Mode), which downloads and decodes the file so Stremio can play it.</p>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Streaming Mode -->
+        <section class="card help-section" id="streaming-mode">
+          <h2>Streaming Mode</h2>
+          <p>There are two ways the addon can send content to Stremio:</p>
+          <div class="option-grid">
+            <div class="option-card">
+              <span class="option-name">NZBDav Mode <span class="badge badge-green">All platforms</span></span>
+              <span class="option-desc">The addon pushes each NZB to <strong>NZBDav</strong>, which downloads and exposes the file over WebDAV. Stremio then streams from that WebDAV URL. Works on every platform — web, mobile, TV.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Desktop Native Mode <span class="badge badge-blue">Desktop / Android TV only</span></span>
+              <span class="option-desc">The addon streams the NZB content <em>directly</em> using your NNTP credentials — no NZBDav required. Only works with Stremio v5 on Windows, Mac, Linux, and Android TV. Does not work with Prowlarr/NZBHydra — use Direct Newznab indexers only.</span>
+            </div>
+          </div>
+          <div class="tip-box"><strong>Not sure which to pick?</strong> Use NZBDav Mode — it works everywhere and requires less setup on the Stremio side.</div>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Indexer Manager -->
+        <section class="card help-section" id="indexer-manager">
+          <h2>Indexer Manager</h2>
+          <p>An indexer manager is an app you run separately (Prowlarr or NZBHydra) that sits between UsenetStreamer and your indexers. Instead of configuring each indexer inside UsenetStreamer, you configure them once in Prowlarr or NZBHydra and point the addon at the manager.</p>
+          <div class="option-grid">
+            <div class="option-card">
+              <span class="option-name">Prowlarr</span>
+              <span class="option-desc">A modern indexer manager that integrates tightly with Sonarr/Radarr. Use numeric Prowlarr indexer IDs (or <code>-1</code> to query all your Usenet indexers).</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">NZBHydra2</span>
+              <span class="option-desc">A multi-indexer proxy with its own dedup and stats. Use exact indexer names as shown inside Hydra (case-sensitive).</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Direct Newznab <span class="badge badge-green">Recommended</span></span>
+              <span class="option-desc">Add indexers directly inside UsenetStreamer using their Newznab API URL and key. No Prowlarr or NZBHydra needed.</span>
+            </div>
+          </div>
+          <p><strong>Manager URL</strong> — the address of your Prowlarr or NZBHydra instance (e.g. <code>http://localhost:9696</code>). Must be reachable from wherever UsenetStreamer is running.</p>
+          <p><strong>API Key</strong> — found in your Prowlarr or NZBHydra settings. Used to authenticate every search request the addon sends to the manager.</p>
+          <p><strong>Indexer IDs / Names</strong> — controls which indexers inside your manager the addon is allowed to query. For Prowlarr, use the numeric indexer IDs shown in Prowlarr's indexer list, or <code>-1</code> to query all Usenet indexers. For NZBHydra, type the indexer names exactly as they appear in Hydra (case-sensitive).</p>
+          <p><strong>I have paid subscriptions with</strong> — enter the names or IDs of indexers where you have an active paid plan. This tells the addon which results to prioritise during health checks — only these indexers are checked, so your check slots are never wasted on free sources.</p>
+          <p><strong>Grab limits per indexer</strong> — controls how many results from each paid indexer are used for health checks. Enter the limits in the same order as the indexer list, comma-separated (e.g. <code>2,2</code> means 2 results from the first indexer and 2 from the second). Default is 6 per indexer if left empty.</p>
+          <p><strong>Strict ID match</strong> — when enabled, the addon only searches by IMDB/TVDB/TMDb IDs and skips text-based fallback searches. This reduces noise from irrelevant results but may miss content that isn't in the ID databases.</p>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Direct Newznab -->
+        <section class="card help-section" id="direct-newznab">
+          <h2>Direct Newznab Indexers</h2>
+          <p>Instead of routing through a manager app, you can add up to 20 Usenet indexers directly. Each indexer needs its Newznab API endpoint and API key — both available from your indexer's website under API settings.</p>
+          <ul>
+            <li><strong>Endpoint</strong> — the base URL of the indexer's Newznab API (e.g. <code>https://indexer.example.com</code>)</li>
+            <li><strong>API Key</strong> — your personal key from the indexer's account settings</li>
+            <li><strong>Paid</strong> — mark this if the indexer is a paid subscription. This affects two things: (1) during deduplication, results from paid indexers are kept over free ones for the same release; (2) during health checks, paid indexer results are moved to the front of the verification queue so your limited check slots (2, 4, or 6) are used on the most reliable sources first. If you only health-check 2 candidates, you want those 2 to come from your paid indexers — not random free ones.</li>
+          </ul>
+          <div class="tip-box"><strong>Tip:</strong> Direct Newznab and an indexer manager can be active at the same time — results from both are merged and scored together.</div>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Easynews -->
+        <section class="card help-section" id="easynews">
+          <h2>Easynews</h2>
+          <p>Easynews is a Usenet provider with its own built-in web search. When enabled, UsenetStreamer queries Easynews directly using your account credentials alongside your normal indexers. Results are merged into the same sorted list.</p>
+          <ul>
+            <li>Requires an active Easynews subscription</li>
+            <li><strong>Treat as indexer</strong> — when on, Easynews results are scored and sorted together with NZB results from your other indexers</li>
+          </ul>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Sorting -->
+        <section class="card help-section" id="sorting">
+          <h2>Sorting</h2>
+          <p>You build your own sort order by checking the dimensions you care about and numbering them in priority order. The addon sorts results by your first checked dimension, then breaks ties using the second, and so on.</p>
+          <div class="option-grid">
+            <div class="option-card">
+              <span class="option-name">Language</span>
+              <span class="option-desc">Results matching your preferred language(s) appear first. <strong>You must check this AND set Preferred Languages below</strong> — without both, language has no effect on the order.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Resolution</span>
+              <span class="option-desc">Higher resolution ranks first (4K → 1080p → 720p …). If no resolution is parsed from a title, it falls to the bottom of this tier.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Quality</span>
+              <span class="option-desc">Ranks by release quality type (Remux → BluRay → WEB-DL → WEBRip …). Set Preferred Qualities below to pin specific types to the top within this dimension.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Encode</span>
+              <span class="option-desc">Ranks by video codec (e.g. HEVC, AVC). Set Preferred Encodes below to specify which codec you want at the top.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Visual Tag</span>
+              <span class="option-desc">Ranks by HDR format (e.g. Dolby Vision, HDR10+, HDR). Set Preferred Visual Tags to favour specific formats.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Audio Tag</span>
+              <span class="option-desc">Ranks by audio format (e.g. Atmos, TrueHD, DTS). Set Preferred Audio Tags to favour specific formats.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Release Group</span>
+              <span class="option-desc">Ranks results from specific release groups higher. Set Preferred Release Groups to list the groups you trust.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Size</span>
+              <span class="option-desc">Larger files rank higher within the same tier — usually means better quality for the same encode type.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Date (newest first)</span>
+              <span class="option-desc">More recently posted NZBs rank higher. Useful for content where newer posts are more likely to be complete.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">File Count (fewest first)</span>
+              <span class="option-desc">NZBs with fewer files rank higher. Fewer files usually means a single clean post rather than a multi-part split set that's more likely to be incomplete.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Keyword</span>
+              <span class="option-desc">Results whose titles contain your preferred keywords rank higher. Set Preferred Keywords to a comma-separated list (e.g. <code>extended, proper, repack</code>).</span>
+            </div>
+          </div>
+          <div class="tip-box"><strong>Preferred Language only works if Language is checked in the sort order.</strong> Setting a preferred language without also enabling the Language sort dimension has no effect — the addon won't know to use it.</div>
+          <p><strong>Preferred settings</strong> — each "Preferred X" field only has an effect when its matching sort dimension is checked. For example: Preferred Qualities does nothing unless Quality is in your sort order. This lets you keep a dimension active without personal preferences, or disable a dimension entirely while keeping your preferences saved for later.</p>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Filtering -->
+        <section class="card help-section" id="filtering">
+          <h2>Filtering</h2>
+          <p>Filters remove unwanted results before they reach Stremio.</p>
+          <div class="option-grid">
+            <div class="option-card">
+              <span class="option-name">Allowed Resolutions</span>
+              <span class="option-desc">Only show results at the resolutions you tick. Uncheck 4K to avoid large files when you only have a 1080p display.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Resolution Cap per Quality</span>
+              <span class="option-desc">Limit how many results appear per resolution. Set to <code>4</code> to show at most 4 results for each resolution tier, keeping the list manageable.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Max File Size</span>
+              <span class="option-desc">Results larger than this are hidden. Default is 30 GB. Lower it if you have limited storage or a slow connection.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Min File Size</span>
+              <span class="option-desc">Results smaller than this are hidden. Default is 45 MB. Keeps out tiny corrupt or incomplete posts that would fail to play.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Release Exclusions</span>
+              <span class="option-desc">Comma-separated keywords — any result whose title contains one of these words is removed. Use this to block cam rips, screeners, or other releases you never want (e.g. <code>cam, ts, screener</code>).</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Hide Blocked Results</span>
+              <span class="option-desc">When health checks are enabled, this hides any NZB that the health check marked as incomplete or corrupt. Off by default.</span>
+            </div>
+          </div>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Deduplication -->
+        <section class="card help-section" id="deduplication">
+          <h2>Deduplication</h2>
+          <p>The same NZB post is often indexed by multiple indexers. Deduplication keeps only one copy so your stream list isn't full of identical entries from different sources.</p>
+          <p>Two results are considered the same release if they share the same normalised title, the same Usenet group, and were posted within 14 days of each other. When duplicates are found, the addon keeps the best one:</p>
+          <ol>
+            <li>A result from a <strong>paid indexer</strong> beats a result from a free one.</li>
+            <li>If both are paid (or both free), the one with <strong>fewer files</strong> wins — fewer files usually means it's a single clean NZB rather than a split set.</li>
+          </ol>
+          <p>Turn deduplication off if you want to see every copy from every indexer — useful for debugging or if you have indexers with different retention.</p>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Naming -->
+        <section class="card help-section" id="naming">
+          <h2>Stream Names &amp; Display</h2>
+          <p>You can customise the label that appears for each stream in Stremio using template tokens. The admin panel has a live preview so you can see exactly what your pattern produces before saving.</p>
+          <p>Common tokens: <code>resolution</code>, <code>size</code>, <code>indexer</code>, <code>encode</code>, <code>language</code>, <code>age</code>, <code>files</code>.</p>
+          <div class="tip-box"><strong>Example:</strong> <code>resolution · size · indexer</code> produces <em>1080p · 8.4 GB · NZBGeek</em></div>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Health Checks / Triage -->
+        <section class="card help-section" id="triage">
+          <h2>Health Checks (NNTP Triage)</h2>
+          <p>Before showing you a stream link, UsenetStreamer can verify the NZB is actually available and complete on your Usenet provider's servers. It does this by connecting directly to your provider over NNTP and checking whether the article headers still exist — an expired or corrupt post will fail this check.</p>
+          <p>You need to supply your NNTP server credentials (host, port, TLS on/off, username, password) — the same ones you use in SABnzbd or NZBGet.</p>
+
+          <p><strong>Max Candidates (2 / 4 / 6)</strong> — your sorted result list can have dozens of entries, but checking all of them would be slow. This setting controls how many of the top results actually get health-checked. The addon picks from that pool and only verifies up to this many NZBs per request.</p>
+          <p>The key insight: <strong>results from paid indexers are always moved to the front of that pool</strong>, so your limited check slots are used on the most reliable sources first. If you set Max Candidates to 2 and have results from a paid indexer and several free ones, the 2 paid results are checked — not random free ones.</p>
+          <p><strong>Max Connections</strong> — how many simultaneous NNTP connections to open when running checks. More connections = faster parallel checking, but uses more of your provider's connection allowance. Keep this at or below your provider's connection limit.</p>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Stream Protection -->
+        <section class="card help-section" id="stream-protection">
+          <h2>Stream Protection</h2>
+          <p>Stream Protection controls what happens when you click a stream link — specifically, how the addon guards against playing a result that will fail mid-download.</p>
+          <div class="option-grid">
+            <div class="option-card">
+              <span class="option-name">None</span>
+              <span class="option-desc">No protection. The NZB is sent directly to your download client when you click it.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Auto-Advance</span>
+              <span class="option-desc">If the current NZB fails (download errors, wrong content), the addon automatically tries the next result in the list without you having to go back and pick another one.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Health Check</span>
+              <span class="option-desc">Before sending the NZB to your download client, the addon verifies it's available. If it fails the check, a different result is used instead.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Health Check + Auto-Advance</span>
+              <span class="option-desc">Both — health-checks first, and auto-advances if something still goes wrong during playback.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Smart Play</span>
+              <span class="option-desc">The most thorough mode — see <a href="#smart-play" style="color:var(--accent);">Smart Play</a> below.</span>
+            </div>
+          </div>
+          <p><strong>Prefetch First Verified</strong> — when enabled, as soon as the first candidate passes its health check the addon starts downloading it in the background, even before you click. This shaves off the initial buffering delay when you do click that stream.</p>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Smart Play -->
+        <section class="card help-section" id="smart-play">
+          <h2>Smart Play</h2>
+          <p>Smart Play is the highest level of stream protection. When you click a result, the addon runs a full health check across the top candidates, picks the one most likely to play successfully, and sends that to your download client.</p>
+          <div class="option-grid">
+            <div class="option-card">
+              <span class="option-name">Fastest</span>
+              <span class="option-desc">Picks the first candidate that passes the health check. Minimises wait time — starts download as soon as one good result is found.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Top Ranked</span>
+              <span class="option-desc">Checks all candidates first, then picks the highest-scored one that passed. May take slightly longer but gives you the best quality that's actually available.</span>
+            </div>
+          </div>
+          <div class="tip-box"><strong>Smart Play needs NNTP credentials</strong> — it uses the same NNTP triage settings to perform its checks. Make sure your NNTP host, port, username, and password are filled in under Health Checks.</div>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- NZBDav -->
+        <section class="card help-section" id="nzbdav">
+          <h2>NZBDav</h2>
+          <p>NZBDav is a separate application you run alongside UsenetStreamer. It receives NZB files from the addon, downloads them from Usenet, and exposes the decoded video file over WebDAV so Stremio can stream it directly.</p>
+          <ul>
+            <li><strong>NZBDav URL</strong> — the address of your NZBDav instance (e.g. <code>http://localhost:3000</code>). This is used by the addon to push NZB files to NZBDav.</li>
+            <li><strong>API Key</strong> — from NZBDav's settings, used to authenticate push requests from the addon</li>
+            <li><strong>WebDAV URL / User / Pass</strong> — how Stremio connects to NZBDav to stream the file after it's downloaded. In most setups this is the same URL as the NZBDav URL above — only change it if you've configured NZBDav to serve WebDAV on a different address or port.</li>
+            <li><strong>Category</strong> — optional label applied to downloads inside NZBDav, used to organise them. The addon appends <code>_MOVIE</code> or <code>_TV</code> automatically based on content type</li>
+            <li><strong>History Catalog Limit</strong> — controls how many recently completed NZBDav downloads appear in your Stremio catalog for instant playback. Raising this shows more of your download history directly in Stremio without re-downloading.</li>
+          </ul>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Metadata -->
+        <section class="card help-section" id="metadata">
+          <h2>Metadata Services (TMDb &amp; TVDB)</h2>
+          <p>By default the addon searches Usenet using the title Stremio provides. Enabling metadata services lets it also search by the content's database IDs (e.g. TMDb ID, TVDB ID), which produces more accurate results — especially for content with common titles or non-English names.</p>
+          <div class="option-grid">
+            <div class="option-card">
+              <span class="option-name">TMDb <span class="badge badge-blue">Movies &amp; TV</span></span>
+              <span class="option-desc">The Movie Database. Provides additional title variants, release year, original-language title, and alternative titles for non-English content. Requires a free TMDb API key.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">TVDB <span class="badge badge-blue">TV only</span></span>
+              <span class="option-desc">TheTVDB. Provides TVDB episode IDs used by some indexers — particularly useful for anime. Requires a free TVDB API key.</span>
+            </div>
+          </div>
+          <p><strong>TMDb Search Mode</strong> — controls which title variants are used for searches. <em>All</em> tries every known title (English + regional). <em>Primary only</em> uses just the main title — faster but may miss regional releases.</p>
+          <p><strong>TMDb Additional Languages</strong> — lets the addon search using titles in additional languages. Useful if you watch content where the native-language title returns better results on your indexers.</p>
+          <div class="warn-box"><strong>Note:</strong> Metadata API keys are free but you must register on each site to get one. Without them the addon still searches using the IDs Stremio provides, but it won't fetch additional title variants or localized titles — meaning some indexers may return fewer or no results for that content.</div>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Tokens & Security -->
+        <section class="card help-section" id="tokens">
+          <h2>Tokens &amp; Security</h2>
+          <p>UsenetStreamer uses two separate tokens to control access:</p>
+          <div class="option-grid">
+            <div class="option-card">
+              <span class="option-name">Admin Token <code>ADDON_SHARED_SECRET</code></span>
+              <span class="option-desc">Protects the Control Panel. Set this in your Docker/environment config before starting the addon. It cannot be changed through the UI. Anyone with this token can read and change all your settings.</span>
+            </div>
+            <div class="option-card">
+              <span class="option-name">Stream Token <code>ADDON_STREAM_TOKEN</code></span>
+              <span class="option-desc">Included in your Stremio manifest URL. Anyone with this token can trigger searches and receive stream links — but cannot open the admin panel. Share this token only with Stremio clients you trust.</span>
+            </div>
+          </div>
+          <p>Your <strong>manifest URL</strong> is the URL you paste into Stremio to install the addon. It contains the stream token as part of the path. If you ever need to revoke access, change the stream token and reinstall the addon in Stremio with the new URL.</p>
+          <div class="warn-box"><strong>Keep both tokens private.</strong> If your addon is publicly reachable, anyone who finds the stream token can use your indexers and download client. Use a long random string for both tokens.</div>
+        </section>
+
+      </div><!-- end main content -->
+    </div><!-- end help-layout -->
+
+    <footer style="text-align:center; padding-top:1rem;">
+      <a href="index.html" class="back-link">← Back to Control Panel</a>
+      <p style="margin:1rem 0 0; font-size:0.85rem; color:var(--text-muted);">UsenetStreamer &mdash; <a href="https://github.com/sponsors/Sanket9225" target="_blank" rel="noopener" style="color:var(--accent);">Support on GitHub</a></p>
+    </footer>
+
+  </main>
+</body>
+</html>
