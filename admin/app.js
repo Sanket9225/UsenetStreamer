@@ -1150,6 +1150,23 @@
     } else {
       managerFields.forEach((field) => field.classList.toggle('hidden', managerValue === 'none'));
     }
+
+    const indexerInput = configForm.querySelector('input[name="INDEXER_MANAGER_INDEXERS"]');
+    const indexerHint = indexerInput && indexerInput.nextElementSibling;
+    const paidInput = configForm.querySelector('input[name="NZB_TRIAGE_PRIORITY_INDEXERS"]');
+    const paidHint = paidInput && paidInput.nextElementSibling;
+    if (managerValue === 'prowlarr') {
+      if (indexerInput) indexerInput.placeholder = 'e.g. 1,2,3 or -1 for all';
+      if (indexerHint) indexerHint.textContent = 'Comma-separated numeric IDs from Prowlarr\'s indexer list. Use -1 to query all Usenet indexers.';
+      if (paidInput) paidInput.placeholder = 'e.g. 3,4';
+      if (paidHint) paidHint.textContent = 'Numeric IDs of indexers where you have a paid plan. Health checks only run against these.';
+    } else if (managerValue === 'nzbhydra') {
+      if (indexerInput) indexerInput.placeholder = 'e.g. NZBGeek,UsenetCrawler';
+      if (indexerHint) indexerHint.textContent = 'Comma-separated indexer names exactly as shown in NZBHydra (case-sensitive).';
+      if (paidInput) paidInput.placeholder = 'e.g. NZBGeek,UsenetCrawler';
+      if (paidHint) paidHint.textContent = 'Names of indexers where you have a paid plan, exactly as shown in NZBHydra. Health checks only run against these.';
+    }
+
     syncSaveGuard();
   }
 
