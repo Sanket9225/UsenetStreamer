@@ -27,11 +27,14 @@ function parseRequestedEpisode(type, id, query = {}) {
 
   const rawId = String(id || '');
   const parts = rawId.split(':');
-  const season = parts[1] ? Number(parts[1]) : null;
-  const episode = parts[2] ? Number(parts[2]) : null;
 
-  if (Number.isFinite(season) && Number.isFinite(episode)) {
-    return { season, episode };
+  // Use the last two segments as season and episode (handles tmdb:<id>:S:E).
+  if (parts.length >= 2) {
+    const season = Number(parts[parts.length - 2]);
+    const episode = Number(parts[parts.length - 1]);
+    if (Number.isFinite(season) && Number.isFinite(episode)) {
+      return { season, episode };
+    }
   }
 
   if (query.season !== undefined && query.episode !== undefined) {
