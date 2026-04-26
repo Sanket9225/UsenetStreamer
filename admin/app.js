@@ -1326,8 +1326,8 @@
       const portChanged = Boolean(result?.portChanged);
       const manifestNote = manifestUrl ? `Manifest URL: ${manifestUrl}. ` : '';
       const reloadNote = portChanged
-        ? 'Settings applied and the addon restarted on the new port.'
-        : 'Settings applied instantly — no restart needed.';
+        ? 'Settings applied and the addon restarted on the new port. All cached results cleared.'
+        : 'Settings applied instantly — no restart needed. All cached results cleared.';
       saveStatus.textContent = `${manifestNote}${reloadNote}`.trim();
     } catch (error) {
       saveStatus.textContent = `Error: ${error.message}`;

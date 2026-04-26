@@ -235,6 +235,7 @@
             <li><a href="#sorting">Sorting</a></li>
             <li><a href="#filtering">Filtering</a></li>
             <li><a href="#deduplication">Deduplication</a></li>
+            <li><a href="#cache">Cache</a></li>
             <li><a href="#naming">Stream Names</a></li>
             <li class="toc-section-title">Quality</li>
             <li><a href="#triage">Health Checks</a></li>
@@ -446,6 +447,15 @@
             <li>If both are paid (or both free), the one with <strong>fewer files</strong> wins — fewer files usually means it's a single clean NZB rather than a split set.</li>
           </ol>
           <p>Turn deduplication off if you want to see every copy from every indexer — useful for debugging or if you have indexers with different retention.</p>
+        </section>
+
+        <hr class="section-divider" />
+
+        <!-- Cache -->
+        <section class="card help-section" id="cache">
+          <h2>Cache</h2>
+          <p>The addon caches search results for <strong>72 hours</strong> by default. When the same title is requested again within that window, the cached results are returned immediately instead of hitting your indexers again — making repeat searches much faster.</p>
+          <p><strong>Saving your settings clears the cache.</strong> Every time you click Save Changes in the Control Panel, all cached results are wiped. This means your next search will always fetch fresh results with your updated settings applied.</p>
         </section>
 
         <hr class="section-divider" />
