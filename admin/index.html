@@ -483,14 +483,14 @@ health'></textarea>
         <section class="group" id="streamProtectionGroup">
           <h3>Stream Protection</h3>
           <div class="field-grid">
-            <label>Protection Mode
+            <label class="wide-field">Protection Mode
               <select name="NZB_STREAM_PROTECTION" id="streamProtectionSelect">
                 <option value="none">No Protection</option>
                 <option value="auto-advance">Auto-Advance Only</option>
                 <option value="health-check">Upfront Health Check</option>
-                <option value="health-check-auto-advance">Upfront Health Check + Auto-Advance (recommended)</option>
+                <option value="health-check-auto-advance">Upfront Health Check + Auto-Advance (recommended if wrapped in AIO)</option>
                 <option value="smart-play-only">Background Health Check + Smart Play</option>
-                <option value="smart-play">Background Health Check + Smart Play + Auto-Advance</option>
+                <option value="smart-play">Background Health Check + Smart Play + Auto-Advance (recommended for standalone)</option>
               </select>
             </label>
             <!-- Auto-Advance Backup Strategy hidden for now — defaulting to on-demand (slower failover)
