@@ -2174,7 +2174,7 @@ async function streamHandler(req, res) {
 
       const resultMatchesStrictPlan = (plan, item) => {
         const isTvdbPlan = Array.isArray(plan?.tokens) && plan.tokens.some(t => /^\{TvdbId:/i.test(t));
-        const isSceneNzbs = (item?.indexerId || item?.indexer || '').toLowerCase().includes('scenenzbs');
+        const isSceneNzbs = String(item?.indexerId || item?.indexer || '').toLowerCase().includes('scenenzbs');
         if (isTvdbPlan && isSceneNzbs && type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
           const annotated = (item?.season !== undefined || item?.episode !== undefined) ? item : annotateNzbResult(item, 0);
           if (Number(annotated?.season) !== Number(seasonNum) || Number(annotated?.episode) !== Number(episodeNum)) return false;
