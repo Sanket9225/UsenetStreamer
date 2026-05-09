@@ -1,5 +1,6 @@
 const nzbdavService = require('../services/nzbdav');
 const { sanitizeErrorForClient } = require('../utils/helpers');
+const { buildNzbdavMetaWithDeadline } = require('./buildNzbdavMeta');
 
 module.exports = function createMetaHandler(getConfig) {
   return async function metaHandler(req, res) {
@@ -37,14 +38,8 @@ module.exports = function createMetaHandler(getConfig) {
       return;
     }
 
-    const poster = `${ADDON_BASE_URL.replace(/\/$/, '')}/assets/icon.png`;
     res.json({
-      meta: {
-        id: `nzbdav:${match.nzoId}`,
-        type,
-        name: match.jobName || 'NZBDav Completed',
-        poster,
-      }
+      meta: await buildNzbdavMetaWithDeadline(match, type, ADDON_BASE_URL),
     });
   };
 };

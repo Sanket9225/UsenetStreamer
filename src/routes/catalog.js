@@ -1,5 +1,6 @@
 const nzbdavService = require('../services/nzbdav');
 const { sanitizeErrorForClient } = require('../utils/helpers');
+const { buildNzbdavMetas } = require('./buildNzbdavMeta');
 
 module.exports = function createCatalogHandler(getConfig) {
   return async function catalogHandler(req, res) {
@@ -34,17 +35,8 @@ module.exports = function createCatalogHandler(getConfig) {
     const historyMap = await nzbdavService.fetchCompletedNzbdavHistory([categoryForType], limit + skip);
     const entries = Array.from(historyMap.values());
     const slice = entries.slice(skip, skip + limit);
-    const poster = `${ADDON_BASE_URL.replace(/\/$/, '')}/assets/icon.png`;
 
-    const metas = slice.map((entry) => {
-      const name = entry.jobName || 'NZBDav Completed';
-      return {
-        id: `nzbdav:${entry.nzoId}`,
-        type,
-        name,
-        poster,
-      };
-    });
+    const metas = await buildNzbdavMetas(slice, type, ADDON_BASE_URL);
 
     res.json({ metas });
   };

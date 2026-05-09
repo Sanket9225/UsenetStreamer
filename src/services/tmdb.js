@@ -127,6 +127,23 @@ function normalizeToAscii(text) {
     .trim();
 }
 
+function normalizeSearchText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function buildPosterUrl(posterPath, size = 'w342') {
+  if (!posterPath) return null;
+  return `https://image.tmdb.org/t/p/${size}${posterPath}`;
+}
+
+// Sentinel cached when a title search returns no usable result, so a cached
+// miss is distinguishable from "no cache entry" — getFromCache() returns null
+// for both an absent key and a value stored as null.
+const SEARCH_CACHE_MISS = Object.freeze({ __searchByTitle: 'miss' });
+
 /**
  * Get cache key for TMDb lookups
  */
@@ -349,6 +366,112 @@ async function getExternalIds(tmdbId, mediaType) {
     return parsed;
   } catch (error) {
     console.error(`[TMDB] getExternalIds error for ${mediaType}/${tmdbId}:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Search TMDb by title (with optional year) and return the best-ranked match.
+ * Used for catalog/meta enrichment when the only handle on a release is its
+ * parsed jobName.
+ *
+ * @param {object} options
+ * @param {string} options.title - parsed release title
+ * @param {string} options.type - 'movie' or 'series'
+ * @param {number|null} [options.year] - release year (movie) or first-air year (tv)
+ * @returns {Promise<object|null>} { tmdbId, mediaType, title, originalTitle, releaseYear, posterPath, posterUrl, backdropPath } or null
+ */
+async function searchByTitle({ title, type, year = null }) {
+  if (!isConfigured()) {
+    return null;
+  }
+
+  const trimmedTitle = String(title || '').trim();
+  if (!trimmedTitle) {
+    return null;
+  }
+
+  const mediaType = type === 'series' ? 'tv' : 'movie';
+  const cacheKey = getCacheKey('search', `${mediaType}:${trimmedTitle.toLowerCase()}:${year || ''}`, null);
+  const cached = getFromCache(cacheKey);
+  if (cached === SEARCH_CACHE_MISS) {
+    return null;
+  }
+  if (cached !== null) {
+    return cached;
+  }
+
+  try {
+    const endpoint = mediaType === 'movie' ? '/search/movie' : '/search/tv';
+    const params = {
+      query: trimmedTitle,
+      include_adult: false,
+      language: 'en-US',
+    };
+
+    if (Number.isFinite(year)) {
+      if (mediaType === 'movie') {
+        params.year = String(year);
+      } else {
+        params.first_air_date_year = String(year);
+      }
+    }
+
+    const data = await tmdbRequest(endpoint, params);
+    const results = Array.isArray(data?.results) ? data.results : [];
+    if (results.length === 0) {
+      setInCache(cacheKey, SEARCH_CACHE_MISS);
+      return null;
+    }
+
+    const normalizedQuery = normalizeSearchText(trimmedTitle);
+    const ranked = results
+      .slice(0, 10)
+      .map((result, index) => {
+        const primaryTitle = result?.title || result?.name || '';
+        const originalTitle = result?.original_title || result?.original_name || '';
+        const normalizedPrimary = normalizeSearchText(primaryTitle);
+        const normalizedOriginal = normalizeSearchText(originalTitle);
+        const resultYear = Number.parseInt(String(result?.release_date || result?.first_air_date || '').slice(0, 4), 10);
+        let score = 0;
+
+        if (normalizedPrimary === normalizedQuery || normalizedOriginal === normalizedQuery) {
+          score += 100;
+        } else if (normalizedPrimary.includes(normalizedQuery) || normalizedOriginal.includes(normalizedQuery)) {
+          score += 50;
+        }
+
+        if (Number.isFinite(year) && Number.isFinite(resultYear) && resultYear === year) {
+          score += 20;
+        }
+
+        score += Math.max(0, 10 - index);
+
+        return { result, score };
+      })
+      .sort((left, right) => right.score - left.score);
+
+    const best = ranked[0]?.result;
+    if (!best) {
+      setInCache(cacheKey, SEARCH_CACHE_MISS);
+      return null;
+    }
+
+    const parsed = {
+      tmdbId: String(best.id),
+      mediaType,
+      title: best.title || best.name || trimmedTitle,
+      originalTitle: best.original_title || best.original_name || null,
+      releaseYear: (best.release_date || best.first_air_date || '').substring(0, 4) || null,
+      posterPath: best.poster_path || null,
+      posterUrl: buildPosterUrl(best.poster_path),
+      backdropPath: best.backdrop_path || null,
+    };
+
+    setInCache(cacheKey, parsed);
+    return parsed;
+  } catch (error) {
+    console.error(`[TMDB] searchByTitle error for ${trimmedTitle}:`, error.message);
     return null;
   }
 }
@@ -653,6 +776,7 @@ module.exports = {
   findByExternalId,
   getDetails,
   getExternalIds,
+  searchByTitle,
   getMetadataAndTitles,
   getLocalizedTitle,
   normalizeToAscii,
