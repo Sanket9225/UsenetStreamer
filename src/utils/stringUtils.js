@@ -4,6 +4,17 @@ const TITLE_SIMILARITY_THRESHOLD = 0.85;
 // (ä→ae, ü→ue, ß→ss), applied BEFORE NFD so they aren't reduced to bare vowels.
 const UMLAUT_MAP = { 'Ä': 'Ae', 'ä': 'ae', 'Ö': 'Oe', 'ö': 'oe', 'Ü': 'Ue', 'ü': 'ue', 'ß': 'ss' };
 
+// The word "&" expands to depends on the title's language, the way release names
+// spell it out (Dutch "en", German "und", French "et", …). Mirrors UMLAUT_MAP:
+// an existing language-aware normalization pattern. Falls back to English "and"
+// when the language is unknown, preserving the previous behaviour.
+const AMPERSAND_MAP = { nl: 'en', de: 'und', fr: 'et', es: 'y', it: 'e', pt: 'e', en: 'and' };
+
+function ampersandWord(lang) {
+  const code = String(lang || '').slice(0, 2).toLowerCase();
+  return AMPERSAND_MAP[code] || 'and';
+}
+
 // Fold accents to ASCII so a metadata title ("Café", "Über") compares equal to
 // the ASCII form release names use ("Cafe", "Ueber"). Mirrors the query-side
 // ASCII folding (tmdb.normalizeToAscii) so both sides of a match normalize the
@@ -12,13 +23,13 @@ function foldAccents(text) {
   return String(text || '')
     .replace(/[ÄäÖöÜüß]/g, (c) => UMLAUT_MAP[c])
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '');
+    .replace(/[\u0300-\u036f]/g, '');
 }
 
-function sanitizeStrictSearchPhrase(text) {
+function sanitizeStrictSearchPhrase(text, lang) {
   if (!text) return '';
   return foldAccents(text)
-    .replace(/&/g, ' and ')
+    .replace(/&/g, ` ${ampersandWord(lang)} `)
     // Treat separators — including slash/backslash — as a single space so a
     // title like "A/B" tokenizes as ["a","b"] (matching dotted release names
     // "A.B...") instead of collapsing into "ab".
@@ -39,17 +50,17 @@ function sanitizeStrictSearchPhrase(text) {
 // or the indexer returns nothing. Rules:
 //   - fold accents/umlauts to ASCII (matches how releases spell them)
 //   - apostrophes are REMOVED, not spaced ("Director's" → "Directors", not "Director s")
-//   - "&" → "and" (so "1 & 2" → "1 and 2")
+//   - "&" → language-specific word ("and"/"en"/"und"/… via ampersandWord)
 //   - every other punctuation/symbol → space ("A/B" → "A B",
 //     commas, parens, colons, dots, hyphens, music glyphs, …)
 //   - collapse whitespace; case is preserved (indexer text search is
 //     case-insensitive). The result lines up with sanitizeStrictSearchPhrase so
 //     the query we send and the phrase we match on stay consistent.
-function cleanSearchTitle(title) {
+function cleanSearchTitle(title, lang) {
   if (!title) return '';
   return foldAccents(String(title))
     .replace(/['‘’ʼ]/g, '') // straight/curly/modifier apostrophes → removed
-    .replace(/&/g, ' and ')
+    .replace(/&/g, ` ${ampersandWord(lang)} `)
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')          // any other punctuation/symbol → space
     .replace(/\s+/g, ' ')
     .trim();
@@ -85,9 +96,9 @@ function matchesStrictSearch(title, strictPhrase) {
   return true;
 }
 
-function normaliseTitle(text) {
+function normaliseTitle(text, lang) {
   if (!text) return '';
-  return foldAccents(String(text).replace(/&/g, 'and'))
+  return foldAccents(String(text).replace(/&/g, ampersandWord(lang)))
     .replace(/[^\p{L}\p{N}]/gu, '')   // strip ALL non-alphanumeric
     .toLowerCase();
 }
@@ -135,6 +146,7 @@ function titleSimilarityCheck(candidateParsedTitle, queryParsedTitle) {
 module.exports = {
   TITLE_SIMILARITY_THRESHOLD,
   foldAccents,
+  ampersandWord,
   sanitizeStrictSearchPhrase,
   cleanSearchTitle,
   matchesStrictSearch,

@@ -2433,7 +2433,7 @@ async function streamHandler(req, res) {
             // "A B and C ..."); the year/SxxEyy suffix is alphanumeric so it
             // survives. ASCII-normalize first (handles CJK / transliteration),
             // then clean.
-            textQueryFallbackValue = cleanSearchTitle(tmdbService.normalizeToAscii(rawFallback));
+            textQueryFallbackValue = cleanSearchTitle(tmdbService.normalizeToAscii(rawFallback), tmdbMetadata?.originalLanguage);
             if (textQueryFallbackValue && textQueryFallbackValue !== rawFallback) {
               console.log(`${INDEXER_LOG_PREFIX} Normalized text query to ASCII`, { original: rawFallback, normalized: textQueryFallbackValue });
             }
@@ -2495,7 +2495,7 @@ async function streamHandler(req, res) {
             // Strip punctuation so the query matches release-name tokens
             // ("A, B & C (...)" → "A B and C ..."); ratio guard above already
             // ran on the uncleaned title.
-            let normalizedQuery = cleanSearchTitle(normalizedBase);
+            let normalizedQuery = cleanSearchTitle(normalizedBase, titleObj.language);
             if (!normalizedQuery) return;
             if (type === 'movie' && Number.isFinite(releaseYear)) {
               normalizedQuery = `${normalizedQuery} ${releaseYear}`;
