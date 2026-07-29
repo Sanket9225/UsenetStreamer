@@ -919,7 +919,7 @@ async function proxyNzbdavStream(req, res, viewPath, fileNameHint = '') {
       headers: {
         'User-Agent': headers['User-Agent'] || `UsenetStreamer/${ADDON_VERSION}`
       },
-      timeout: 30000,
+      timeout: NZBDAV_STREAM_TIMEOUT_MS,
       validateStatus: (status) => status < 500,
       httpAgent: nzbdavHttpAgent,
       httpsAgent: nzbdavHttpsAgent
