@@ -514,27 +514,55 @@ function filterAndMap(jsonData, options) {
           return;
         }
       }
-      if (queryMeta?.season && parsedSeason && queryMeta.season !== parsedSeason) {
-        if (debugEnabled) {
-          console.log('[EASYNEWS] Strict match failed (season mismatch)', {
-            title,
-            parsedTitle: parsedCandidateTitle,
-            season: parsedSeason,
-            expectedSeason: queryMeta.season,
-          });
+      if (queryMeta?.airDate) {
+        const targetDates = [
+          queryMeta.airDate,
+          ...(queryMeta.alternateAirDates || []).map((a) => (typeof a === 'string' ? a : a?.airDate)).filter(Boolean),
+        ];
+        const releaseDate = parsedRelease?.date || null;
+        const rawTitle = String(title || '').toLowerCase();
+        const dateMatches = (releaseDate && targetDates.includes(releaseDate)) || targetDates.some((td) => {
+          const dotted = td.replace(/-/g, '.');
+          const hyphen = td.replace(/\./g, '-');
+          const spaced = td.replace(/[-.]/g, ' ');
+          return rawTitle.includes(dotted) || rawTitle.includes(hyphen) || rawTitle.includes(spaced);
+        });
+        const seasonEpMatches = queryMeta.season && queryMeta.episode && parsedSeason && parsedEpisode
+          && queryMeta.season === parsedSeason && queryMeta.episode === parsedEpisode;
+
+        if (!dateMatches && !seasonEpMatches) {
+          if (debugEnabled) {
+            console.log('[EASYNEWS] Strict match failed (air-date mismatch)', {
+              title,
+              releaseDate,
+              expectedDate: queryMeta.airDate,
+            });
+          }
+          return;
         }
-        return;
-      }
-      if (queryMeta?.episode && parsedEpisode && queryMeta.episode !== parsedEpisode) {
-        if (debugEnabled) {
-          console.log('[EASYNEWS] Strict match failed (episode mismatch)', {
-            title,
-            parsedTitle: parsedCandidateTitle,
-            episode: parsedEpisode,
-            expectedEpisode: queryMeta.episode,
-          });
+      } else {
+        if (queryMeta?.season && parsedSeason && queryMeta.season !== parsedSeason) {
+          if (debugEnabled) {
+            console.log('[EASYNEWS] Strict match failed (season mismatch)', {
+              title,
+              parsedTitle: parsedCandidateTitle,
+              season: parsedSeason,
+              expectedSeason: queryMeta.season,
+            });
+          }
+          return;
         }
-        return;
+        if (queryMeta?.episode && parsedEpisode && queryMeta.episode !== parsedEpisode) {
+          if (debugEnabled) {
+            console.log('[EASYNEWS] Strict match failed (episode mismatch)', {
+              title,
+              parsedTitle: parsedCandidateTitle,
+              episode: parsedEpisode,
+              expectedEpisode: queryMeta.episode,
+            });
+          }
+          return;
+        }
       }
 
       if (debugEnabled) {
@@ -548,8 +576,10 @@ function filterAndMap(jsonData, options) {
 
     if (queryMeta) {
       if (queryMeta.year && titleMeta.year && queryMeta.year !== titleMeta.year) return;
-      if (queryMeta.season && titleMeta.season && queryMeta.season !== titleMeta.season) return;
-      if (queryMeta.episode && titleMeta.episode && queryMeta.episode !== titleMeta.episode) return;
+      if (!queryMeta.airDate) {
+        if (queryMeta.season && titleMeta.season && queryMeta.season !== titleMeta.season) return;
+        if (queryMeta.episode && titleMeta.episode && queryMeta.episode !== titleMeta.episode) return;
+      }
     }
 
     if (tokenSet.size > 0) {
@@ -615,11 +645,13 @@ async function fetchSearchResults(query, authOverride = null) {
   return response.data || {};
 }
 
-function buildQueryMeta({ rawQuery, year, season, episode }) {
+function buildQueryMeta({ rawQuery, year, season, episode, airDate, alternateAirDates }) {
   const markers = extractReleaseMarkers(rawQuery || '');
   if (year) markers.year = year;
   if (typeof season === 'number') markers.season = season;
   if (typeof episode === 'number') markers.episode = episode;
+  if (airDate) markers.airDate = airDate;
+  if (Array.isArray(alternateAirDates)) markers.alternateAirDates = alternateAirDates;
   try {
     const parsed = parseTorrentTitle(rawQuery || '');
     if (parsed?.title) markers.title = parsed.title;
@@ -668,6 +700,8 @@ async function searchEasynews(options = {}) {
     year,
     season,
     episode,
+    airDate,
+    alternateAirDates,
     strictMode = false,
     specialTextOnly = false,
   } = options;
@@ -681,7 +715,7 @@ async function searchEasynews(options = {}) {
   const strict = strictMode && !specialTextOnly && !EASYNEWS_SAFE_TEXT_MODE;
   const strictPhrase = strict ? sanitizePhrase(query) : '';
   const queryTokens = strict ? tokenize(query) : [];
-  const queryMeta = strict ? buildQueryMeta({ rawQuery: query, year, season, episode }) : null;
+  const queryMeta = strict ? buildQueryMeta({ rawQuery: query, year, season, episode, airDate, alternateAirDates }) : null;
   const minBytes = EASYNEWS_MIN_SIZE_BYTES;
   const data = await fetchSearchResults(query);
   const mapped = filterAndMap(data, {

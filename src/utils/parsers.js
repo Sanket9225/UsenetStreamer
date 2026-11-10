@@ -66,6 +66,23 @@ function fileMatchesEpisode(fileName, requestedEpisode) {
     `s${String(s).padStart(2, '0')}e${String(e).padStart(2, '0')}`,
     `${s}x${String(e).padStart(2, '0')}`,
   ];
+  if (requestedEpisode.airDate) {
+    const rawDate = String(requestedEpisode.airDate).trim();
+    const dotted = rawDate.replace(/-/g, '.').toLowerCase();
+    const hyphen = rawDate.replace(/\./g, '-').toLowerCase();
+    const spaced = rawDate.replace(/[-.]/g, ' ').toLowerCase();
+    const compact = rawDate.replace(/[-.]/g, '').toLowerCase();
+    patterns.push(dotted, hyphen, spaced, compact);
+  }
+  if (Array.isArray(requestedEpisode.alternateAirDates)) {
+    for (const alt of requestedEpisode.alternateAirDates) {
+      const altStr = typeof alt === 'string' ? alt : alt?.airDate;
+      if (altStr) {
+        const d = String(altStr).trim();
+        patterns.push(d.replace(/-/g, '.').toLowerCase(), d.replace(/\./g, '-').toLowerCase(), d.replace(/[-.]/g, ' ').toLowerCase());
+      }
+    }
+  }
   return patterns.some((pattern) => lower.includes(pattern));
 }
 

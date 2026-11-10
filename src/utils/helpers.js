@@ -740,6 +740,7 @@ function buildStreamCacheKey({ type, id, query = {}, requestedEpisode = null, pr
     ? {
       season: Number.isFinite(requestedEpisode.season) ? requestedEpisode.season : null,
       episode: Number.isFinite(requestedEpisode.episode) ? requestedEpisode.episode : null,
+      airDate: requestedEpisode.airDate || null,
     }
     : null;
   const payload = { type, id, requestedEpisode: normalizedEpisode, query: normalizedQuery };

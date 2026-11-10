@@ -100,6 +100,7 @@ const nzbdavService = require('./src/services/nzbdav');
 const specialMetadata = require('./src/services/specialMetadata');
 const tmdbService = require('./src/services/tmdb');
 const tvdbService = require('./src/services/tvdb');
+const dailyShowsService = require('./src/services/dailyShows');
 const animeDatabase = require('./src/services/animeDatabase');
 const autoAdvanceQueue = require('./src/services/autoAdvanceQueue');
 const backgroundTriage = require('./src/services/backgroundTriage');
@@ -255,6 +256,15 @@ adminApiRouter.get('/config', (req, res) => {
   }
   if (!values.TMDB_SEARCH_MODE) {
     values.TMDB_SEARCH_MODE = 'english_only';
+  }
+  if (values.DAILY_SHOWS_ENABLED === undefined || values.DAILY_SHOWS_ENABLED === null || values.DAILY_SHOWS_ENABLED === '') {
+    values.DAILY_SHOWS_ENABLED = 'true';
+  }
+  if (values.DAILY_SHOWS_AUTO_DETECT === undefined || values.DAILY_SHOWS_AUTO_DETECT === null || values.DAILY_SHOWS_AUTO_DETECT === '') {
+    values.DAILY_SHOWS_AUTO_DETECT = 'true';
+  }
+  if (!values.DAILY_SHOWS_CUSTOM_IDS) {
+    values.DAILY_SHOWS_CUSTOM_IDS = '';
   }
   // Populate derived sort order so dashboard reflects legacy NZB_SORT_MODE correctly
   if (!(values.NZB_SORT_ORDER || '').trim()) {
@@ -449,6 +459,7 @@ adminApiRouter.post('/config', async (req, res) => {
     nzbdavService.reloadConfig();
     tmdbService.reloadConfig();
     tvdbService.reloadConfig();
+    dailyShowsService.reloadConfig();
     if (typeof cache.reloadNzbdavCacheConfig === 'function') {
       cache.reloadNzbdavCacheConfig();
     }
@@ -1179,6 +1190,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   const resolvedAddonBase = ADDON_BASE_URL || `http://${SERVER_HOST}:${currentPort}`;
   easynewsService.reloadConfig({ addonBaseUrl: resolvedAddonBase, sharedSecret: ADDON_STREAM_TOKEN });
   diskNzbCache.reloadConfig();
+  dailyShowsService.reloadConfig();
 
   const portChanged = previousPort !== undefined && previousPort !== currentPort;
   if (log) {
@@ -1291,6 +1303,9 @@ const ADMIN_CONFIG_KEYS = [
   'TMDB_SEARCH_MODE',
   'TVDB_ENABLED',
   'TVDB_API_KEY',
+  'DAILY_SHOWS_ENABLED',
+  'DAILY_SHOWS_AUTO_DETECT',
+  'DAILY_SHOWS_CUSTOM_IDS',
 ];
 
 ADMIN_CONFIG_KEYS.push('NEWZNAB_ENABLED', 'NEWZNAB_FILTER_NZB_ONLY', ...NEWZNAB_NUMBERED_KEYS);
@@ -2005,15 +2020,19 @@ async function streamHandler(req, res) {
       });
     }
 
-    const needsCinemeta = !skipMetadataFetch && !shouldUseTmdb && (
-      needsStrictSeriesTvdb
-      || needsRelaxedMetadata
-      || easynewsService.requiresCinemetaMetadata(isSpecialRequest)
+    const needsCinemeta = !skipMetadataFetch && (
+      (!shouldUseTmdb && (
+        needsStrictSeriesTvdb
+        || needsRelaxedMetadata
+        || easynewsService.requiresCinemetaMetadata(isSpecialRequest)
+      ))
+      || (type === 'series' && dailyShowsService.isEnabled())
     );
 
     let cinemetaPromise = null;
     if (needsCinemeta) {
-      const cinemetaPath = type === 'series' ? `series/${baseIdentifier}.json` : `${type}/${baseIdentifier}.json`;
+      const cinemetaId = incomingImdbId || baseIdentifier;
+      const cinemetaPath = type === 'series' ? `series/${cinemetaId}.json` : `${type}/${cinemetaId}.json`;
       const cinemetaUrl = `${CINEMETA_URL}/${cinemetaPath}`;
       console.log(`[CINEMETA] Starting Cinemeta fetch in background from ${cinemetaUrl}`);
       cinemetaPromise = axios.get(cinemetaUrl, { timeout: 10000 })
@@ -2398,6 +2417,45 @@ async function streamHandler(req, res) {
         ? stripSeriesSubtitle(movieTitle, isCinemetaTitleSource)
         : movieTitle;
 
+      // Daily show detection & air-date resolution
+      let isDaily = false;
+      let dailyAirDate = null;
+      if (type === 'series' && dailyShowsService.isEnabled()) {
+        isDaily = dailyShowsService.isDailyShow({
+          imdbId: metaIds.imdb,
+          tvdbId: metaIds.tvdb,
+          tmdbId: metaIds.tmdb,
+          cinemetaMeta,
+          title: searchTitle || movieTitle,
+        });
+        if (isDaily) {
+          console.log(`[DAILY SHOWS] Detected daily show: "${searchTitle || movieTitle}"`);
+          dailyAirDate = await dailyShowsService.resolveAirDate({
+            seasonNum,
+            episodeNum,
+            cinemetaMeta,
+            imdbId: metaIds.imdb,
+            tvdbId: metaIds.tvdb,
+            tmdbId: metaIds.tmdb,
+            tmdbService,
+            tvdbService,
+          });
+          if (dailyAirDate) {
+            requestedEpisode = {
+              ...(requestedEpisode || {}),
+              season: seasonNum,
+              episode: episodeNum,
+              airDate: dailyAirDate.airDate,
+              airDateDotted: dailyAirDate.airDateDotted,
+              airDateHyphenated: dailyAirDate.airDateHyphenated,
+              airDateSpaced: dailyAirDate.airDateSpaced,
+              alternateAirDates: dailyAirDate.alternateAirDates,
+              isDaily: true,
+            };
+          }
+        }
+      }
+
       // Continue with text-based searches using TMDb titles
       const textQueryParts = [];
       let tmdbLocalizedQuery = null;
@@ -2408,6 +2466,8 @@ async function streamHandler(req, res) {
       }
       if (type === 'movie' && Number.isFinite(releaseYear)) {
         textQueryParts.push(String(releaseYear));
+      } else if (type === 'series' && dailyAirDate) {
+        textQueryParts.push(dailyAirDate.airDateDotted);
       } else if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
         textQueryParts.push(`S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`);
       }
@@ -2463,6 +2523,21 @@ async function streamHandler(req, res) {
               } else {
                 console.log(`${INDEXER_LOG_PREFIX} Text search plan already present (deduped)`, { query: textQueryFallbackValue });
               }
+
+              if (type === 'series' && dailyAirDate) {
+                const hyphenQuery = cleanSearchTitle(`${tmdbService.normalizeToAscii(searchTitle)} ${dailyAirDate.airDateHyphenated}`, tmdbMetadata?.originalLanguage);
+                if (hyphenQuery && hyphenQuery !== textQueryFallbackValue) {
+                  addPlan('search', { rawQuery: hyphenQuery });
+                }
+                for (const alt of (dailyAirDate.alternateAirDates || [])) {
+                  const altQuery = cleanSearchTitle(`${tmdbService.normalizeToAscii(searchTitle)} ${alt.airDateDotted}`, tmdbMetadata?.originalLanguage);
+                  if (altQuery) addPlan('search', { rawQuery: altQuery });
+                }
+                if (Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
+                  const sxxExxQuery = cleanSearchTitle(`${tmdbService.normalizeToAscii(searchTitle)} S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`, tmdbMetadata?.originalLanguage);
+                  if (sxxExxQuery) addPlan('search', { rawQuery: sxxExxQuery });
+                }
+              }
             } else {
               console.log(`${INDEXER_LOG_PREFIX} Skipping text search plan (empty after ASCII normalization); will use TMDb titles instead`);
             }
@@ -2500,6 +2575,8 @@ async function streamHandler(req, res) {
             if (!normalizedQuery) return;
             if (type === 'movie' && Number.isFinite(releaseYear)) {
               normalizedQuery = `${normalizedQuery} ${releaseYear}`;
+            } else if (type === 'series' && dailyAirDate) {
+              normalizedQuery = `${normalizedQuery} ${dailyAirDate.airDateDotted}`;
             } else if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
               normalizedQuery = `${normalizedQuery} S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
             }
@@ -2524,6 +2601,8 @@ async function streamHandler(req, res) {
             if (!normalizedQuery) continue;
             if (type === 'movie' && Number.isFinite(releaseYear)) {
               normalizedQuery = `${normalizedQuery} ${releaseYear}`;
+            } else if (type === 'series' && dailyAirDate) {
+              normalizedQuery = `${normalizedQuery} ${dailyAirDate.airDateDotted}`;
             } else if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
               normalizedQuery = `${normalizedQuery} S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
             }
@@ -2558,6 +2637,7 @@ async function streamHandler(req, res) {
           releaseYear,
           seasonNum,
           episodeNum,
+          dailyAirDate,
           tmdbTitles: metaSources.find(s => s?._tmdbTitles)?._tmdbTitles,
           isAnimeRequest,
           animeSearchableTitles,
@@ -2684,29 +2764,57 @@ async function streamHandler(req, res) {
           return false;
         }
         if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
-          if (!Number.isFinite(annotated?.season) || !Number.isFinite(annotated?.episode)) {
-            if (isNewznabDebugEnabled()) {
-              console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (missing season/episode)`, {
-                title: candidateTitle,
-                season: annotated?.season ?? null,
-                episode: annotated?.episode ?? null,
-                query: plan.query,
-              });
+          if (requestedEpisode?.airDate) {
+            const dateMatches = dailyShowsService.matchesDailyAirDate(annotated, {
+              airDate: requestedEpisode.airDate,
+              airDateDotted: requestedEpisode.airDateDotted,
+              airDateHyphenated: requestedEpisode.airDateHyphenated,
+              airDateSpaced: requestedEpisode.airDateSpaced,
+              alternateAirDates: requestedEpisode.alternateAirDates,
+            });
+            const seasonEpMatches = Number.isFinite(annotated?.season) && Number.isFinite(annotated?.episode)
+              && Number(annotated.season) === Number(seasonNum) && Number(annotated.episode) === Number(episodeNum);
+
+            if (!dateMatches && !seasonEpMatches) {
+              if (isNewznabDebugEnabled()) {
+                console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (daily show air-date & season/episode mismatch)`, {
+                  title: candidateTitle,
+                  date: annotated?.date ?? null,
+                  expectedAirDate: requestedEpisode.airDate,
+                  season: annotated?.season ?? null,
+                  episode: annotated?.episode ?? null,
+                  expectedSeason: seasonNum,
+                  expectedEpisode: episodeNum,
+                  query: plan.query,
+                });
+              }
+              return false;
             }
-            return false;
-          }
-          if (Number(annotated.season) !== Number(seasonNum) || Number(annotated.episode) !== Number(episodeNum)) {
-            if (isNewznabDebugEnabled()) {
-              console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (season/episode mismatch)`, {
-                title: candidateTitle,
-                season: annotated?.season ?? null,
-                episode: annotated?.episode ?? null,
-                expectedSeason: seasonNum,
-                expectedEpisode: episodeNum,
-                query: plan.query,
-              });
+          } else {
+            if (!Number.isFinite(annotated?.season) || !Number.isFinite(annotated?.episode)) {
+              if (isNewznabDebugEnabled()) {
+                console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (missing season/episode)`, {
+                  title: candidateTitle,
+                  season: annotated?.season ?? null,
+                  episode: annotated?.episode ?? null,
+                  query: plan.query,
+                });
+              }
+              return false;
             }
-            return false;
+            if (Number(annotated.season) !== Number(seasonNum) || Number(annotated.episode) !== Number(episodeNum)) {
+              if (isNewznabDebugEnabled()) {
+                console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (season/episode mismatch)`, {
+                  title: candidateTitle,
+                  season: annotated?.season ?? null,
+                  episode: annotated?.episode ?? null,
+                  expectedSeason: seasonNum,
+                  expectedEpisode: episodeNum,
+                  query: plan.query,
+                });
+              }
+              return false;
+            }
           }
         }
         if (type === 'movie' && Number.isFinite(releaseYear)) {
@@ -2734,13 +2842,16 @@ async function streamHandler(req, res) {
           }
         }
         // For series: if the NZB has a year and we know the release year, reject on mismatch (±1 tolerance)
-        if (type === 'series' && Number.isFinite(releaseYear) && Number.isFinite(annotated?.year)) {
-          if (Math.abs(Number(annotated.year) - Number(releaseYear)) > 1) {
+        if (type === 'series' && Number.isFinite(annotated?.year)) {
+          const expectedYear = requestedEpisode?.airDate
+            ? Number(requestedEpisode.airDate.split('-')[0])
+            : releaseYear;
+          if (Number.isFinite(expectedYear) && Math.abs(Number(annotated.year) - Number(expectedYear)) > 1) {
             if (isNewznabDebugEnabled()) {
               console.log(`${INDEXER_LOG_PREFIX} Strict text match failed (series year mismatch)`, {
                 title: candidateTitle,
                 year: annotated.year,
-                expectedYear: releaseYear,
+                expectedYear,
                 query: plan.query,
               });
             }
@@ -4230,9 +4341,13 @@ async function streamHandler(req, res) {
       const safeTitle = (searchTitle || 'SmartPlay').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
       let smartPlayFilename;
       if (type === 'series' && requestedEpisode) {
-        const s = String(requestedEpisode.season).padStart(2, '0');
-        const e = String(requestedEpisode.episode).padStart(2, '0');
-        smartPlayFilename = `${safeTitle}_S${s}E${e}.mkv`;
+        if (requestedEpisode.airDateDotted) {
+          smartPlayFilename = `${safeTitle}_${requestedEpisode.airDateDotted.replace(/\./g, '_')}.mkv`;
+        } else {
+          const s = String(requestedEpisode.season).padStart(2, '0');
+          const e = String(requestedEpisode.episode).padStart(2, '0');
+          smartPlayFilename = `${safeTitle}_S${s}E${e}.mkv`;
+        }
       } else {
         smartPlayFilename = releaseYear ? `${safeTitle}_${releaseYear}.mkv` : `${safeTitle}.mkv`;
       }
@@ -4242,7 +4357,11 @@ async function streamHandler(req, res) {
       // Build Smart Play description with title and episode info
       let smartPlayTitle = searchTitle;
       if (type === 'series' && requestedEpisode) {
-        smartPlayTitle = `${searchTitle} S${String(requestedEpisode.season).padStart(2, '0')}E${String(requestedEpisode.episode).padStart(2, '0')}`;
+        if (requestedEpisode.airDateDotted) {
+          smartPlayTitle = `${searchTitle} ${requestedEpisode.airDateDotted}`;
+        } else {
+          smartPlayTitle = `${searchTitle} S${String(requestedEpisode.season).padStart(2, '0')}E${String(requestedEpisode.episode).padStart(2, '0')}`;
+        }
       } else if (releaseYear) {
         smartPlayTitle = `${searchTitle} (${releaseYear})`;
       }

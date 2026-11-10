@@ -798,6 +798,28 @@ async function getLocalizedTitle({ imdbId, type, englishTitle, preferredLanguage
 }
 
 /**
+ * Get episode air-date from TMDb
+ */
+async function getEpisodeAirDate(tmdbId, season, episode) {
+  if (!isConfigured() || !tmdbId || !Number.isFinite(Number(season)) || !Number.isFinite(Number(episode))) {
+    return null;
+  }
+  const cacheKey = getCacheKey('episode_air_date', `${tmdbId}/s${season}e${episode}`);
+  const cached = getFromCache(cacheKey);
+  if (cached !== null) return cached;
+
+  try {
+    const data = await tmdbRequest(`/tv/${tmdbId}/season/${season}/episode/${episode}`);
+    const airDate = data?.air_date || null;
+    setInCache(cacheKey, airDate);
+    return airDate;
+  } catch (error) {
+    console.warn(`[TMDB] Failed to fetch air date for tv/${tmdbId} S${season}E${episode}:`, error.message);
+    return null;
+  }
+}
+
+/**
  * Clear the TMDb cache
  */
 function clearCache() {
@@ -811,6 +833,7 @@ module.exports = {
   getConfig,
   findByExternalId,
   getDetails,
+  getEpisodeAirDate,
   getExternalIds,
   searchByTitle,
   getMetadataAndTitles,
