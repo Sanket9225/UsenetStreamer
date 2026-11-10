@@ -1,10 +1,15 @@
 const { foldAccents, cleanSearchTitle } = require('../../utils/stringUtils');
 
-function appendEpisodeSuffix(title, { type, releaseYear, seasonNum, episodeNum }) {
+function appendEpisodeSuffix(title, { type, releaseYear, seasonNum, episodeNum, dailyAirDate }) {
   if (!title) return '';
   if (type === 'movie' && Number.isFinite(releaseYear)) return `${title} ${releaseYear}`;
-  if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
-    return `${title} S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
+  if (type === 'series') {
+    if (dailyAirDate?.airDateDotted) {
+      return `${title} ${dailyAirDate.airDateDotted}`;
+    }
+    if (Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
+      return `${title} S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
+    }
   }
   return title;
 }
@@ -41,10 +46,11 @@ function buildEasynewsSearchParams({
   strictMode,
   normalizeToAscii,
   originalLanguage,
+  dailyAirDate,
 }) {
   const seenKeys = new Set();
   const queries = [];
-  const suffixCtx = { type, releaseYear, seasonNum, episodeNum };
+  const suffixCtx = { type, releaseYear, seasonNum, episodeNum, dailyAirDate };
 
   // originalTitle is the pre-normalization source used for the retained-ratio check.
   // When rawTitle is already asciiTitle (pre-normalized), pass the raw original separately
@@ -122,6 +128,8 @@ function buildEasynewsSearchParams({
     year: Number.isFinite(releaseYear) ? releaseYear : null,
     season: type === 'series' ? seasonNum : null,
     episode: type === 'series' ? episodeNum : null,
+    airDate: dailyAirDate?.airDate || null,
+    alternateAirDates: dailyAirDate?.alternateAirDates || [],
     strictMode: Boolean(strictMode),
     specialTextOnly: Boolean(isSpecialRequest || requestLacksIdentifiers),
   };

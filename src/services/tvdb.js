@@ -133,6 +133,23 @@ async function getTvdbIdForSeries(imdbId) {
   }
 }
 
+async function getEpisodeAirDateForSeries(tvdbId, season, episode) {
+  if (!isConfigured() || !tvdbId || !Number.isFinite(Number(season)) || !Number.isFinite(Number(episode))) {
+    return null;
+  }
+  try {
+    const data = await tvdbRequest(`/series/${tvdbId}/episodes/default`, { season: Number(season), episodeNumber: Number(episode) });
+    const list = Array.isArray(data?.data?.episodes) ? data.data.episodes : (Array.isArray(data?.data) ? data.data : []);
+    const found = list.find((ep) => Number(ep.seasonNumber || ep.season) === Number(season) && Number(ep.number || ep.episodeNumber) === Number(episode));
+    if (found?.aired) return String(found.aired).trim();
+    if (found?.firstAired) return String(found.firstAired).trim();
+    return null;
+  } catch (error) {
+    console.warn('[TVDB] Failed to resolve episode air date:', error.message);
+    return null;
+  }
+}
+
 async function testTvdbConnection({ apiKey, enabled }) {
   if (enabled !== undefined) {
     const normalized = String(enabled).trim().toLowerCase();
@@ -154,5 +171,6 @@ module.exports = {
   getConfig,
   getImdbIdForSeries,
   getTvdbIdForSeries,
+  getEpisodeAirDateForSeries,
   testTvdbConnection,
 };

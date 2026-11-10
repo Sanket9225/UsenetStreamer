@@ -230,6 +230,8 @@
       if (element.type === 'checkbox') {
         if (key === 'TMDB_ENABLED' && rawValue === '') {
           element.checked = false;
+        } else if ((key === 'DAILY_SHOWS_ENABLED' || key === 'DAILY_SHOWS_AUTO_DETECT') && rawValue === '') {
+          element.checked = true;
         } else {
           element.checked = parseBool(rawValue);
         }

@@ -383,6 +383,7 @@ function parseReleaseMetadata(title) {
     season: parsedSeason,
     episode: parsedEpisode,
     year: parsedYear,
+    date: parsed.date || null,
     complete: parsed.complete || false,
     proper: parsed.proper || false,
     repack: parsed.repack || false,

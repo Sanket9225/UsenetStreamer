@@ -505,6 +505,9 @@ function buildNzbdavCacheKey(downloadUrl, category, requestedEpisode = null) {
   if (requestedEpisode && Number.isFinite(requestedEpisode.season) && Number.isFinite(requestedEpisode.episode)) {
     keyParts.push(`${requestedEpisode.season}x${requestedEpisode.episode}`);
   }
+  if (requestedEpisode?.airDate) {
+    keyParts.push(requestedEpisode.airDate);
+  }
   return keyParts.join('|');
 }
 

@@ -1055,6 +1055,25 @@ health'></textarea>
           </div>
         </section>
 
+        <section class="group" id="dailyShowsGroup">
+          <h3>Daily &amp; Late-Night TV Shows (Air-Date Support)</h3>
+          <p class="hint">Translates standard Stremio <code>SxxExx</code> queries on the fly to air-dates (<code>YYYY.MM.DD</code>) for daily and late-night shows (e.g. <em>The Daily Show</em>, <em>The Tonight Show</em>, <em>Stephen Colbert</em>) which are indexed on Usenet by broadcast date rather than season/episode numbers.</p>
+          <div class="field-grid">
+            <label class="checkbox">
+              <input name="DAILY_SHOWS_ENABLED" type="checkbox" />
+              <span>Enable Daily Shows Air-Date Support</span>
+            </label>
+            <label class="checkbox">
+              <input name="DAILY_SHOWS_AUTO_DETECT" type="checkbox" />
+              <span>Auto-detect Daily Shows via Cinemeta (Talk-Show, News, Soap)</span>
+            </label>
+            <label class="wide-field">Custom Daily Show IDs / Titles
+              <input name="DAILY_SHOWS_CUSTOM_IDS" type="text" placeholder="e.g. tt0115147, 71256, tt3444938" />
+              <span class="field-hint">Comma-separated IMDb IDs (<code>tt...</code>), TVDB IDs, TMDb IDs, or show titles to always treat as daily shows. Works alongside or independently of auto-detection.</span>
+            </label>
+          </div>
+        </section>
+
         <section class="group" data-profile-section="Addon Name">
           <h3>Addon Metadata</h3>
           <div class="field-grid">
