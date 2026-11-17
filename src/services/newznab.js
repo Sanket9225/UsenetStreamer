@@ -5,12 +5,22 @@ const { getDefaultSearchUserAgent, getDefaultDownloadUserAgent } = require('../u
 const { buildProxyAgents } = require('../utils/proxyAgent');
 
 const MAX_NEWZNAB_INDEXERS = 20;
-const NEWZNAB_FIELD_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT', 'ZYCLOPS', 'SEARCH_UA', 'DOWNLOAD_UA', 'PROXY'];
+const NEWZNAB_FIELD_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT', 'SEARCH_UA', 'DOWNLOAD_UA', 'PROXY'];
 const NEWZNAB_NUMBERED_KEYS = [];
 for (let i = 1; i <= MAX_NEWZNAB_INDEXERS; i += 1) {
   const idx = String(i).padStart(2, '0');
   NEWZNAB_FIELD_SUFFIXES.forEach((suffix) => {
     NEWZNAB_NUMBERED_KEYS.push(`NEWZNAB_${suffix}_${idx}`);
+  });
+}
+// Per-indexer keys that are no longer read. Cleared on admin save so stale
+// values do not linger in the runtime env file.
+const RETIRED_NEWZNAB_FIELD_SUFFIXES = ['ZYCLOPS'];
+const RETIRED_NEWZNAB_NUMBERED_KEYS = [];
+for (let i = 1; i <= MAX_NEWZNAB_INDEXERS; i += 1) {
+  const idx = String(i).padStart(2, '0');
+  RETIRED_NEWZNAB_FIELD_SUFFIXES.forEach((suffix) => {
+    RETIRED_NEWZNAB_NUMBERED_KEYS.push(`NEWZNAB_${suffix}_${idx}`);
   });
 }
 
@@ -454,34 +464,6 @@ function extractRequiredIdParams(plan) {
 
 loadCapsCacheFromEnv();
 
-const ZYCLOPS_ENDPOINT = 'https://zyclops.elfhosted.com';
-const ZYCLOPS_API_PATH = '/api';
-
-function getZyclopsProviderHost() {
-  return (process.env.NZB_TRIAGE_NNTP_HOST || '').trim();
-}
-
-function applyZyclopsTransform(config) {
-  if (!config || !config.zyclopsEnabled) return config;
-  const providerHost = getZyclopsProviderHost();
-  if (!providerHost) {
-    console.warn(`[NEWZNAB][${config.displayName}] Zyclops enabled but no NNTP host configured — skipping transform`);
-    return config;
-  }
-  const originalBaseUrl = `${config.endpoint}${config.apiPath}`;
-  const zyclopsApiKey = `${config.apiKey}&target=${encodeURIComponent(originalBaseUrl)}&provider_host=${encodeURIComponent(providerHost)}`;
-  return {
-    ...config,
-    endpoint: ZYCLOPS_ENDPOINT,
-    apiPath: ZYCLOPS_API_PATH,
-    apiKey: zyclopsApiKey,
-    baseUrl: `${ZYCLOPS_ENDPOINT}${ZYCLOPS_API_PATH}`,
-    _zyclopsOriginalEndpoint: config.endpoint,
-    _zyclopsOriginalApiPath: config.apiPath,
-    _zyclopsOriginalApiKey: config.apiKey,
-  };
-}
-
 function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
   const key = String(idx).padStart(2, '0');
   const endpoint = toTrimmedString(source[`NEWZNAB_ENDPOINT_${key}`]);
@@ -495,8 +477,6 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
   const isPaid = parseBoolean(paidRaw, false);
   const paidLimitRaw = source[`NEWZNAB_PAID_LIMIT_${key}`];
   const paidLimit = isPaid ? parsePaidLimit(paidLimitRaw, 6) : null;
-  const zyclopsRaw = source[`NEWZNAB_ZYCLOPS_${key}`];
-  const zyclopsEnabled = parseBoolean(zyclopsRaw, false);
   const searchUserAgent = toTrimmedString(source[`NEWZNAB_SEARCH_UA_${key}`]);
   const downloadUserAgent = toTrimmedString(source[`NEWZNAB_DOWNLOAD_UA_${key}`]);
   // Per-indexer proxy URL (blank => direct). Intentionally NOT part of
@@ -512,7 +492,7 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
   const displayName = name || (normalizedEndpoint ? extractHost(normalizedEndpoint) : `Indexer ${idx}`);
   const slug = displayName.toLowerCase().replace(/[^a-z0-9]+/gi, '-');
 
-  const rawConfig = {
+  return {
     id: key,
     ordinal: idx,
     endpoint: normalizedEndpoint,
@@ -523,7 +503,6 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
     enabled,
     isPaid,
     paidLimit,
-    zyclopsEnabled,
     searchUserAgent,
     downloadUserAgent,
     proxy,
@@ -531,8 +510,6 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
     dedupeKey: slug || `indexer-${key}`,
     baseUrl: normalizedEndpoint ? `${normalizedEndpoint}${apiPath}` : '',
   };
-
-  return applyZyclopsTransform(rawConfig);
 }
 
 function buildIndexerConfigs(source = {}, options = {}) {
@@ -1133,6 +1110,7 @@ async function testNewznabCaps(config, options = {}) {
 module.exports = {
   MAX_NEWZNAB_INDEXERS,
   NEWZNAB_NUMBERED_KEYS,
+  RETIRED_NEWZNAB_NUMBERED_KEYS,
   getEnvNewznabConfigs,
   getNewznabConfigsFromValues,
   filterUsableConfigs,

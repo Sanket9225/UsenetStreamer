@@ -70,7 +70,7 @@
   let loadedSortMode = 'quality_then_size';
 
   const MAX_NEWZNAB_INDEXERS = 20;
-  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT', 'ZYCLOPS', 'SEARCH_UA', 'DOWNLOAD_UA', 'PROXY'];
+  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT', 'SEARCH_UA', 'DOWNLOAD_UA', 'PROXY'];
 
   // Canonical option vocabularies for preferred/excluded chip helpers.
   // Aligned with the import schema so imported configs map 1:1. Release groups
@@ -870,12 +870,7 @@
             <input type="text" data-field="PROXY" placeholder="socks5://gluetun:8388 or http://gluetun:8888" autocomplete="new-password" />
             <span class="field-hint">Optional — usually not needed. Only set this if this indexer has blocked your server's IP (common on cloud/VPS hosts). Routes this indexer's search, caps, test and NZB downloads through the proxy. Leave blank for a direct connection. Local/LAN targets are bypassed; use socks5h:// to resolve DNS at the proxy. Need one? Webshare (webshare.io) offers free proxies.</span>
           </label>
-          <label class="checkbox">
-            <input type="checkbox" data-field="ZYCLOPS" />
-            <span>Enable Zyclops Health Check Proxy</span>
-          </label>
         </div>
-        <p class="warning hidden" data-zyclops-warning>⚠️ Zyclops proxies your indexer URL/API key and returns only known-healthy results for your providers. It also downloads and ingests the newest untested NZB to enrich the health database. (Learn more <A HREF="https://zyclops.elfhosted.com/">here</A>) Many indexers prohibit this, so proceed at your own risk. The health database is directly searchable via Newznab on private ElfHosted instances only.</p>
       </details>
     `;
 
@@ -886,14 +881,9 @@
     const apiKeyInput = row.querySelector('[data-field="API_KEY"]');
     const endpointInput = row.querySelector('[data-field="ENDPOINT"]');
     const paidLimitSelect = row.querySelector('[data-field="PAID_LIMIT"]');
-    const zyclopsToggle = row.querySelector('[data-field="ZYCLOPS"]');
-    const zyclopsRowWarning = row.querySelector('[data-zyclops-warning]');
 
     if (removeButton) removeButton.addEventListener('click', () => { removeNewznabRow(row); });
     if (enabledToggle) enabledToggle.addEventListener('change', () => syncNewznabControls());
-    if (zyclopsToggle) zyclopsToggle.addEventListener('change', () => {
-      if (zyclopsRowWarning) zyclopsRowWarning.classList.toggle('hidden', !zyclopsToggle.checked);
-    });
     if (paidToggle) {
       paidToggle.addEventListener('change', () => {
         updateHealthPaidWarning();
@@ -924,10 +914,7 @@
     }
     refreshNewznabFieldNames();
     applyNewznabRowValues(row, initialValues);
-    const zyclopsCheck = row.querySelector('[data-field="ZYCLOPS"]');
-    const zyclopsWarn = row.querySelector('[data-zyclops-warning]');
-    if (zyclopsCheck && zyclopsWarn) zyclopsWarn.classList.toggle('hidden', !zyclopsCheck.checked);
-    // Auto-open Advanced settings if Zyclops is enabled or any UA override is set
+    // Auto-open Advanced settings if any UA or proxy override is set
     const advancedDetails = row.querySelector('details.advanced-settings');
     if (advancedDetails) {
       const searchUaInput = row.querySelector('[data-field="SEARCH_UA"]');
@@ -935,8 +922,7 @@
       const proxyInput = row.querySelector('[data-field="PROXY"]');
       const hasOverride = (searchUaInput && searchUaInput.value && searchUaInput.value.trim())
         || (downloadUaInput && downloadUaInput.value && downloadUaInput.value.trim())
-        || (proxyInput && proxyInput.value && proxyInput.value.trim())
-        || (zyclopsCheck && zyclopsCheck.checked);
+        || (proxyInput && proxyInput.value && proxyInput.value.trim());
       if (hasOverride) advancedDetails.open = true;
     }
     if (options.preset) {
@@ -1540,8 +1526,7 @@
     const needsNntp = ['health-check', 'health-check-auto-advance', 'smart-play-only', 'smart-play'].includes(mode);
     const hasAutoAdvance = ['auto-advance', 'health-check-auto-advance', 'smart-play'].includes(mode);
 
-    // Show/hide NNTP credentials section — always visible now
-    // (needed for Zyclops even in no-protection/auto-advance modes)
+    // NNTP credentials section is always visible
 
     // Health-check modes can't run without NNTP creds — flag it right at the
     // mode dropdown, but only while the provider login is still missing.
@@ -1846,26 +1831,10 @@
     updateHealthPaidWarning();
   }
 
-  function hasAnyZyclopsEnabled() {
-    return getNewznabRows().some((row) => {
-      const zyclopsToggle = row.querySelector('[data-field="ZYCLOPS"]');
-      return Boolean(zyclopsToggle?.checked);
-    });
-  }
-
   async function saveConfiguration(event) {
     event.preventDefault();
     saveStatus.textContent = '';
     if (currentProfileSlug !== null) { return saveProfileConfiguration(); }
-
-    // Block save if any Zyclops is enabled but NNTP host is empty
-    if (hasAnyZyclopsEnabled()) {
-      const nntpHost = configForm.querySelector('[name="NZB_TRIAGE_NNTP_HOST"]');
-      if (!nntpHost?.value?.trim()) {
-        saveStatus.textContent = 'Error: Zyclops requires your Usenet Provider Host to be set in the NNTP Health Check Credentials section.';
-        return;
-      }
-    }
 
     try {
       markSaving(true);
