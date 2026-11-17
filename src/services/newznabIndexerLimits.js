@@ -2,7 +2,7 @@ const { normalizeIndexerToken } = require('../utils/parsers');
 
 function getPaidDirectIndexerTokens(configs = []) {
   return configs
-    .filter((config) => config && config.isPaid && !config.zyclopsEnabled)
+    .filter((config) => config && config.isPaid)
     .map((config) => normalizeIndexerToken(config.slug || config.dedupeKey || config.displayName || config.id))
     .filter(Boolean);
 }
@@ -10,7 +10,7 @@ function getPaidDirectIndexerTokens(configs = []) {
 function buildPaidIndexerLimitMap(configs = []) {
   const limitMap = new Map();
   (configs || []).forEach((config) => {
-    if (!config || !config.isPaid || config.zyclopsEnabled) return;
+    if (!config || !config.isPaid) return;
     const limit = Number.isFinite(config.paidLimit) ? config.paidLimit : 6;
     const tokens = [
       config.slug,

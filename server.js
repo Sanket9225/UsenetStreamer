@@ -329,6 +329,9 @@ adminApiRouter.post('/config', async (req, res) => {
   NEWZNAB_NUMBERED_KEYS.forEach((key) => {
     updates[key] = null;
   });
+  RETIRED_NEWZNAB_NUMBERED_KEYS.forEach((key) => {
+    updates[key] = null;
+  });
 
   // Debug: ensure ADMIN_CONFIG_KEYS contains TMDb keys
   if (!ADMIN_CONFIG_KEYS.includes('TMDB_API_KEY')) {
@@ -986,6 +989,7 @@ function buildSharedPoolOptions() {
 
 const MAX_NEWZNAB_INDEXERS = newznabService.MAX_NEWZNAB_INDEXERS;
 const NEWZNAB_NUMBERED_KEYS = newznabService.NEWZNAB_NUMBERED_KEYS;
+const RETIRED_NEWZNAB_NUMBERED_KEYS = newznabService.RETIRED_NEWZNAB_NUMBERED_KEYS;
 
 // True if any saved profile selects a protection mode that enables triage
 // (health-check / smart-play variants). A profile with no STREAM_PROTECTION
